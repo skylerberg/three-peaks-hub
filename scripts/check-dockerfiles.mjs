@@ -49,6 +49,24 @@ function isExcluded(path, patterns) {
   return excluded;
 }
 
+// Conventional exclusions that are meant to apply inside a copied directory.
+// Anything else nested under one is almost certainly a mistake: the COPY still
+// succeeds and silently omits the excluded part, which is how the preview-edge
+// image once shipped with no source in it.
+const EXPECTED_NESTED =
+  /(^|\/)(node_modules|dist|coverage|data|\.env.*|.*\.tsbuildinfo|.*\.md|openapi\.json|realtime-events\.json|tests)$/;
+
+function nestedExclusions(copiedDir, patterns) {
+  const prefix = copiedDir.endsWith('/') ? copiedDir : `${copiedDir}/`;
+  return patterns.filter(
+    (pattern) =>
+      !pattern.startsWith('!') &&
+      !pattern.startsWith('**') &&
+      pattern.startsWith(prefix) &&
+      !EXPECTED_NESTED.test(pattern)
+  );
+}
+
 function copySources(dockerfile) {
   const source = readFileSync(join(root, dockerfile), 'utf8');
   const sources = [];
@@ -77,6 +95,15 @@ for (const dockerfile of DOCKERFILES) {
     }
     if (isExcluded(source, patterns)) {
       problems.push(`${dockerfile}: COPY ${source} -- excluded by .dockerignore`);
+      continue;
+    }
+
+    // A directory copy that succeeds while silently missing part of its
+    // contents is worse than one that fails outright.
+    for (const nested of nestedExclusions(source, patterns)) {
+      problems.push(
+        `${dockerfile}: COPY ${source} -- .dockerignore excludes ${nested} from inside it`
+      );
     }
   }
 }
@@ -92,7 +119,16 @@ if (selftest) {
     console.error('[selftest] FAILED: an included path was reported as excluded');
     process.exit(1);
   }
-  console.log('[selftest] the matcher separates excluded paths from included ones');
+  if (nestedExclusions('apps/api', ['apps/api/src']).length !== 1) {
+    console.error('[selftest] FAILED: an unexpected nested exclusion was not reported');
+    process.exit(1);
+  }
+  if (nestedExclusions('apps/api', ['apps/api/node_modules']).length !== 0) {
+    console.error('[selftest] FAILED: a conventional nested exclusion was reported');
+    process.exit(1);
+  }
+  console.log('[selftest] the matcher separates excluded paths from included ones,');
+  console.log('[selftest] and an unexpected nested exclusion from a conventional one');
 }
 
 if (problems.length > 0) {

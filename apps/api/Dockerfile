@@ -40,7 +40,11 @@ RUN pnpm --filter @three-peaks/api run build:prod
 # A second --prod install rather than a prune: pnpm's own docs steer away from
 # prune, and re-resolving against the same frozen lockfile drops the
 # devDependencies. Same filter, or packages/shared goes with them.
-RUN pnpm install --frozen-lockfile --prod --filter "@three-peaks/api..."
+# The dependency set shrinks here, so pnpm wants to purge node_modules and
+# refuses to without a TTY. Scoped to this one command rather than set as a
+# workspace setting, because that confirmation is a useful safety net locally.
+RUN pnpm install --frozen-lockfile --prod --config.confirmModulesPurge=false \
+    --filter "@three-peaks/api..."
 
 FROM node:24-alpine
 WORKDIR /app
