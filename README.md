@@ -59,5 +59,10 @@ generated.
 
 Push to `main`. The workflow builds the image, runs migrations as a Job, then
 rolls out; the web half deploys after the API so a bundle is never served
-against an endpoint that does not exist yet. `infra/terraform/README.md` covers
-first-time bootstrap, which is a two-pass apply for a reason it explains.
+against an endpoint that does not exist yet.
+
+**The deploy workflow fails until the cloud side is bootstrapped**, starting at
+the auth step — Workload Identity bindings are per-repository. CI is the signal
+that matters until then. `infra/terraform/README.md` has the bootstrap in order:
+the IAM binding, DNS in Route 53, the database and its secret, and a two-pass
+`terraform apply` whose reason it explains.

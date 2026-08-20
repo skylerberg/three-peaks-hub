@@ -13,6 +13,27 @@ environment that NEG does not exist until the first deploy has run, so a single
 
 ## First-time bootstrap
 
+0. **Let this repository authenticate to GCP.** Workload Identity bindings are
+   per-repository, so until this is added every deploy fails at the auth step
+   with `iam.serviceAccounts.getAccessToken denied`. This is a privilege grant
+   on a shared project — read it before running it.
+
+   ```sh
+   gcloud iam service-accounts add-iam-policy-binding \
+     github-actions-service@realm-construction.iam.gserviceaccount.com \
+     --project=realm-construction \
+     --role=roles/iam.workloadIdentityUser \
+     --member='principalSet://iam.googleapis.com/projects/1085332810847/locations/global/workloadIdentityPools/default-pool/attribute.repository/skylerberg/three-peaks-hub'
+   ```
+
+   Confirm it landed beside the existing repositories:
+
+   ```sh
+   gcloud iam service-accounts get-iam-policy \
+     github-actions-service@realm-construction.iam.gserviceaccount.com \
+     --project=realm-construction
+   ```
+
 1. **Create everything the cluster does not depend on.**
 
    ```sh
