@@ -197,6 +197,10 @@ from under the first.
 - **`check:a11y`** runs axe-core over the real screens in **both colour
   schemes**; half the tokens exist only under `prefers-color-scheme: dark`, so a
   light-only run reads none of them.
+- **`check:k8s`** renders the manifests with a full-length SHA, the way the
+  deploy does, and checks the name and label lengths that a client-side
+  `kubectl --dry-run` silently accepts. It caught a migrate Job whose name was
+  64 bytes; only the API server had been rejecting it, at deploy time.
 - **`check:dockerfiles`** asserts that every path a Dockerfile COPYs survives
   `.dockerignore`. That mismatch is invisible to every other check — the API
   image copies the other packages' manifests, because pnpm reads the whole

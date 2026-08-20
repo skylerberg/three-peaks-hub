@@ -31,12 +31,13 @@
     "check:comments": "node scripts/check-comments.mjs",
     "check:test-guards": "node scripts/check-test-guards.mjs",
     "check:test-guards:anchors": "node scripts/check-test-guards.mjs --verify-only",
-    "check:all": "pnpm run format:check && pnpm run lint && pnpm run type-check && pnpm run knip && pnpm run check:generated && pnpm run check:comments && pnpm run check:dockerfiles && pnpm run check:a11y && pnpm run check:test-guards && pnpm run test && pnpm run build",
+    "check:all": "pnpm run format:check && pnpm run lint && pnpm run type-check && pnpm run knip && pnpm run check:generated && pnpm run check:comments && pnpm run check:dockerfiles && pnpm run check:k8s && pnpm run check:a11y && pnpm run check:test-guards && pnpm run test && pnpm run build",
     "setup:env": "node scripts/setup-env.mjs",
     "prepare": "node scripts/setup-hooks.mjs",
     "check:a11y": "pnpm --filter @three-peaks/web run check:a11y",
     "check:upload": "pnpm --filter @three-peaks/web run check:upload",
-    "check:dockerfiles": "node scripts/check-dockerfiles.mjs"
+    "check:dockerfiles": "node scripts/check-dockerfiles.mjs",
+    "check:k8s": "node scripts/check-k8s.mjs"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",

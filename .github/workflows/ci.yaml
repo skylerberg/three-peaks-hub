@@ -42,6 +42,10 @@ jobs:
       # actual image build can see -- and does so before the images job spends
       # a build on it.
       - run: pnpm run check:dockerfiles
+      # A client-side kubectl dry-run does not check name or label lengths, and
+      # the deploy substitutes a 40-character SHA. This renders the manifests
+      # the way the deploy does and checks what the dry-run will not.
+      - run: pnpm run check:k8s
 
   # The suite runs with fileParallelism:false -- files in a run share one
   # database, so they cannot run concurrently. Sharding keeps that rule rather

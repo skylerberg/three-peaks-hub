@@ -1,7 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: three-peaks-hub-migrate-{COMMITHASH}
+  # A SHORT hash, not the full one. Kubernetes copies the Job's name into the
+  # pod template's `job-name` label, and a label value caps at 63 bytes --
+  # "three-peaks-hub-migrate-" plus a 40-character SHA is 64. Only a
+  # server-side dry-run reports it; a client-side one accepts it happily, which
+  # is why check:k8s asserts the lengths itself.
+  name: three-peaks-hub-migrate-{SHORTHASH}
   namespace: three-peaks-hub
 spec:
   # Lock contention is retried inside the run itself, where an attempt costs

@@ -119,9 +119,13 @@ jobs:
       # with the previous release.
       - name: 'Run database migrations'
         run: |
-          job="three-peaks-hub-migrate-$GITHUB_SHA"
+          # Short for the Job name (a label-value length limit applies to it),
+          # full for the image tag.
+          short="${GITHUB_SHA:0:12}"
+          job="three-peaks-hub-migrate-$short"
           kubectl -n "$NAMESPACE" delete job "$job" --ignore-not-found
-          sed "s/{COMMITHASH}/$GITHUB_SHA/g" infra/k8s/migrate-job.yaml | kubectl apply -f -
+          sed -e "s/{COMMITHASH}/$GITHUB_SHA/g" -e "s/{SHORTHASH}/$short/g" \
+            infra/k8s/migrate-job.yaml | kubectl apply -f -
 
           # Conditions arrive as a list ("SuccessCriteriaMet Complete",
           # "FailureTarget Failed" on k8s >= 1.31), so substring-match rather
