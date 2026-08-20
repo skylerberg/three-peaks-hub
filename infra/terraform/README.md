@@ -4,6 +4,27 @@ Everything below lives in the existing `realm-construction` GCP project and the
 existing `cow-cluster` GKE cluster. State is in `gs://cow-terraform-state` under
 the `three-peaks-hub` prefix.
 
+## Current state (2026-08-20)
+
+Done: the Workload Identity binding, the `three_peaks_hub` Cloud SQL role and
+database on `master-instance`, the `three-peaks-hub` namespace with its secret,
+Redis, the Services, the PodDisruptionBudget, and the API Deployment. Migrations
+have run and two replicas are serving; `three-peaks-hub-api-neg` exists with two
+endpoints, so the `data` source below now resolves.
+
+Not done: **`terraform apply` has never been run.** There is no load balancer,
+no static IP, no certificate, no web bucket and no Cloud Run service, so nothing
+is publicly reachable and the deploy workflow's `web` job fails on the missing
+bucket. Everything under "First-time bootstrap" from step 1 on is still pending,
+and steps 0, 3 and 4 are already done.
+
+Secrets are readable back out of the cluster if they are needed again:
+
+```sh
+kubectl -n three-peaks-hub get secret three-peaks-hub-secrets \
+  -o jsonpath='{.data.DB_PASSWORD}' | base64 -d
+```
+
 ## The ordering problem
 
 `data "google_compute_network_endpoint_group" "api"` reads a NEG that **GKE

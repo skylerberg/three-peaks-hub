@@ -61,8 +61,8 @@ Push to `main`. The workflow builds the image, runs migrations as a Job, then
 rolls out; the web half deploys after the API so a bundle is never served
 against an endpoint that does not exist yet.
 
-**The deploy workflow fails until the cloud side is bootstrapped**, starting at
-the auth step — Workload Identity bindings are per-repository. CI is the signal
-that matters until then. `infra/terraform/README.md` has the bootstrap in order:
-the IAM binding, DNS in Route 53, the database and its secret, and a two-pass
-`terraform apply` whose reason it explains.
+The API half is live: two replicas are serving in the `three-peaks-hub`
+namespace against Cloud SQL. **The web half fails until `terraform apply` has
+run**, because the bucket it uploads to does not exist yet, and nothing is
+publicly reachable without the load balancer that same apply creates.
+`infra/terraform/README.md` records exactly what is done and what is not.
