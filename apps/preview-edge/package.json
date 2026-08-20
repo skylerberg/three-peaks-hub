@@ -1,0 +1,16 @@
+{
+  "name": "@three-peaks/preview-edge",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "type-check": "tsc"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

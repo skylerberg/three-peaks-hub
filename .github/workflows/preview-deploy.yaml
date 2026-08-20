@@ -1,0 +1,89 @@
+name: preview-deploy
+
+# The privileged half. Triggered by workflow_run, so it executes **main's copy**
+# of this file rather than the pull request's -- which is what stops a PR from
+# rewriting these steps to exfiltrate the federated token. It never checks out
+# PR code; it only moves an already-built artifact into a bucket prefix.
+on:
+  workflow_run:
+    workflows: [preview-build]
+    types: [completed]
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+  pull-requests: 'write'
+  actions: 'read'
+
+concurrency:
+  group: preview-deploy-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      BUCKET: three-peaks-hub-web-prod
+      DOMAIN: tools.threepeaksgames.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-build
+          path: out
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        run: |
+          echo "mode=$(cat out/mode)" >> "$GITHUB_OUTPUT"
+          echo "pr=$(cat out/pr)" >> "$GITHUB_OUTPUT"
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/1085332810847/locations/global/workloadIdentityPools/default-pool/providers/github-provider
+          service_account: github-actions-service@realm-construction.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: 'Publish the preview'
+        if: steps.meta.outputs.mode == 'deploy'
+        run: |
+          gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+            out/dist "gs://$BUCKET/pr/${{ steps.meta.outputs.pr }}"
+          # No immutable headers anywhere in a preview: a force-push rewrites
+          # the same prefix and has to be picked up immediately.
+          gcloud storage objects update --recursive \
+            --cache-control='no-store' \
+            "gs://$BUCKET/pr/${{ steps.meta.outputs.pr }}"
+
+      - name: 'Remove the preview'
+        if: steps.meta.outputs.mode == 'closed'
+        run: |
+          gcloud storage rm --recursive "gs://$BUCKET/pr/${{ steps.meta.outputs.pr }}" || true
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = Number('${{ steps.meta.outputs.pr }}');
+            const mode = '${{ steps.meta.outputs.mode }}';
+            const domain = '${{ env.DOMAIN }}';
+            // Keyed by a marker so each push edits one comment instead of
+            // adding another.
+            const marker = '<!-- pr-preview-comment -->';
+            const body = mode === 'deploy'
+              ? `${marker}\n**Preview:** https://pr-${pr}.${domain}\n\n_Auto-updated on each push; removed when the PR closes. Reads and writes real production data._`
+              : `${marker}\nPreview removed (pull request closed).`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: pr, per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.startsWith(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: pr, body });
+            }

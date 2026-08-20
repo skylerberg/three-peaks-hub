@@ -1,0 +1,253 @@
+name: production-deploy
+run-name: Production Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: realm-construction
+  NAMESPACE: three-peaks-hub
+  REGISTRY: us-west1-docker.pkg.dev
+  WIF_PROVIDER: projects/1085332810847/locations/global/workloadIdentityPools/default-pool/providers/github-provider
+  WIF_SERVICE_ACCOUNT: github-actions-service@realm-construction.iam.gserviceaccount.com
+
+jobs:
+  # Path filtering lives in a job rather than in `on.push.paths`, so the two
+  # halves can be ordered against each other below.
+  #
+  # One shared lockfile is the trade the monorepo makes: any dependency change
+  # touches pnpm-lock.yaml and matches both filters, so a web-only bump will
+  # roll the API. That is accepted rather than overlooked -- the API deploy is
+  # idempotent (the migration Job finds nothing pending, and the rollout is a
+  # zero-downtime surge under a PDB). Dropping the lockfile from the API's
+  # filter would be worse: a genuine API dependency bump would then ship an
+  # image built from a lockfile CI never tested.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+      preview_edge: ${{ steps.filter.outputs.preview_edge }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+              - 'infra/k8s/**'
+              - 'scripts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/deploy.yaml'
+            web:
+              - 'apps/web/**'
+              - 'packages/shared/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.github/workflows/deploy.yaml'
+            preview_edge:
+              - 'apps/preview-edge/**'
+              - '.github/workflows/deploy.yaml'
+
+  api:
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.api == 'true' }}
+    runs-on: ubuntu-latest
+    # No cancel-in-progress on this one: a killed run could leave a migration
+    # mid-flight.
+    concurrency:
+      group: deploy-api
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    env:
+      IMAGE: us-west1-docker.pkg.dev/realm-construction/three-peaks-hub/api
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keyless. No long-lived GCP credentials exist in this repository's
+      # secrets.
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+      - uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: 'cow-cluster'
+          location: 'us-west1-a'
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: 'oauth2accesstoken'
+          password: ${{ steps.auth.outputs.access_token }}
+      - uses: docker/setup-buildx-action@v4
+
+      # Context is the repository root: a workspace install needs the root
+      # lockfile and packages/shared, neither of which is under apps/api.
+      - name: 'Build and push the image'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: '${{ env.IMAGE }}:${{ github.sha }}'
+          cache-from: 'type=gha,scope=api'
+          cache-to: 'type=gha,mode=max,scope=api'
+
+      - name: 'Apply the base manifests'
+        run: |
+          kubectl apply -f infra/k8s/namespace.yaml \
+                        -f infra/k8s/serviceaccount.yaml \
+                        -f infra/k8s/redis.yaml \
+                        -f infra/k8s/pdb.yaml \
+                        -f infra/k8s/service.yaml
+
+      # Before the rollout, so old and new pods serve side by side against the
+      # migrated schema. Every migration must therefore be backward-compatible
+      # with the previous release.
+      - name: 'Run database migrations'
+        run: |
+          job="three-peaks-hub-migrate-$GITHUB_SHA"
+          kubectl -n "$NAMESPACE" delete job "$job" --ignore-not-found
+          sed "s/{COMMITHASH}/$GITHUB_SHA/g" infra/k8s/migrate-job.yaml | kubectl apply -f -
+
+          # Conditions arrive as a list ("SuccessCriteriaMet Complete",
+          # "FailureTarget Failed" on k8s >= 1.31), so substring-match rather
+          # than comparing the whole string.
+          for _ in $(seq 1 60); do
+            conditions=$(kubectl -n "$NAMESPACE" get job "$job" \
+              -o jsonpath='{.status.conditions[?(@.status=="True")].type}')
+            case " $conditions " in
+              *' Complete '*)
+                echo "migrations complete"
+                exit 0
+                ;;
+              *' Failed '*)
+                echo "::error::Migration job failed" >&2
+                kubectl -n "$NAMESPACE" logs "job/$job" >&2 || true
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo "::error::Timed out waiting for the migration job" >&2
+          kubectl -n "$NAMESPACE" logs "job/$job" >&2 || true
+          exit 1
+
+      - name: 'Roll out'
+        run: |
+          sed "s/{COMMITHASH}/$GITHUB_SHA/g" infra/k8s/deployment.yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" rollout status deployment/three-peaks-hub-api --timeout=300s
+
+  web:
+    # After the API, not beside it. On a change that touches both, the endpoint
+    # has to exist before the bundle that calls it is being served. Two separate
+    # repositories could not order this at all; it is the one thing the monorepo
+    # makes strictly better rather than merely tidier.
+    needs: [changes, api]
+    if: >-
+      ${{ !cancelled() && needs.api.result != 'failure'
+          && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.web == 'true') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-web
+      cancel-in-progress: true
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    env:
+      BUCKET: three-peaks-hub-web-prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @three-peaks/web run build
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: 'Upload the site'
+        uses: google-github-actions/upload-cloud-storage@v3
+        with:
+          path: 'apps/web/dist'
+          destination: '${{ env.BUCKET }}'
+          parent: false
+          process_gcloudignore: false
+
+      # `gcloud storage` rather than `gsutil`: gsutil cannot consume the
+      # workload-identity-federation credentials that auth@v3 sets up.
+      - name: 'Set cache headers'
+        run: |
+          gcloud storage objects update --recursive \
+            --cache-control='public, max-age=31536000, immutable' \
+            "gs://$BUCKET/assets"
+          gcloud storage objects update \
+            --cache-control='no-cache, no-store, must-revalidate' \
+            "gs://$BUCKET/index.html"
+
+  preview-edge:
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.preview_edge == 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-preview-edge
+      cancel-in-progress: true
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    env:
+      IMAGE: us-west1-docker.pkg.dev/realm-construction/three-peaks-hub/preview-edge
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+      - uses: google-github-actions/setup-gcloud@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: 'oauth2accesstoken'
+          password: ${{ steps.auth.outputs.access_token }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/preview-edge/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: 'type=gha,scope=preview-edge'
+          cache-to: 'type=gha,mode=max,scope=preview-edge'
+      # Terraform owns the service's configuration and ignores its image, so the
+      # rollout is only ever an image swap. `|| true` on the describe: the very
+      # first deploy runs before terraform has created the service.
+      - name: 'Roll out'
+        run: |
+          if gcloud run services describe three-peaks-hub-preview-edge --region us-west1 >/dev/null 2>&1; then
+            gcloud run services update three-peaks-hub-preview-edge \
+              --region us-west1 --image "${IMAGE}:${GITHUB_SHA}"
+          else
+            echo "Cloud Run service does not exist yet; terraform apply creates it."
+          fi

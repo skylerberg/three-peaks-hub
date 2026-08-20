@@ -1,0 +1,34 @@
+#!/bin/sh
+# Formats what the commit just touched and amends the result in, so formatting
+# is fixed the moment work is committed rather than being a step anyone runs by
+# hand. One consequence worth knowing: `format:check` is only meaningful on a
+# committed tree — failing it on uncommitted edits means nothing has fixed them
+# yet, not that something is wrong.
+[ -n "$SKIP_POST_COMMIT" ] && exit 0
+
+files=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\.(ts|mjs|svelte|json|css)$')
+[ -z "$files" ] && exit 0
+
+# Skip files carrying unstaged work, so the amend cannot swallow it.
+targets=""
+for f in $files; do
+  [ -f "$f" ] || continue
+  git diff --quiet -- "$f" || continue
+  targets="$targets $f"
+done
+[ -z "$targets" ] && exit 0
+
+# `|| true` on both: the hook shells out to pnpm, and a worktree nobody has run
+# `pnpm install` in yet gets a hook that runs and formats nothing rather than
+# one that fails the commit.
+pnpm exec eslint --fix $targets >/dev/null 2>&1 || true
+pnpm exec prettier --write --log-level warn $targets >/dev/null 2>&1 || true
+
+changed=""
+for f in $targets; do
+  git diff --quiet -- "$f" || changed="$changed $f"
+done
+[ -z "$changed" ] && exit 0
+
+git add $changed
+SKIP_POST_COMMIT=1 git commit --amend --no-edit --no-verify >/dev/null

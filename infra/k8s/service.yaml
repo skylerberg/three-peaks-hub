@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: three-peaks-hub-api
+  namespace: three-peaks-hub
+  annotations:
+    # Creates a standalone zonal NEG that the Terraform-managed backend service
+    # consumes. There is no Ingress object anywhere in this repo; the load
+    # balancer is built in Terraform and points at this NEG by name.
+    cloud.google.com/neg: '{"exposed_ports": {"80": {"name": "three-peaks-hub-api-neg"}}}'
+spec:
+  type: ClusterIP
+  selector:
+    app: three-peaks-hub-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3001

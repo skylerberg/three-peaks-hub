@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+/* Design tokens. Every colour the app uses is named here and nowhere else, so
+   dark mode is a redefinition rather than a second set of class names sprinkled
+   through the markup. Never reach for a raw gray-* utility. */
+:root {
+  color-scheme: light dark;
+
+  --tph-canvas: #f7f5f0;
+  --tph-surface: #ffffff;
+  --tph-surface-raised: #ffffff;
+  --tph-edge: #ddd8cd;
+  --tph-ink: #1d2321;
+  --tph-muted: #5f6b66;
+  --tph-accent: #3f6d52;
+  --tph-accent-strong: #325841;
+  --tph-accent-soft: #e6efe9;
+  --tph-on-accent: #ffffff;
+  --tph-danger: #a4342a;
+  --tph-on-danger: #ffffff;
+  --tph-success: #2f6d46;
+  --tph-warning: #8a6314;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tph-canvas: #14171a;
+    --tph-surface: #1b1f23;
+    --tph-surface-raised: #232830;
+    --tph-edge: #333a42;
+    --tph-ink: #e9ecef;
+    --tph-muted: #9aa5ad;
+    --tph-accent: #6fae87;
+    --tph-accent-strong: #85c39c;
+    --tph-accent-soft: #22302a;
+    --tph-on-accent: #10231a;
+    --tph-danger: #e3796d;
+    --tph-on-danger: #2a100d;
+    --tph-success: #7cc39a;
+    --tph-warning: #d8ab4f;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--tph-canvas);
+  --color-surface: var(--tph-surface);
+  --color-surface-raised: var(--tph-surface-raised);
+  --color-edge: var(--tph-edge);
+  --color-ink: var(--tph-ink);
+  --color-muted: var(--tph-muted);
+  --color-accent: var(--tph-accent);
+  --color-accent-strong: var(--tph-accent-strong);
+  --color-accent-soft: var(--tph-accent-soft);
+  --color-on-accent: var(--tph-on-accent);
+  --color-danger: var(--tph-danger);
+  --color-on-danger: var(--tph-on-danger);
+  --color-success: var(--tph-success);
+  --color-warning: var(--tph-warning);
+}
+
+/* One focus ring, in three placements. Defined here so a component never
+   invents its own and drifts out of contrast. */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--tph-accent);
+    outline-offset: 2px;
+  }
+}
+
+@utility focus-ring-inset {
+  &:focus-visible {
+    outline: 2px solid var(--tph-accent);
+    outline-offset: -2px;
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--tph-canvas);
+  color: var(--tph-ink);
+  -webkit-font-smoothing: antialiased;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+::selection {
+  background: var(--tph-accent-soft);
+  color: var(--tph-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

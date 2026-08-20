@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: three-peaks-hub-migrate-{COMMITHASH}
+  namespace: three-peaks-hub
+spec:
+  # Lock contention is retried inside the run itself, where an attempt costs
+  # milliseconds. A pod-level retry would also re-run a migration that is simply
+  # wrong, delaying the report of a failure that will not resolve on its own.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: migrate
+          image: us-west1-docker.pkg.dev/realm-construction/three-peaks-hub/api:{COMMITHASH}
+          # Runs the TypeScript directly through tsx, which is why src/ ships in
+          # the image alongside the bundle and why tsx is a dependency rather
+          # than a devDependency.
+          command: ['node', '--import', 'tsx', 'src/db/migrate.ts']
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: DB_HOSTNAME
+              value: 10.122.128.3
+            - name: DB_PORT
+              value: '5432'
+            - name: DB_DATABASE
+              value: three_peaks_hub
+            - name: DB_USER
+              value: three_peaks_hub
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: three-peaks-hub-secrets
+                  key: DB_PASSWORD
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

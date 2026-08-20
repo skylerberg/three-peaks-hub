@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: three-peaks-hub-api
+  namespace: three-peaks-hub
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      # Never drop below the current count during a roll.
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: three-peaks-hub-api
+  template:
+    metadata:
+      labels:
+        app: three-peaks-hub-api
+    spec:
+      serviceAccountName: three-peaks-hub-api
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: three-peaks-hub-api
+      containers:
+        - name: api
+          image: us-west1-docker.pkg.dev/realm-construction/three-peaks-hub/api:{COMMITHASH}
+          ports:
+            - containerPort: 3001
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: PORT
+              value: '3001'
+            - name: DB_HOSTNAME
+              value: 10.122.128.3
+            - name: DB_PORT
+              value: '5432'
+            - name: DB_DATABASE
+              value: three_peaks_hub
+            - name: DB_USER
+              value: three_peaks_hub
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: three-peaks-hub-secrets
+                  key: DB_PASSWORD
+            - name: PASSWORD_RESET_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: three-peaks-hub-secrets
+                  key: PASSWORD_RESET_SECRET
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: three-peaks-hub-secrets
+                  key: REDIS_URL
+            - name: STORAGE_DRIVER
+              value: gcs
+            - name: STORAGE_GCS_BUCKET
+              value: three-peaks-hub-uploads-prod
+            - name: CORS_ORIGINS
+              value: https://tools.threepeaksgames.com
+            - name: APP_URL_BASE
+              value: https://tools.threepeaksgames.com
+            - name: TRUST_PROXY
+              value: 'true'
+            # The GCLB, then the NEG. Miscount this and the rate limiter counts
+            # every request against one address.
+            - name: TRUST_PROXY_HOPS
+              value: '2'
+            # Ships on the console driver: password reset returns 204 and logs
+            # the link rather than mailing it. Switching to `ses` needs a
+            # verified SES domain and the AWS keys in the secret above, and the
+            # boot asserts both rather than failing silently at send time.
+            - name: EMAIL_DRIVER
+              value: console
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          # TCP, not /health, and deliberately so: a database outage would make
+          # /health fail on every replica at once and restart-loop the entire
+          # deployment, turning a recoverable dependency failure into an outage.
+          livenessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          lifecycle:
+            # Keep serving while the load balancer deprograms this endpoint from
+            # the NEG. SIGTERM only arrives after the sleep.
+            preStop:
+              exec:
+                command: ['sleep', '15']
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

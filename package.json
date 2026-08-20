@@ -1,0 +1,54 @@
+{
+  "name": "three-peaks-hub",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scarfSettings": {
+    "enabled": false
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @three-peaks/api dev",
+    "dev:web": "pnpm --filter @three-peaks/web dev",
+    "build": "pnpm -r build",
+    "type-check": "pnpm -r --no-bail type-check",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write --log-level warn .",
+    "format:check": "prettier --check .",
+    "knip": "knip",
+    "test": "pnpm -r --no-bail test",
+    "test:api": "pnpm --filter @three-peaks/api test",
+    "test:web": "pnpm --filter @three-peaks/web test",
+    "migrate": "pnpm --filter @three-peaks/api migrate",
+    "migrate:test": "pnpm --filter @three-peaks/api migrate:test",
+    "generate": "node scripts/generate-clients.mjs",
+    "check:generated": "pnpm run generate && git diff --exit-code -- packages/shared/src/api packages/shared/src/realtime",
+    "check:comments": "node scripts/check-comments.mjs",
+    "check:test-guards": "node scripts/check-test-guards.mjs",
+    "check:test-guards:anchors": "node scripts/check-test-guards.mjs --verify-only",
+    "check:all": "pnpm run format:check && pnpm run lint && pnpm run type-check && pnpm run knip && pnpm run check:generated && pnpm run check:comments && pnpm run check:a11y && pnpm run check:test-guards && pnpm run test && pnpm run build",
+    "setup:env": "node scripts/setup-env.mjs",
+    "prepare": "node scripts/setup-hooks.mjs",
+    "check:a11y": "pnpm --filter @three-peaks/web run check:a11y",
+    "check:upload": "pnpm --filter @three-peaks/web run check:upload"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "eslint-plugin-import-x": "^4.17.1",
+    "eslint-plugin-svelte": "~3.23.0",
+    "globals": "^17.11.0",
+    "knip": "^6.32.2",
+    "openapi-typescript": "~7.13.0",
+    "prettier": "catalog:",
+    "prettier-plugin-svelte": "~4.1.1",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}

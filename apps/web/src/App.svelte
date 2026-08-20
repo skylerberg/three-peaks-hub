@@ -1,0 +1,92 @@
+<script lang="ts">
+  import Toasts from './components/ui/Toasts.svelte';
+  import Spinner from './components/ui/Spinner.svelte';
+  import Account from './routes/Account.svelte';
+  import ForgotPassword from './routes/ForgotPassword.svelte';
+  import Login from './routes/Login.svelte';
+  import Members from './routes/Members.svelte';
+  import NotFound from './routes/NotFound.svelte';
+  import Project from './routes/Project.svelte';
+  import Projects from './routes/Projects.svelte';
+  import ResetPassword from './routes/ResetPassword.svelte';
+  import Signup from './routes/Signup.svelte';
+  import { files } from './lib/files.svelte.ts';
+  import { projects } from './lib/projects.svelte.ts';
+  import { realtime } from './lib/realtime.svelte.ts';
+  import { isSignedIn, session } from './lib/session.svelte.ts';
+  import { link, router } from './lib/router.svelte.ts';
+
+  router.start();
+  router.beforeNavigate = session.guardRoute;
+
+  // beforeNavigate does not run on the initial page load, so the first route has
+  // to be guarded once by hand -- after the session store knows whether there
+  // is a signed-in account.
+  void session.init().then(() => {
+    const redirected = session.guardRoute(router.current, router.path);
+    if (typeof redirected === 'string') router.redirect(redirected);
+  });
+
+  // Another tab signing out, or a 401 clearing the session mid-session, must
+  // not leave one person's project list on screen for the next.
+  $effect(() => {
+    if (session.status === 'anon') {
+      projects.reset();
+      files.reset();
+      realtime.stop();
+    }
+  });
+
+  // Opened once there is a credential to present, closed when there is not.
+  $effect(() => {
+    const token = session.status === 'authed' ? session.token : null;
+    if (!token) return;
+    realtime.start(token);
+    return () => realtime.stop();
+  });
+
+  const route = $derived(router.current);
+  const showChrome = $derived(isSignedIn(session.status));
+</script>
+
+<div class="flex min-h-full flex-col">
+  {#if showChrome}
+    <header class="border-b border-edge bg-surface" use:link>
+      <nav class="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-2">
+        <a class="focus-ring rounded px-2 py-1 font-semibold" href="/">Three Peaks Hub</a>
+        <div class="flex items-center gap-1 text-sm">
+          {#if session.status === 'offline'}
+            <span class="rounded px-2 py-1 text-warning" role="status">Offline</span>
+          {/if}
+          <a class="focus-ring rounded px-3 py-2 hover:bg-accent-soft" href="/account">Account</a>
+        </div>
+      </nav>
+    </header>
+  {/if}
+
+  <main class="flex-1">
+    {#if session.status === 'unknown'}
+      <div class="flex justify-center py-24"><Spinner label="Loading" /></div>
+    {:else if route.name === 'projects'}
+      <Projects />
+    {:else if route.name === 'project'}
+      <Project projectId={route.params.projectId} folderId={route.params.folderId} />
+    {:else if route.name === 'members'}
+      <Members projectId={route.params.projectId} />
+    {:else if route.name === 'account'}
+      <Account />
+    {:else if route.name === 'login'}
+      <Login />
+    {:else if route.name === 'signup'}
+      <Signup />
+    {:else if route.name === 'forgot-password'}
+      <ForgotPassword />
+    {:else if route.name === 'reset-password'}
+      <ResetPassword token={route.params.token} />
+    {:else}
+      <NotFound />
+    {/if}
+  </main>
+</div>
+
+<Toasts />

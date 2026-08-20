@@ -1,0 +1,51 @@
+# One replica, no PVC. The realtime bus and the rate limiter both treat Redis as
+# a cache: losing it drops queued fan-out and resets rate-limit windows, and both
+# fall back to per-process behaviour rather than failing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: three-peaks-hub-redis
+  namespace: three-peaks-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: three-peaks-hub-redis
+  template:
+    metadata:
+      labels:
+        app: three-peaks-hub-redis
+    spec:
+      containers:
+        - name: redis
+          # Pinned to the tag the test suite runs against, so a floating tag
+          # cannot green-light semantics production does not have.
+          image: redis:8.2-alpine
+          args: ['--requirepass', '$(REDIS_PASSWORD)', '--save', '', '--appendonly', 'no']
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: three-peaks-hub-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: three-peaks-hub-redis
+  namespace: three-peaks-hub
+spec:
+  type: ClusterIP
+  selector:
+    app: three-peaks-hub-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

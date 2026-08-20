@@ -1,0 +1,52 @@
+name: preview-build
+
+# The unprivileged half. It runs pull-request code, so it holds no credentials
+# and only `contents: read`. Everything it produces leaves as an artifact; the
+# privileged half picks it up.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: 'read'
+
+concurrency:
+  group: preview-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 'Record what the deploy half should do'
+        run: |
+          mkdir -p out
+          if [ "${{ github.event.action }}" = "closed" ]; then
+            echo "closed" > out/mode
+          else
+            echo "deploy" > out/mode
+          fi
+          echo "${{ github.event.pull_request.number }}" > out/pr
+
+      - uses: pnpm/action-setup@v4
+        if: github.event.action != 'closed'
+      - uses: actions/setup-node@v4
+        if: github.event.action != 'closed'
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+        if: github.event.action != 'closed'
+      - run: pnpm --filter @three-peaks/web run build
+        if: github.event.action != 'closed'
+        env:
+          VITE_PREVIEW: '1'
+      - name: 'Collect the build'
+        if: github.event.action != 'closed'
+        run: cp -R apps/web/dist out/dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-build
+          path: out
+          retention-days: 1

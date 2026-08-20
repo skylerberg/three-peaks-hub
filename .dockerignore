@@ -1,0 +1,28 @@
+# Docker reads only the .dockerignore at the context root, and the API image's
+# context IS the repo root — a workspace install needs the root lockfile, the
+# root manifests and packages/shared, none of which live under apps/api.
+
+.git
+.githooks
+.github
+.claude
+.vscode
+
+# Globbed: a bare `node_modules` matches only the top level, and pnpm gives
+# every workspace package a node_modules of its own.
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+**/*.md
+**/*.tsbuildinfo
+
+apps/api/data
+apps/api/openapi.json
+apps/api/realtime-events.json
+apps/api/tests
+apps/web
+apps/preview-edge
+infra
+eslint-rules

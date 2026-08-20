@@ -1,0 +1,33 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.tsbuildinfo
+
+# Env files are per-machine. `.example` copies are tracked; scripts/setup-env.mjs
+# turns them into the real thing.
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# Generated dumps. These are deterministic intermediates, not review artifacts —
+# the *clients* generated from them are what gets committed.
+apps/api/openapi.json
+apps/api/realtime-events.json
+
+apps/api/data/
+apps/web/.svelte-kit/
+apps/web/test-results/
+
+# The sanctioned throwaway-probe prefix. Ignored here, by eslint, by vitest's
+# test discovery and by check:comments — every gate that walks the tree.
+scripts/tmp-*
+apps/*/scripts/tmp-*
+
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+.DS_Store

@@ -1,0 +1,70 @@
+# pnpm 11 reads settings from nowhere else. `.npmrc` carries auth and registry
+# only, package.json's `pnpm` field is ignored, and so is npm's top-level
+# `overrides` — which is why that block is here. **Keys are camelCase.** A
+# kebab-case key is dropped silently, with no warning and exit 0, which is the
+# one way to misconfigure this file and see nothing at all.
+
+packages:
+  - apps/*
+  - packages/*
+
+# One version of the toolchain, named once. Referenced as `catalog:` in a
+# package's dependencies, so three packages cannot drift onto three
+# TypeScripts — which is what happened across the two reference repos, where
+# prettier and vitest resolved differently on each side of the pair.
+#
+# typescript is pinned to 6.0.3 rather than the 7.0.2 that npm calls `latest`.
+# TypeScript 7 is the native port, and the ecosystem has not followed:
+# typescript-eslint@8.67 declares `typescript: >=4.8.4 <6.1.0` and
+# svelte-check@4.7 declares `^5.0.0 || ^6.0.0`. Adopting 7 would silently cost
+# type-aware linting and every Svelte type check. Revisit when both peer ranges
+# admit it.
+catalog:
+  '@eslint/js': ^10.0.1
+  '@types/node': ^26.2.0
+  eslint: ^10.8.1
+  prettier: ~3.9.6
+  typescript: 6.0.3
+  typescript-eslint: ~8.67.0
+  vitest: ~4.1.11
+
+# openapi-typescript declares a TypeScript peer this repo is ahead of, so
+# without the override every install reports an unmet peer.
+overrides:
+  openapi-typescript>typescript: 'catalog:'
+  # Peer-resolved transitively by the svelte and tailwind vite plugins, which
+  # would otherwise pull whatever is newest -- including a release published
+  # hours ago that minimumReleaseAge is there to hold back.
+  vite: 8.2.1
+
+# `strictDepBuilds` fails the install on any dependency whose install scripts
+# have not been ruled on, so a denial has to be written down rather than left
+# out — an omission and a glob both match nothing, and fail identically. pnpm
+# appends an unruled name here as `set this to true or false` on its way out,
+# so a failed install also leaves this file dirty.
+allowBuilds:
+  argon2: true # native addon via node-gyp-build
+  esbuild: true # downloads its platform binary
+
+  unrs-resolver: true # eslint-plugin-import-x's resolver; prebuilt binary
+  '@scarf/scarf': false # telemetry; scarfSettings.enabled already neuters it
+  sharp: set this to true or false
+
+# Off, for one measured reason: under `CI` pnpm computes a different
+# `enableGlobalVirtualStore` default than the value an install without it
+# recorded, so every CI-flagged child dies before it runs.
+#
+#   $ pnpm exec node -e 'console.log(1)'        -> 1
+#   $ CI=1 pnpm exec node -e 'console.log(1)'   -> ERR_PNPM_VERIFY_DEPS_BEFORE_RUN
+#
+# The mutation-guard runner spawns every child with CI=1, which is how this
+# turned a guard suite into a wall of RUN-FAILEDs. `pnpm install` does not
+# clear it. Off is what npm did.
+verifyDepsBeforeRun: false
+
+# Supply-chain gate: a version published in the last few days is not installed.
+# The window is what turns "a maintainer account was compromised an hour ago"
+# from an install into a non-event. Dependency ranges here are deliberately
+# written loose enough that pnpm can resolve to the newest version that has
+# aged past it, rather than pinning an exact version and needing an exclusion.
+minimumReleaseAgeStrict: true

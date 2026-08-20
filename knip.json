@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs"],
+      "project": ["scripts/**/*.mjs"]
+    },
+    "apps/api": {
+      "entry": ["scripts/*.ts", "src/db/migrations/*.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+      "ignore": ["src/db/types.generated.ts"]
+    },
+    "apps/web": {
+      "entry": ["scripts/*.mjs"],
+      "project": ["src/**/*.{ts,svelte}", "scripts/**/*.mjs"],
+      "ignoreDependencies": ["tailwindcss"]
+    },
+    "apps/preview-edge": {
+      "project": ["src/**/*.ts"]
+    },
+    "packages/shared": {
+      "project": ["src/**/*.ts"]
+    }
+  }
+}

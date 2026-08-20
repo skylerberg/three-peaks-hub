@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast and database-free. Runs beside the suites so a lint error does not wait
+  # on them, and they do not wait on it.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          # No cache-dependency-path: one lockfile, at the default location.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run lint
+      - run: pnpm run type-check
+      - run: pnpm run knip
+
+      # openapi:dump uses --env-file-if-exists and touches no database, so the
+      # drift check needs neither an env file nor Postgres.
+      - name: 'Regenerate the API client'
+        run: pnpm run generate
+      - name: 'Committed client is up to date'
+        run: |
+          git diff --exit-code -- packages/shared/src/api \
+            || { echo '::error::The generated client is stale. Run `pnpm run generate` and commit the result.'; exit 1; }
+
+      - run: pnpm run check:comments
+
+  # The suite runs with fileParallelism:false -- files in a run share one
+  # database, so they cannot run concurrently. Sharding keeps that rule rather
+  # than breaking it: each shard gets its own Postgres and Redis, files stay
+  # serial inside a shard, and the shards run in parallel.
+  test-api:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: three_peaks_hub_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        # Pinned to the tag production runs, so a floating tag cannot
+        # green-light semantics the deployment does not have.
+        image: redis:8.2-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+
+      # Node's --env-file hard-errors when the file is missing, so write it. In
+      # apps/api, because that is the cwd the test script runs in.
+      - name: Write apps/api/.env.test
+        run: |
+          cat > apps/api/.env.test <<'EOF'
+          ENVIRONMENT=test
+          DB_HOSTNAME=127.0.0.1
+          DB_PORT=5432
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_DATABASE=three_peaks_hub_test
+          STORAGE_DRIVER=disk
+          STORAGE_DISK_ROOT=./data/test-uploads
+          REDIS_TEST_URL=redis://127.0.0.1:6379/15
+          EOF
+
+      # No `--` before the flag. npm swallows that separator; pnpm forwards it
+      # into the script's argv, where vitest reads it as end-of-options and
+      # ignores everything after -- so `pnpm test -- --shard=1/2` silently runs
+      # the whole suite in every shard and passes green.
+      #
+      # --filter, not a bare `pnpm test`: at the root that would hand --shard to
+      # the web and shared suites too.
+      - run: pnpm --filter @three-peaks/api test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      # --filter, because playwright is a devDependency of the web app and the
+      # root has no node_modules/.bin/playwright to exec.
+      - run: pnpm --filter @three-peaks/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @three-peaks/shared test
+      - run: pnpm --filter @three-peaks/web test
+      - run: pnpm --filter @three-peaks/web run build
+
+  # Mutation testing: every guard names a bug and the edit that puts it back,
+  # and the named tests must FAIL with that edit in place. A guard whose tests
+  # still pass has stopped guarding anything.
+  guards:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: three_peaks_hub_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Write apps/api/.env.test
+        run: |
+          cat > apps/api/.env.test <<'EOF'
+          ENVIRONMENT=test
+          DB_HOSTNAME=127.0.0.1
+          DB_PORT=5432
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_DATABASE=three_peaks_hub_test
+          STORAGE_DRIVER=disk
+          STORAGE_DISK_ROOT=./data/test-uploads
+          EOF
+      - run: pnpm run check:test-guards
+
+  # The Dockerfiles are otherwise unverified until a merge to main triggers a
+  # production build. Build both here without pushing, so a broken image fails
+  # on the pull request instead.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      # Distinct cache scopes. The gha exporter defaults both to `buildkit`, so
+      # one image's export overwrites the other's and neither ever hits.
+      - name: 'Build the API image'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: 'type=gha,scope=api'
+          cache-to: 'type=gha,mode=max,scope=api'
+      - name: 'Build the preview-edge image'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/preview-edge/Dockerfile
+          push: false
+          cache-from: 'type=gha,scope=preview-edge'
+          cache-to: 'type=gha,mode=max,scope=preview-edge'
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive infra/terraform
+      # -backend=false: validation needs no state and therefore no credentials.
+      - run: terraform -chdir=infra/terraform init -backend=false
+      - run: terraform -chdir=infra/terraform validate
