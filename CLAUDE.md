@@ -197,6 +197,11 @@ from under the first.
 - **`check:a11y`** runs axe-core over the real screens in **both colour
   schemes**; half the tokens exist only under `prefers-color-scheme: dark`, so a
   light-only run reads none of them.
+- **`check:dockerfiles`** asserts that every path a Dockerfile COPYs survives
+  `.dockerignore`. That mismatch is invisible to every other check — the API
+  image copies the other packages' manifests, because pnpm reads the whole
+  workspace to validate the lockfile even for a filtered install, and excluding
+  those directories fails a line that reads perfectly well.
 
 **All of these take `--selftest`**, which re-runs them against something
 deliberately put back on the bug and fails if it still _passes_. They share a

@@ -38,6 +38,10 @@ jobs:
             || { echo '::error::The generated client is stale. Run `pnpm run generate` and commit the result.'; exit 1; }
 
       - run: pnpm run check:comments
+      # Catches a COPY the .dockerignore excludes, which otherwise only an
+      # actual image build can see -- and does so before the images job spends
+      # a build on it.
+      - run: pnpm run check:dockerfiles
 
   # The suite runs with fileParallelism:false -- files in a run share one
   # database, so they cannot run concurrently. Sharding keeps that rule rather

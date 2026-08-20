@@ -22,7 +22,9 @@ apps/api/data
 apps/api/openapi.json
 apps/api/realtime-events.json
 apps/api/tests
-apps/web
-apps/preview-edge
+apps/web/src
+apps/web/public
+apps/web/scripts
+apps/preview-edge/src
 infra
 eslint-rules

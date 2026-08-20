@@ -7,6 +7,7 @@
 //
 // It reads the docs as well as the code because docs drift worse: nothing about
 // a stale README is anyone's compile error.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,10 +113,26 @@ for (const doc of DOC_FILES) {
 const PATH_REFERENCE = /\b((?:apps|packages|infra|scripts)\/[A-Za-z0-9_./-]+\.[A-Za-z]{2,6})\b/g;
 const unresolved = [];
 
+// A path the repository deliberately does not contain is not a dangling
+// reference: apps/api/.env is *supposed* to be absent from a fresh clone, which
+// is precisely what the README explaining it says. Ask git rather than guess.
+function isDeliberatelyAbsent(target) {
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', target], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function checkReferences(text, where) {
   for (const match of text.matchAll(PATH_REFERENCE)) {
     const target = match[1].replace(/[.,)]+$/, '');
     if (existsSync(join(root, target))) continue;
+    if (isDeliberatelyAbsent(target)) continue;
     unresolved.push({ target, where });
   }
 }
