@@ -61,6 +61,19 @@ resource "google_cloud_run_v2_service" "preview_edge" {
   }
 }
 
+# The load balancer forwards requests unauthenticated, so the service has to
+# accept them, and without this every preview answers 403. "allUsers" is safe
+# only in combination with the ingress setting above:
+# INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER blocks the public run.app URL outright,
+# so the load balancer is the only path that can reach this at all.
+resource "google_cloud_run_v2_service_iam_member" "preview_edge_invoker" {
+  project  = local.project
+  location = google_cloud_run_v2_service.preview_edge.location
+  name     = google_cloud_run_v2_service.preview_edge.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
 resource "google_compute_region_network_endpoint_group" "preview_edge" {
   name                  = "${local.name}-preview-edge-neg"
   region                = local.region
