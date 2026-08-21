@@ -12,7 +12,10 @@ on:
 permissions:
   contents: 'read'
   id-token: 'write'
+  # A pull request's conversation comments are *issue* comments -- the endpoints
+  # are /issues/{n}/comments and /issues/comments/{id} -- so both scopes apply.
   pull-requests: 'write'
+  issues: 'write'
   actions: 'read'
 
 concurrency:
@@ -64,7 +67,12 @@ jobs:
         run: |
           gcloud storage rm --recursive "gs://$BUCKET/pr/${{ steps.meta.outputs.pr }}" || true
 
+      # Cosmetic, and deliberately non-fatal. The preview itself has already been
+      # published or removed by the time this runs; a failed comment update once
+      # marked a teardown that had actually succeeded as a failed job, which is a
+      # worse signal than a stale comment.
       - uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             const pr = Number('${{ steps.meta.outputs.pr }}');
