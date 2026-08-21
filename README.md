@@ -61,8 +61,7 @@ Push to `main`. The workflow builds the image, runs migrations as a Job, then
 rolls out; the web half deploys after the API so a bundle is never served
 against an endpoint that does not exist yet.
 
-The API half is live: two replicas are serving in the `three-peaks-hub`
-namespace against Cloud SQL. **The web half fails until `terraform apply` has
-run**, because the bucket it uploads to does not exist yet, and nothing is
-publicly reachable without the load balancer that same apply creates.
-`infra/terraform/README.md` records exactly what is done and what is not.
+Live at **https://tools.threepeaksgames.com**. Per-PR previews are the one part
+not yet reachable: the wildcard certificate needs a DNS-01 CNAME published in
+Route 53 first. `infra/terraform/README.md` records exactly what is done and
+what is not.

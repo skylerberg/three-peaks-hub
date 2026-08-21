@@ -4,19 +4,20 @@ Everything below lives in the existing `realm-construction` GCP project and the
 existing `cow-cluster` GKE cluster. State is in `gs://cow-terraform-state` under
 the `three-peaks-hub` prefix.
 
-## Current state (2026-08-20)
+## Current state (2026-08-21)
 
-Done: the Workload Identity binding, the `three_peaks_hub` Cloud SQL role and
-database on `master-instance`, the `three-peaks-hub` namespace with its secret,
-Redis, the Services, the PodDisruptionBudget, and the API Deployment. Migrations
-have run and two replicas are serving; `three-peaks-hub-api-neg` exists with two
-endpoints, so the `data` source below now resolves.
+**The site is live at https://tools.threepeaksgames.com.** `terraform apply` has
+run in full (27 resources), the managed certificate for the apex is ACTIVE, both
+API replicas are HEALTHY in the load balancer's NEG, and the SPA is served from
+the bucket with the API on the same origin. Uploads go to GCS through Workload
+Identity with no key file anywhere.
 
-Not done: **`terraform apply` has never been run.** There is no load balancer,
-no static IP, no certificate, no web bucket and no Cloud Run service, so nothing
-is publicly reachable and the deploy workflow's `web` job fails on the missing
-bucket. Everything under "First-time bootstrap" from step 1 on is still pending,
-and steps 0, 3 and 4 are already done.
+Everything under "First-time bootstrap" is done. What is left is previews only:
+
+- `three-peaks-hub-wildcard-cert` is **PROVISIONING** and will stay that way
+  until the DNS-01 CNAME under "Enabling preview subdomains" is published in
+  Route 53. Until then `pr-<n>.tools.threepeaksgames.com` has no certificate,
+  and `attach_wildcard_cert_map` must stay `false`.
 
 Secrets are readable back out of the cluster if they are needed again:
 
