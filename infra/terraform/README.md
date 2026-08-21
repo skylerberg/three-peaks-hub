@@ -6,18 +6,23 @@ the `three-peaks-hub` prefix.
 
 ## Current state (2026-08-21)
 
-**The site is live at https://tools.threepeaksgames.com.** `terraform apply` has
-run in full (27 resources), the managed certificate for the apex is ACTIVE, both
-API replicas are HEALTHY in the load balancer's NEG, and the SPA is served from
-the bucket with the API on the same origin. Uploads go to GCS through Workload
-Identity with no key file anywhere.
+**Live at https://tools.threepeaksgames.com, and fully bootstrapped.** Terraform
+is applied with `attach_wildcard_cert_map = true`, both certificates are ACTIVE,
+both API replicas are HEALTHY in the load balancer's NEG, and uploads reach GCS
+through Workload Identity with no key file anywhere.
 
-Everything under "First-time bootstrap" is done. What is left is previews only:
+Per-PR previews work end to end: opening a pull request publishes to
+`pr/<n>/` and comments the URL, and closing it removes both. Verified on #1 and
+#2.
 
-- `three-peaks-hub-wildcard-cert` is **PROVISIONING** and will stay that way
-  until the DNS-01 CNAME under "Enabling preview subdomains" is published in
-  Route 53. Until then `pr-<n>.tools.threepeaksgames.com` has no certificate,
-  and `attach_wildcard_cert_map` must stay `false`.
+**One DNS record is still missing.** There is no wildcard `A` record, so
+`pr-<n>.tools.threepeaksgames.com` does not resolve — the previews above were
+verified with `curl --resolve`. Add this in Route 53 and the URLs in the PR
+comments become clickable:
+
+```
+*.tools.threepeaksgames.com.  A  136.68.172.27
+```
 
 Secrets are readable back out of the cluster if they are needed again:
 

@@ -61,7 +61,7 @@ Push to `main`. The workflow builds the image, runs migrations as a Job, then
 rolls out; the web half deploys after the API so a bundle is never served
 against an endpoint that does not exist yet.
 
-Live at **https://tools.threepeaksgames.com**. Per-PR previews are the one part
-not yet reachable: the wildcard certificate needs a DNS-01 CNAME published in
-Route 53 first. `infra/terraform/README.md` records exactly what is done and
-what is not.
+Live at **https://tools.threepeaksgames.com**. Opening a pull request publishes
+a preview to `pr-<n>.tools.threepeaksgames.com` and comments the URL; closing it
+removes both. Those URLs need one more Route 53 record before they resolve —
+`infra/terraform/README.md` has it, and records exactly what is done.
