@@ -36,6 +36,7 @@
     "prepare": "node scripts/setup-hooks.mjs",
     "check:a11y": "pnpm --filter @three-peaks/web run check:a11y",
     "check:upload": "pnpm --filter @three-peaks/web run check:upload",
+    "check:model3d": "pnpm --filter @three-peaks/web run check:model3d",
     "check:dockerfiles": "node scripts/check-dockerfiles.mjs",
     "check:k8s": "node scripts/check-k8s.mjs"
   },

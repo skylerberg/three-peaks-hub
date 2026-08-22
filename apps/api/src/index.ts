@@ -10,6 +10,7 @@ import { transactionMiddleware } from './middleware/transaction.ts';
 import { authRouter, publicAuthRouter } from './routes/auth.ts';
 import { docsRouter } from './routes/docs.ts';
 import { filesRouter } from './routes/files.ts';
+import { modelsRouter } from './routes/models.ts';
 import { projectsRouter } from './routes/projects.ts';
 import { openApiSpec } from './spec/openapi.ts';
 import { attachRealtime, realtimeEventsDocument, startBus } from './services/realtime/index.ts';
@@ -54,6 +55,7 @@ app.route('/api/auth', publicAuthRouter);
 app.route('/api/auth', authRouter);
 app.route('/api/projects', projectsRouter);
 app.route('/api/files', filesRouter);
+app.route('/api/models', modelsRouter);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);

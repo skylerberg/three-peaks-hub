@@ -176,6 +176,42 @@ router library.
   `$state` during teardown silently does not survive, so bookkeeping that must
   outlive an unmount belongs in a plain binding.
 
+# The 3D studio
+
+`/projects/:projectId/files/:fileId/3d` turns one uploaded image into one
+component — a card, or a wooden piece cut to the image's own silhouette — and
+exports it as a `.glb`.
+
+**All of it runs in the browser.** `apps/api` has no image or geometry
+dependency; it recognises two more content types and stores a settings blob.
+`apps/web/src/lib/model3d/` is reached only by `await import()`, so `three` —
+larger than everything else in the bundle put together — stays in a chunk that
+only this screen pays for.
+
+- **Millimetres in the settings, metres in the file.** glTF's unit is the metre
+  and every importer assumes it, so `MM` in `apps/web/src/lib/model3d/units.ts`
+  is applied when geometry is built and never afterwards by scaling a node.
+- **A bevel in `ExtrudeGeometry` grows the piece**: the outline it is handed
+  becomes the flat face, and the bevel then pushes out past it in x and y and
+  past the depth in z. `geometry/extrude.ts` offsets it inwards by its own size
+  and takes it out of the depth, so a 63.5 mm card measures 63.5 mm. It exported
+  63.66 mm before.
+- **`ExtrudeGeometry` puts both lids in one group**, so a card's two faces cannot
+  carry different artwork. `geometry/faceGroups.ts` repartitions the triangles
+  into front, back and rim, and rewrites the cap UVs — which are world
+  coordinates in metres otherwise, sampling one corner of the texture. Textures
+  are exported with `flipY` off, as glTF requires, so the UVs are written to
+  match; the two have to agree.
+- **A vector source is already an outline.** An SVG's paths are parsed and
+  extruded; only a raster is contour-traced. Rasterising an SVG to trace the
+  raster back would throw away the exact edge.
+- Textures are generated from seeded noise, never `Math.random()`: the same
+  settings have to produce the same file twice.
+
+Settings live in `component_model`, one row per source image, and the bounds the
+API enforces are named once in `packages/shared/src/models3d.ts` so no input can
+offer a value the server will reject.
+
 # Running things
 
 ```sh
@@ -234,9 +270,15 @@ failure mode a unit test mostly does not: measuring nothing and reporting green.
 CI runs them without the flag; the flag is how you earn the right to believe
 them.
 
-`check:upload` drives the real file picker in a real browser against a real API.
-It needs one running (`pnpm dev:api`); it skips locally without one and fails
-under CI rather than skipping.
+`check:upload` drives the real file picker in a real browser against a real API,
+and `check:model3d` drives the studio and reads the `.glb` that comes out —
+GLTFExporter needs a real canvas to serialise a texture, so nothing else covers
+the step between "the vertices are right" and "a file Blender can open came
+out". Both need an API running (`pnpm dev:api`); they skip locally without one
+and fail under CI rather than skipping. `check:a11y` reaches its one screen
+behind the session the same way, and skips only that screen without an API —
+it is in `check:all`, which has to keep passing on a checkout with nothing else
+running.
 
 **Never run `prettier --write` or `eslint --fix` by hand.** `.githooks/post-commit`
 runs both over the files each commit touched and amends the result in. The

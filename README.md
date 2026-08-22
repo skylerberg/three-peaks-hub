@@ -22,6 +22,9 @@ A pnpm-workspace monorepo:
 - **Files.** Project-scoped folders and files, streaming uploads whose content
   type is decided by magic bytes rather than by what the client claims, a
   per-project storage quota, and a browser explorer with drag-and-drop.
+- **3D.** Any uploaded image can be turned into a card or a wooden component,
+  tuned against a live preview, and exported as a `.glb` at real-world scale.
+  The silhouette of a wooden piece is cut from the image itself.
 - **Realtime.** A WebSocket at `/ws`; every mutation announces itself, and
   delivery re-checks access per event.
 

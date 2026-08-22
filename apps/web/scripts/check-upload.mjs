@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
+import { apiReachable, createProject, signUp } from './lib/session.mjs';
 
 const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 5220);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
@@ -29,17 +30,8 @@ function check(name, condition, detail = '') {
   return condition;
 }
 
-async function apiReachable() {
-  try {
-    const res = await fetch(`${API}/health`);
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function run() {
-  if (!(await apiReachable())) {
+  if (!(await apiReachable(API))) {
     const message = `[check:upload] no API at ${API}`;
     // Under CI the API is a service the workflow starts, so its absence is a
     // broken gate rather than a local convenience.
@@ -66,28 +58,12 @@ async function run() {
     return 0;
   }
 
-  const email = `probe-${Date.now()}@example.test`;
-  const password = 'correct horse battery staple';
-
   try {
-    // --- sign up through the real form -------------------------------------
-    await browser.goto(`${base}/signup`, { wait: 300 });
-    await browser.page.fill('input[autocomplete="name"]', 'Upload Probe');
-    await browser.page.fill('input[type="email"]', email);
-    await browser.page.fill('input[type="password"]', password);
-    await browser.click('button[type="submit"]');
-    await browser.page.waitForSelector('text=Projects', { timeout: 10_000 });
+    await signUp(browser, base, { name: 'Upload Probe', stamp: Date.now() });
     check('signing up lands on the projects screen', true);
 
-    // --- create a project --------------------------------------------------
-    await browser.click('button:has-text("New project")');
-    await browser.page.fill('input[placeholder="Colori"]', 'Probe Project');
-    await browser.click('button[type="submit"]');
-    await browser.page.waitForSelector('a:has-text("Probe Project")', { timeout: 10_000 });
+    await createProject(browser, 'Probe Project');
     check('a created project appears in the list', true);
-
-    await browser.click('a:has-text("Probe Project")');
-    await browser.page.waitForSelector('button:has-text("Upload files")', { timeout: 10_000 });
 
     // --- upload through the real file input --------------------------------
     const dir = mkdtempSync(join(tmpdir(), 'tph-upload-'));
@@ -98,7 +74,11 @@ async function run() {
     // setInputFiles is the real picker's effect; there is no way to reach this
     // path from jsdom at all.
     await browser.setInputFiles('input[type="file"]', filePath);
-    await browser.page.waitForSelector('text=probe-card.txt', { timeout: 15_000 });
+    // The download link, not the filename: the explorer draws the name on an
+    // optimistic row the moment the upload starts, so waiting for the text
+    // waits for nothing and every assertion below it then races the transfer.
+    // Only a row from a real listing carries a link to the stored bytes.
+    await browser.page.waitForSelector('a[download="probe-card.txt"]', { timeout: 15_000 });
     check('the uploaded file is drawn in the explorer', true);
 
     // The row is not proof the bytes arrived. Read them back through the API,
@@ -132,11 +112,25 @@ async function run() {
     );
 
     // --- the quota meter reflects the upload -------------------------------
-    const usedText = await browser.page.textContent('text=/of .* used/');
+    // Waited for, not sampled. The meter is drawn from the listing that the
+    // refresh after the upload fetches, which is a second round trip -- reading
+    // it once raced that refresh and failed about one run in three, for no
+    // reason to do with the code under test.
+    const usedText = await browser.page
+      .waitForFunction(
+        () => {
+          const match = document.body.innerText.match(/[\d.]+ [KMGT]?B of .+ used/);
+          return match && !match[0].startsWith('0 B of') ? match[0] : null;
+        },
+        { timeout: 15_000 }
+      )
+      .then((handle) => handle.jsonValue())
+      .catch(() => null);
+
     check(
       'the storage meter shows a non-zero total',
-      !/^0 B of/.test(usedText ?? ''),
-      usedText ?? ''
+      usedText !== null,
+      'still read 0 B fifteen seconds after the upload'
     );
 
     if (selftest) {

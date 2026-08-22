@@ -2,7 +2,7 @@ import { Transform, type Readable } from 'node:stream';
 import { PROJECT_STORAGE_QUOTA_BYTES } from '@three-peaks/shared';
 import { AppError } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
-import { SNIFF_BYTES, sniffImageType } from './imageSniff.ts';
+import { SNIFF_BYTES, sniffContentType } from './imageSniff.ts';
 import { storage } from './storage/index.ts';
 import type { AppContext } from '../types/index.ts';
 
@@ -86,12 +86,13 @@ export async function storeUpload(
     throw error;
   }
 
-  const sniffed = sniffImageType(Buffer.concat(head));
+  const sniffed = sniffContentType(Buffer.concat(head));
   return {
     storageKey,
     byteSize,
-    // A non-image is stored as an opaque stream regardless of what it claimed.
-    // Serving a client-declared type back is how a stored .html becomes XSS.
+    // Anything unrecognised is stored as an opaque stream regardless of what it
+    // claimed. Serving a client-declared type back is how a stored .html
+    // becomes XSS.
     contentType: sniffed ?? 'application/octet-stream',
   };
 }

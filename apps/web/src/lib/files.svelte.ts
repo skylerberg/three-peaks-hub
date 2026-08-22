@@ -1,5 +1,5 @@
 import type { components } from '@three-peaks/shared/api';
-import { api, assertOk } from '../api/client.ts';
+import { api, assertOk, authHeader } from '../api/client.ts';
 import { newId } from './ids.ts';
 
 type Folder = components['schemas']['Folder'];
@@ -124,13 +124,6 @@ class FileStore {
     this.pending = [];
     this.loading = false;
   }
-}
-
-// The upload goes through fetch rather than the generated client, so it has to
-// attach the token itself.
-function authHeader(): Record<string, string> {
-  const token = localStorage.getItem('tph.token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export const files = new FileStore();

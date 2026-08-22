@@ -562,6 +562,49 @@ filesRouter.get(
   }
 );
 
+filesRouter.get(
+  '/:id',
+  describeRoute({
+    tags: ['Files'],
+    summary: 'Read one file row',
+    description:
+      'A screen addressed by file id -- the 3D studio -- has to resolve the row on a cold load, before it knows which folder the file is in.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'The file',
+        content: { 'application/json': { schema: resolver(fileSchema) } },
+      },
+      ...standardErrors,
+    },
+  }),
+  async (c) => {
+    const id = c.req.param('id');
+    await assertFileAccess(c, id, 'read');
+
+    const row = await c
+      .get('db')
+      .selectFrom('file')
+      .select([
+        'file.id as id',
+        'file.project_id as project_id',
+        'file.folder_id as folder_id',
+        'file.filename as filename',
+        'file.content_type as content_type',
+        'file.byte_size as byte_size',
+        'file.image_width as image_width',
+        'file.image_height as image_height',
+        'file.uploaded_by as uploaded_by',
+        'file.created_at as created_at',
+        'file.updated_at as updated_at',
+      ])
+      .where('file.id', '=', id)
+      .executeTakeFirstOrThrow();
+
+    return c.json(serializeFile(row));
+  }
+);
+
 filesRouter.patch(
   '/:id',
   describeRoute({

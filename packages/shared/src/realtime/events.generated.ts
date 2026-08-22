@@ -9,6 +9,7 @@ export type RealtimeEventType =
   | 'folder_deleted'
   | 'folder_updated'
   | 'members_changed'
+  | 'model_updated'
   | 'project_deleted'
   | 'project_updated';
 
@@ -52,6 +53,12 @@ export type RealtimeEvent =
   | {
       type: 'members_changed';
       project_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'model_updated';
+      project_id: string;
+      file_id: string;
       actor_user_id: string;
     }
   | {
