@@ -199,7 +199,7 @@ describe('project files', () => {
       ).json();
       const doomed = await (await upload('inside.txt', 'gone soon', lid.id)).json();
 
-      expect((await owner.api.delete(`/api/files/folders/${box.id}`)).status).toBe(204);
+      expect((await owner.api.delete(`/api/files/folders/${box.id}?purge=true`)).status).toBe(204);
       expect((await owner.api.get(`/api/files/${doomed.id}/download`)).status).toBe(404);
       expect(
         (await owner.api.get(`/api/files/directory?project_id=${projectId}&folder_id=${lid.id}`))
@@ -244,9 +244,17 @@ describe('project files', () => {
     });
   });
 
-  it('deletes a file and stops serving it', async () => {
+  it('stops listing a deleted file but keeps serving its bytes', async () => {
     const file = await (await upload('temporary.txt', 'briefly')).json();
     expect((await owner.api.delete(`/api/files/${file.id}`)).status).toBe(204);
+
+    const listing = await (
+      await owner.api.get(`/api/files/directory?project_id=${projectId}`)
+    ).json();
+    expect(listing.files.map((f: { id: string }) => f.id)).not.toContain(file.id);
+    expect((await owner.api.get(`/api/files/${file.id}/download`)).status).toBe(200);
+
+    expect((await owner.api.delete(`/api/files/${file.id}?purge=true`)).status).toBe(204);
     expect((await owner.api.get(`/api/files/${file.id}/download`)).status).toBe(404);
   });
 });

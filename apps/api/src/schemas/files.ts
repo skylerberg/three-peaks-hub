@@ -22,6 +22,9 @@ export const fileSchema = type({
   uploaded_by: 'string',
   created_at: 'string',
   updated_at: 'string',
+  // Null for a live file. A screen that resolves a row by id has to tell a
+  // tombstone apart from a live one, or it offers actions that answer 409.
+  deleted_at: 'string | null',
 });
 
 export const createFolderRequestSchema = type({
@@ -97,4 +100,47 @@ export const fileVersionResultSchema = type({
 // and the pattern is what the generated client carries.
 export const versionQuerySchema = type({
   'version?': '/^[1-9][0-9]{0,8}$/',
+});
+
+// Only the literal word. Anything else — ?purge=false included — is a 400, so
+// reclaiming the bytes is never something a typo falls into.
+export const purgeQuerySchema = type({
+  'purge?': "'true'",
+});
+
+export const deletedQuerySchema = type({
+  project_id: uuid,
+});
+
+// A restore may hand over a new name in the same request. Two steps instead
+// would leave a window where the tombstone still holds the old one.
+export const restoreFileQuerySchema = type({
+  'filename?': stringWithLength(1, 255),
+});
+
+export const restoreFolderQuerySchema = type({
+  'name?': stringWithLength(1, 255),
+});
+
+// One row of the deleted listing. Flat, with the path each entry came from,
+// because a deleted subtree has no live parent to browse into.
+export const deletedEntrySchema = type({
+  kind: "'file' | 'folder'",
+  id: 'string',
+  project_id: 'string',
+  name: 'string',
+  // The folders above it, outermost first; empty at the project root.
+  path: 'string',
+  content_type: 'string | null',
+  // For a file, what purging it reclaims: every version of it, not the current one.
+  byte_size: 'number | null',
+  deleted_at: 'string',
+  deleted_by: 'string | null',
+  // The name of the deleted folder that has to come back first, or null when
+  // this entry can be restored on its own.
+  blocked_by: 'string | null',
+});
+
+export const deletedListingSchema = type({
+  entries: deletedEntrySchema.array(),
 });

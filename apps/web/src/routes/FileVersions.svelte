@@ -26,6 +26,10 @@
 
   const file = $derived(versions.file);
   const history = $derived(versions.versions);
+  // Loose on purpose: a rolling deploy can put this bundle in front of an API
+  // pod whose File carries no deleted_at at all, and a missing key must not read
+  // as a tombstone.
+  const tombstoned = $derived(Boolean(file?.deleted_at));
 
   $effect(() => {
     const id = fileId;
@@ -65,10 +69,11 @@
       if (event.project_id !== id) return;
       if (!('file_id' in event) || event.file_id !== fileId) return;
       void versions.refresh().catch((caught: unknown) => {
-        // Someone else deleted it. Leaving the history on screen would offer to
-        // restore versions that are no longer there.
+        // A soft delete answers with the row and its tombstone, so a 404 here
+        // means the bytes are gone for good; the history on screen would offer
+        // to restore versions that no longer exist.
         if (caught instanceof ApiError && caught.status === 404) {
-          error = 'That file has been deleted.';
+          error = 'That file has been permanently deleted.';
         }
       });
     });
@@ -154,8 +159,8 @@
         <h1 class="truncate text-2xl font-semibold">{file.filename}</h1>
         <p class="text-sm text-muted">
           Every version ever stored, newest first. Restoring one copies it forward. All of them
-          count against project storage, and the only way to reclaim that space is to delete the
-          file.
+          count against project storage, and only deleting the file permanently gives that space
+          back.
         </p>
       </div>
       <a
@@ -166,7 +171,15 @@
       </a>
     </div>
 
-    {#if canEdit}
+    {#if tombstoned}
+      <p role="status" class="rounded-md border border-warning p-4 text-sm text-warning">
+        This file is deleted. Every version below is still here and still downloadable, but nothing
+        can be written to it until it is put back from
+        <a class="focus-ring rounded underline" href="/projects/{projectId}/deleted">Deleted</a>.
+      </p>
+    {/if}
+
+    {#if canEdit && !tombstoned}
       <div class="flex flex-wrap items-center gap-2">
         <Button onclick={() => fileInput?.click()} disabled={busy}>Upload new version</Button>
         {#if busy}<Spinner label="Working" />{/if}
@@ -212,7 +225,7 @@
             >
               Download
             </Button>
-            {#if canEdit && !version.is_current}
+            {#if canEdit && !tombstoned && !version.is_current}
               <Button
                 variant="secondary"
                 disabled={busy}

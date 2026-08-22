@@ -6,6 +6,7 @@ export type Route =
   | { name: 'projects' }
   | { name: 'project'; params: { projectId: string; folderId: string | null } }
   | { name: 'members'; params: { projectId: string } }
+  | { name: 'deleted'; params: { projectId: string } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
   | { name: 'versions'; params: { projectId: string; fileId: string } }
   | { name: 'account' }
@@ -33,6 +34,9 @@ export function matchRoute(path: string, search = ''): Route {
 
   const members = new RegExp(`^/projects/(${UUID})/members$`).exec(clean);
   if (members) return { name: 'members', params: { projectId: members[1] } };
+
+  const deleted = new RegExp(`^/projects/(${UUID})/deleted$`).exec(clean);
+  if (deleted) return { name: 'deleted', params: { projectId: deleted[1] } };
 
   const model = new RegExp(`^/projects/(${UUID})/files/(${UUID})/3d$`).exec(clean);
   if (model) return { name: 'model', params: { projectId: model[1], fileId: model[2] } };

@@ -224,7 +224,7 @@ describe('file versions', () => {
     expect((await owner.api.post(`/api/files/${file.id}/versions/2/restore`)).status).toBe(404);
   });
 
-  it('leaves nothing in storage when a file with three versions is deleted', async () => {
+  it('leaves nothing in storage when a file with three versions is purged', async () => {
     const file = await upload('doomed.txt', 'one');
     expect((await append(file.id, 'two of them')).status).toBe(201);
     expect((await append(file.id, 'three of them now')).status).toBe(201);
@@ -232,13 +232,13 @@ describe('file versions', () => {
     const keys = await versionKeys(file.id);
     expect(keys).toHaveLength(3);
 
-    expect((await owner.api.delete(`/api/files/${file.id}`)).status).toBe(204);
+    expect((await owner.api.delete(`/api/files/${file.id}?purge=true`)).status).toBe(204);
     for (const key of keys) {
       expect(await storage().get(key.storage_key)).toBeNull();
     }
   });
 
-  it('leaves nothing in storage when a folder holding a versioned file is deleted', async () => {
+  it('leaves nothing in storage when a folder holding a versioned file is purged', async () => {
     const folder = await (
       await owner.api.post('/api/files/folders', { project_id: projectId, name: 'Condemned' })
     ).json();
@@ -248,7 +248,7 @@ describe('file versions', () => {
     const keys = await versionKeys(file.id);
     expect(keys).toHaveLength(2);
 
-    expect((await owner.api.delete(`/api/files/folders/${folder.id}`)).status).toBe(204);
+    expect((await owner.api.delete(`/api/files/folders/${folder.id}?purge=true`)).status).toBe(204);
     for (const key of keys) {
       expect(await storage().get(key.storage_key)).toBeNull();
     }

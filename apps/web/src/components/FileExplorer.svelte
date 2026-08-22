@@ -90,7 +90,7 @@
   }
 
   async function removeFile(id: string, name: string) {
-    if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+    if (!confirm(`Delete ${name}? Its history is kept, and Deleted can put it back.`)) return;
     try {
       await files.deleteFile(id);
       await files.refresh();
@@ -100,7 +100,8 @@
   }
 
   async function removeFolder(id: string, name: string) {
-    if (!confirm(`Delete the folder ${name} and everything inside it?`)) return;
+    if (!confirm(`Delete the folder ${name} and everything inside it? Deleted can put it back.`))
+      return;
     try {
       await files.deleteFolder(id);
       await files.refresh();
@@ -145,8 +146,8 @@
     {/each}
   </nav>
 
-  {#if canEdit}
-    <div class="flex flex-wrap items-center gap-2">
+  <div class="flex flex-wrap items-center gap-2">
+    {#if canEdit}
       <Button onclick={() => fileInput?.click()}>Upload files</Button>
       <Button variant="secondary" onclick={() => (creatingFolder = !creatingFolder)}>
         {creatingFolder ? 'Cancel' : 'New folder'}
@@ -165,20 +166,28 @@
           });
         }}
       />
-    </div>
-
-    {#if creatingFolder}
-      <form class="flex items-end gap-2" onsubmit={createFolder}>
-        <label class="flex flex-1 flex-col gap-1 text-sm">
-          <span class="font-medium">Folder name</span>
-          <input
-            bind:value={newFolderName}
-            class="focus-ring min-h-11 rounded-md border border-edge bg-surface px-3 text-sm"
-          />
-        </label>
-        <Button type="submit" disabled={!newFolderName.trim()}>Create</Button>
-      </form>
     {/if}
+    <!-- Unconditional: a viewer cannot restore anything, but seeing what a
+         project has lost is part of reading it. -->
+    <a
+      class="focus-ring inline-flex min-h-11 items-center rounded px-3 text-sm underline"
+      href="/projects/{projectId}/deleted"
+    >
+      Deleted
+    </a>
+  </div>
+
+  {#if canEdit && creatingFolder}
+    <form class="flex items-end gap-2" onsubmit={createFolder}>
+      <label class="flex flex-1 flex-col gap-1 text-sm">
+        <span class="font-medium">Folder name</span>
+        <input
+          bind:value={newFolderName}
+          class="focus-ring min-h-11 rounded-md border border-edge bg-surface px-3 text-sm"
+        />
+      </label>
+      <Button type="submit" disabled={!newFolderName.trim()}>Create</Button>
+    </form>
   {/if}
 
   <!-- Drop zone -->
