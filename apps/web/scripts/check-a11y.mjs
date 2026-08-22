@@ -46,8 +46,8 @@ const SCREENS = [
 const SCHEMES = ['light', 'dark'];
 
 const selftest = process.argv.includes('--selftest');
-const PORT = Number(process.env.A11Y_PROBE_PORT ?? 5200);
-const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
+const PORT = Number(process.env.A11Y_PROBE_PORT ?? 17330);
+const API = process.env.API_PROXY_TARGET ?? 'http://localhost:17310';
 
 // A fresh account per screen and per colour scheme: the probes upload files, and
 // an account carried from one screen to the next would make each run depend on

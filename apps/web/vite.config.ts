@@ -6,10 +6,10 @@ import { guardMutation } from '../../scripts/guard-mutation.mjs';
 
 // An API on a non-default port is the normal case once two branches are in
 // flight: a worktree's API takes a free port because the main checkout already
-// holds 3001, and a dev server hard-wired to 3001 proxies to whichever build
-// owns it without saying so — which looks exactly like the branch's change not
-// working.
-const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
+// holds 17310, and a dev server hard-wired to one port proxies to whichever
+// build owns it without saying so — which looks exactly like the branch's
+// change not working.
+const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:17310';
 
 const apiProxy = {
   '/api': apiTarget,
@@ -33,8 +33,8 @@ export default defineConfig({
   // meaningful for anything else that grows.
   build: { chunkSizeWarningLimit: 700 },
 
-  server: { proxy: apiProxy },
-  preview: { port: 4173, strictPort: true, proxy: apiProxy },
+  server: { port: 17300, proxy: apiProxy },
+  preview: { port: 17320, strictPort: true, proxy: apiProxy },
 
   test: {
     environment: 'jsdom',

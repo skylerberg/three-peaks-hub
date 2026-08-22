@@ -4,7 +4,7 @@
 // same fact CI works around with a heredoc. Every fresh clone and every new
 // worktree hits it on the first `pnpm dev`, and one idempotent command beats a
 // README paragraph.
-import { copyFileSync, existsSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,3 +25,28 @@ for (const dir of dirs) {
   }
 }
 console.log(copied === 0 ? 'env files already present' : `${copied} env file(s) created`);
+
+// An existing .env is never rewritten -- it holds secrets and local choices, and
+// this command is run casually. But a file written before the ports moved pins
+// the old ones, and the symptom is the collision the move was meant to end, so
+// say which lines are stale rather than leaving them to be discovered.
+const STALE = [
+  [/^PORT=3001$/m, 'PORT=17310'],
+  [/^CORS_ORIGINS=http:\/\/localhost:5173$/m, 'CORS_ORIGINS=http://localhost:17300'],
+  [/^APP_URL_BASE=http:\/\/localhost:5173$/m, 'APP_URL_BASE=http://localhost:17300'],
+];
+
+for (const dir of dirs) {
+  const target = join(root, dir, '.env');
+  if (!existsSync(target)) continue;
+  const contents = readFileSync(target, 'utf8');
+  const stale = STALE.filter(([pattern]) => pattern.test(contents));
+  if (stale.length === 0) continue;
+  console.warn(
+    `\n${dir}/.env still names the old development ports. Nothing here rewrites it; ` +
+      'change these lines by hand:'
+  );
+  for (const [pattern, replacement] of stale) {
+    console.warn(`  ${pattern.source.replace(/[$^]|\\/g, '')}  ->  ${replacement}`);
+  }
+}

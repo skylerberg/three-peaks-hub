@@ -25,7 +25,7 @@ function parseInteger(raw: string | undefined, fallback: number): number {
 
 export const env = {
   get port(): number {
-    return parseInteger(process.env.PORT, 3001);
+    return parseInteger(process.env.PORT, 17310);
   },
   get environment(): string {
     return process.env.ENVIRONMENT ?? 'development';
@@ -87,7 +87,7 @@ export const env = {
       .filter(Boolean);
   },
   get appUrlBase(): string {
-    return process.env.APP_URL_BASE ?? 'http://localhost:5173';
+    return process.env.APP_URL_BASE ?? 'http://localhost:17300';
   },
   get trustProxy(): boolean {
     return parseStrictBoolean('TRUST_PROXY', process.env.TRUST_PROXY, false);

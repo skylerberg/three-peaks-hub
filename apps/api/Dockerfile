@@ -62,5 +62,10 @@ USER node
 # src/ ships beside dist/ because the migrate Job runs the TypeScript directly
 # through tsx, and it resolves the migration directory relative to this cwd.
 WORKDIR /app/apps/api
+# Pinned rather than inherited: the code's default is a development port chosen
+# to stay out of the way of other projects on a laptop, and nothing in a
+# container needs to dodge anything. The Deployment sets this too; this is what
+# keeps the image and the EXPOSE below true on their own.
+ENV PORT=3001
 EXPOSE 3001
 CMD ["node", "dist/index.mjs"]

@@ -5,7 +5,7 @@
 // context to have drawn anything at all -- so the step between "the vertices
 // are right" and "a file Blender can open came out" has no other cover.
 //
-// It needs an API. Point API_PROXY_TARGET at one (default localhost:3001) and
+// It needs an API. Point API_PROXY_TARGET at one (default localhost:17310) and
 // it will sign up its own throwaway account.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,8 +16,8 @@ import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
 import { createProject, inspectApi, signUp } from './lib/session.mjs';
 
-const PORT = Number(process.env.MODEL_PROBE_PORT ?? 5230);
-const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
+const PORT = Number(process.env.MODEL_PROBE_PORT ?? 17332);
+const API = process.env.API_PROXY_TARGET ?? 'http://localhost:17310';
 const selftest = process.argv.includes('--selftest');
 
 // Building the model, serialising four generated textures into a .glb and

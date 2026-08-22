@@ -258,12 +258,22 @@ offer a value the server will reject.
 
 ```sh
 pnpm install && pnpm setup:env   # once per checkout or worktree
-pnpm dev                         # api on :3001, web on :5173
+pnpm dev                         # api on :17310, web on :17300
 ```
 
 Native Postgres 18 and Redis (`brew`), no Docker for development. `API_PROXY_TARGET`
 moves the Vite proxy, which matters as soon as a second branch is in flight and
-the main checkout already holds 3001.
+the main checkout already holds 17310.
+
+**Development ports are one block: web 17300, api 17310, preview 17320, the
+browser probes 17330-17332.** Not 3001 and 5173, which every other project on
+the same laptop also defaults to — a sibling project's API answered here on 3001
+for a while, and because its `/health` looks exactly like this one's, the browser
+probes ran against it and failed fifteen seconds later inside a screen. The gaps
+are deliberate: `pnpm dev` lets Vite walk upward from 17300 when a second
+worktree is already running, and it has ten ports to walk before it reaches the
+API. Deployment is unaffected — the container is pinned to 3001 by its Dockerfile
+and its Deployment, and nothing in a container has to dodge anything.
 
 **Run only the tests your change touches; let CI run the rest.**
 `pnpm --filter @three-peaks/api test <path>` takes seconds. Reach for the whole
@@ -360,7 +370,7 @@ substitutes `{BRANCH}` and `{COMMITHASH}` into `infra/k8s/deployment.yaml` as
 else could tell the process what it is. Locally both are absent and it reads the
 checkout instead, which is the case that earns its keep: two worktrees on two
 ports are indistinguishable until one of them says which branch it is, and
-`API_PROXY_TARGET` defaults to whichever already holds 3001.
+`API_PROXY_TARGET` defaults to whichever already holds 17310.
 
 `apps/api/src/utils/serverStartup.ts` is the other half of that. A bind failure
 exits non-zero with a message naming the port — left to the default, `pnpm dev`

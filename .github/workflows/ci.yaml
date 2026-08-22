@@ -172,7 +172,7 @@ jobs:
       - name: Write apps/api/.env
         run: |
           cat > apps/api/.env <<'EOF'
-          PORT=3001
+          PORT=17310
           ENVIRONMENT=development
           DB_HOSTNAME=127.0.0.1
           DB_PORT=5432
@@ -182,8 +182,8 @@ jobs:
           DB_POOL_MAX=10
           STORAGE_DRIVER=disk
           STORAGE_DISK_ROOT=./data/uploads
-          CORS_ORIGINS=http://localhost:5173
-          APP_URL_BASE=http://localhost:5173
+          CORS_ORIGINS=http://localhost:17300
+          APP_URL_BASE=http://localhost:17300
           PASSWORD_RESET_SECRET=ci-only-password-reset-secret
           EMAIL_DRIVER=console
           TRUST_PROXY=false
@@ -201,8 +201,8 @@ jobs:
       - name: Wait for the API
         run: |
           for _ in $(seq 60); do
-            if curl -fsS http://localhost:3001/health > /dev/null; then
-              curl -sS http://localhost:3001/health
+            if curl -fsS http://localhost:17310/health > /dev/null; then
+              curl -sS http://localhost:17310/health
               exit 0
             fi
             sleep 1

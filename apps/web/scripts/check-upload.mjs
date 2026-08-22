@@ -5,7 +5,7 @@
 // store calls fetch; only this can prove that picking a file in the UI puts
 // bytes in the project and draws them back.
 //
-// It needs an API. Point API_PROXY_TARGET at one (default localhost:3001) and
+// It needs an API. Point API_PROXY_TARGET at one (default localhost:17310) and
 // it will sign up its own throwaway account.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,8 +16,8 @@ import { createBrowser } from './lib/browser.mjs';
 import { TINY_PNG } from './lib/fixtures.mjs';
 import { createProject, inspectApi, signUp } from './lib/session.mjs';
 
-const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 5220);
-const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
+const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 17331);
+const API = process.env.API_PROXY_TARGET ?? 'http://localhost:17310';
 const selftest = process.argv.includes('--selftest');
 
 const failures = [];
