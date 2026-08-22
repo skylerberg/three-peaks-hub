@@ -32,11 +32,24 @@ repos this is modelled on:
   (`strictDepBuilds`), and a _denial_ has to be written down rather than left
   out — an omission and a glob both match nothing.
 
-`minimumReleaseAgeStrict` holds back versions published in the last few days.
-Dependency ranges are written loose enough for pnpm to resolve to the newest
-version that has aged past it; pinning an exact brand-new version needs an
-explicit exclusion, which defeats the point. `vite` is pinned by an `overrides`
-entry because the svelte and tailwind plugins peer-resolve it transitively.
+Two more that were learned here rather than inherited, both of which fail an
+install or a build outright rather than degrading:
+
+- **A version published in the last few days will not install.**
+  `minimumReleaseAgeStrict` is the supply-chain gate that makes a compromised
+  release published an hour ago a non-event, and it refuses with
+  `ERR_PNPM_NO_MATURE_MATCHING_VERSION`. Write dependency ranges loose enough
+  for pnpm to pick the newest version that has aged past it. Pinning an exact
+  brand-new one forces an entry in `minimumReleaseAgeExclude`, which is
+  precisely the protection being switched off. Watch for the transitive case:
+  `vite` needs an `overrides` entry because the svelte and tailwind plugins
+  peer-resolve it, and a peer-resolved package ignores the range you wrote.
+- **An install that shrinks the dependency set wants to purge `node_modules`,
+  and will not do it without a terminal.** Anywhere non-interactive — a
+  container build, most obviously — it stops on
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`. Pass
+  `--config.confirmModulesPurge=false` on that one command rather than turning
+  the setting off workspace-wide; interactively the prompt is worth having.
 
 **TypeScript is pinned to 6.0.3, not the 7.x that npm calls `latest`.**
 typescript-eslint declares `typescript: >=4.8.4 <6.1.0` and svelte-check
@@ -95,7 +108,15 @@ tree.
    `project.created_by`, which is RESTRICT.
 8. **Query and path parameters are declared, not just read.** `c.req.query()`
    alone leaves them out of the spec, so the generated client cannot type them.
-9. Comments are minimal and explain only non-obvious _why_.
+9. **Take `validator` and `resolver` from `hono-openapi`, never from
+   `@hono/standard-validator` directly.** Both packages export a `validator`,
+   the import looks equally reasonable either way, and the wrong one type-checks
+   and validates requests correctly at runtime — it simply registers nothing in
+   the spec. The symptom appears two steps away: a request body missing from
+   `openapi.json`, and a generated client whose body is typed `never`. Response
+   schemas have the same shape of trap; they have to be wrapped in `resolver()`
+   or they are not schema objects at all.
+10. Comments are minimal and explain only non-obvious _why_.
 
 ## Realtime
 
