@@ -24,8 +24,15 @@ const MAX_NAME = 253;
 // Names that become a Service or are used as a DNS label are stricter still.
 const MAX_DNS_LABEL = 63;
 
+// Whatever the deploy pushes from. Only the length and shape matter here, and a
+// branch name is unbounded -- the checks below are what say whether it fits.
+const BRANCH = 'main';
+
 function render(source) {
-  return source.replaceAll('{COMMITHASH}', SHA).replaceAll('{SHORTHASH}', SHORT);
+  return source
+    .replaceAll('{COMMITHASH}', SHA)
+    .replaceAll('{SHORTHASH}', SHORT)
+    .replaceAll('{BRANCH}', BRANCH);
 }
 
 // Deliberately not a YAML parser: these manifests are flat enough that reading

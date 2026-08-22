@@ -312,15 +312,28 @@ failure mode a unit test mostly does not: measuring nothing and reporting green.
 CI runs them without the flag; the flag is how you earn the right to believe
 them.
 
+**`check:scripts`** fails if any `check:*` script is run by neither `check:all`
+nor a workflow. CI is a hand-copy of `check:all` — it fans out for a postgres
+service, test sharding and image builds — so the two lists are exactly the thing
+that drifts, and three probes sat in neither for a year with their `--selftest`
+arms and their "fails under CI" contracts never once executing.
+
 `check:upload` drives the real file picker in a real browser against a real API,
 and `check:model3d` drives the studio and reads the `.glb` that comes out —
 GLTFExporter needs a real canvas to serialise a texture, so nothing else covers
 the step between "the vertices are right" and "a file Blender can open came
-out". Both need an API running (`pnpm dev:api`); they skip locally without one
-and fail under CI rather than skipping. `check:a11y` reaches its one screen
-behind the session the same way, and skips only that screen without an API —
-it is in `check:all`, which has to keep passing on a checkout with nothing else
-running.
+out". `check:a11y` reaches its one screen behind the session the same way.
+
+All three need an API (`pnpm dev:api`), and all three interrogate it before a
+browser starts rather than trusting the port. Nothing there skips locally and
+fails under CI; something there that serves a different set of routes fails
+everywhere, with the reason. `check:a11y` skips only the screens behind the
+session, because it is in `check:all` and that has to keep passing on a checkout
+with nothing else running.
+
+Those two guards are the same problem from opposite ends, and both are worth
+having: `inspectApi` lets a probe refuse a server that cannot serve it, and the
+branch and commit on `/health` let a person recognise one.
 
 **Never run `prettier --write` or `eslint --fix` by hand.** `.githooks/post-commit`
 runs both over the files each commit touched and amends the result in. The
@@ -330,6 +343,29 @@ as the assertion that the hook actually ran.
 
 `scripts/tmp-*` and `apps/*/scripts/tmp-*` are the sanctioned throwaway-probe
 prefixes, ignored by git, eslint, vitest discovery and `check:comments`.
+
+# Health, and which build is running
+
+`GET /health` and `GET /` answer the same thing: `status`, plus `name`,
+`environment`, `branch` and a short `commit`.
+
+The status half reaches the database. Answering `ok` without it puts a pod that
+cannot serve one request back into the load balancer's rotation — and liveness
+is a TCP check rather than this one, so a database outage takes replicas out of
+rotation without restart-looping every one of them at once.
+
+The build half is `apps/api/src/config/buildInfo.ts`. In the cluster the deploy
+substitutes `{BRANCH}` and `{COMMITHASH}` into `infra/k8s/deployment.yaml` as
+`BUILD_BRANCH` and `BUILD_COMMIT`; there is no `.git` in the image, so nothing
+else could tell the process what it is. Locally both are absent and it reads the
+checkout instead, which is the case that earns its keep: two worktrees on two
+ports are indistinguishable until one of them says which branch it is, and
+`API_PROXY_TARGET` defaults to whichever already holds 3001.
+
+`apps/api/src/utils/serverStartup.ts` is the other half of that. A bind failure
+exits non-zero with a message naming the port — left to the default, `pnpm dev`
+stays alive under `--watch` with nothing bound and the port answers from
+whatever already owns it.
 
 # Deployment
 

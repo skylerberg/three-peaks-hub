@@ -347,4 +347,15 @@ export const guards = [
     testName: 'reads the bytes with the credential and shows them',
     runner: 'web',
   },
+  {
+    // A readiness probe that answers from memory alone puts a pod with no
+    // database back into the load balancer's rotation.
+    name: 'health reaches the database rather than answering ok regardless',
+    package: 'api',
+    file: 'src/routes/health.ts',
+    find: "    await ping(c.get('db'));",
+    replace: '',
+    tests: ['tests/e2e/health.test.ts'],
+    testName: 'reaches the database rather than answering from memory alone',
+  },
 ];
