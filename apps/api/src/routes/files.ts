@@ -423,7 +423,10 @@ function ancestry(
   let cursor = startId;
   for (let depth = 0; cursor !== null && depth < MAX_BREADCRUMB_DEPTH; depth += 1) {
     const row = folders.get(cursor);
-    if (!row) return { path: names.join('/'), blockedBy: UNKNOWN_ANCESTOR };
+    // Naming a deleted folder the walk did reach beats reporting the chain
+    // unknown: it really is in the way, so restoring it is a step forward even
+    // if the part that was never read holds another one.
+    if (!row) return { path: names.join('/'), blockedBy: blockedBy ?? UNKNOWN_ANCESTOR };
     names.unshift(row.name);
     if (row.deleted_at !== null) blockedBy = { id: row.id, name: row.name };
     cursor = row.parent_id;
@@ -461,12 +464,23 @@ filesRouter.get(
     const [files, folders, everyFolder] = await Promise.all([
       db
         .selectFrom('file')
-        .select([
+        .select((eb) => [
           'file.id as id',
           'file.folder_id as folder_id',
           'file.filename as filename',
           'file.content_type as content_type',
-          'file.byte_size as byte_size',
+          // Every version, because the screen offers this number as what a
+          // purge gives back and the quota is summed the same way. The current
+          // version alone understates a file with history by all the rest.
+          eb
+            .selectFrom('file_version')
+            .whereRef('file_version.file_id', '=', 'file.id')
+            .select((inner) =>
+              inner.fn
+                .coalesce(inner.fn.sum<string>('file_version.byte_size'), inner.lit(0))
+                .as('total')
+            )
+            .as('byte_size'),
           'file.deleted_at as deleted_at',
           'file.deleted_by as deleted_by',
         ])
@@ -666,9 +680,9 @@ filesRouter.patch(
           updated_at: new Date(),
         })
         .where('folder.id', '=', id)
-        // A tombstone is read-only. Renaming one would take it out from under
-        // the name the deleted listing shows, and moving one would make the
-        // path that listing reports a lie.
+        // A tombstone's name and its place are frozen. Renaming one would take
+        // it out from under the name the deleted listing shows, and moving one
+        // would make the path that listing reports a lie.
         .where('folder.deleted_at', 'is', null)
         .returning(FOLDER_COLUMNS)
         .executeTakeFirst();

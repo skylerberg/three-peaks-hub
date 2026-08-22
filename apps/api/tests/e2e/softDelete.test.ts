@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_CARD_SETTINGS } from '@three-peaks/shared';
 import { db } from '../../src/db/index.ts';
 import { storage } from '../../src/services/storage/index.ts';
+import { newId } from '../../src/utils/uuid.ts';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
 const PNG = Buffer.from([
@@ -100,8 +101,11 @@ describe('soft delete', () => {
     };
   }
 
-  async function deletedEntries(user: TestUser = owner): Promise<DeletedEntry[]> {
-    const res = await user.api.get(`/api/files/deleted?project_id=${projectId}`);
+  async function deletedEntries(
+    user: TestUser = owner,
+    project: string = projectId
+  ): Promise<DeletedEntry[]> {
+    const res = await user.api.get(`/api/files/deleted?project_id=${project}`);
     expect(res.status).toBe(200);
     return (await res.json()).entries;
   }
@@ -206,7 +210,9 @@ describe('soft delete', () => {
 
     const refused = await owner.api.post(`/api/files/${original.id}/restore`);
     expect(refused.status).toBe(409);
-    expect((await refused.json()).error).toContain('contested.txt');
+    // How it opens is what the web reads to tell this refusal from the one a
+    // deleted folder gives, and only this one is worth offering a rename for.
+    expect((await refused.json()).error).toMatch(/^A file named "contested\.txt"/);
 
     const restored = await owner.api.post(
       `/api/files/${original.id}/restore?filename=contested-old.txt`
@@ -281,8 +287,16 @@ describe('soft delete', () => {
     const doomed = await upload('doomed-inside.txt', 'one of them', box.id);
     expect((await append(doomed.id, 'two of them now')).status).toBe(201);
 
-    const keys = await versionKeys(doomed.id);
-    expect(keys).toHaveLength(2);
+    // A deleted folder in the middle of the subtree. The cascade takes what is
+    // under it either way, so a walk that stops here leaves those objects in
+    // the bucket with nothing left naming them.
+    const buried = await folder('Reclaimed Inner', box.id);
+    const hidden = await upload('hidden-inside.txt', 'the first cut', buried.id);
+    expect((await append(hidden.id, 'the second cut, revised')).status).toBe(201);
+    expect((await owner.api.delete(`/api/files/folders/${buried.id}`)).status).toBe(204);
+
+    const keys = [...(await versionKeys(doomed.id)), ...(await versionKeys(hidden.id))];
+    expect(keys).toHaveLength(4);
 
     expect((await owner.api.delete(`/api/files/${doomed.id}`)).status).toBe(204);
     expect((await owner.api.delete(`/api/files/folders/${box.id}?purge=true`)).status).toBe(204);
@@ -290,6 +304,22 @@ describe('soft delete', () => {
     for (const key of keys) {
       expect(await storage().get(key.storage_key)).toBeNull();
     }
+  });
+
+  it("reports every version's bytes as what purging an entry reclaims", async () => {
+    const own = (await (await owner.api.post('/api/projects', { name: 'Sized Trash' })).json()).id;
+    const created = await sendUpload('sized.bin', 'a'.repeat(10), undefined, own);
+    expect(created.status).toBe(201);
+    const fileId = (await created.json()).id;
+    expect((await append(fileId, 'b'.repeat(25))).status).toBe(201);
+    expect((await owner.api.delete(`/api/files/${fileId}`)).status).toBe(204);
+
+    const entry = (await deletedEntries(owner, own)).find((e) => e.id === fileId);
+    // Not the 25 bytes of the current version: the number is the one the screen
+    // offers as the space a purge gives back, which is the quota's own total.
+    expect(entry?.byte_size).toBe(35);
+    const directoryRes = await owner.api.get(`/api/files/directory?project_id=${own}`);
+    expect((await directoryRes.json()).storage_used_bytes).toBe(entry?.byte_size);
   });
 
   it('lists what was deleted with the path it came from', async () => {
@@ -388,6 +418,11 @@ describe('soft delete', () => {
     const whileDeleted = await owner.api.get(`/api/models/${file.id}`);
     expect(whileDeleted.status).toBe(200);
     expect((await whileDeleted.json()).settings).toEqual(DEFAULT_CARD_SETTINGS);
+    // Settings are not the file, so dialling one in is not the write a
+    // tombstone refuses.
+    expect(
+      (await owner.api.put(`/api/models/${file.id}`, { settings: DEFAULT_CARD_SETTINGS })).status
+    ).toBe(200);
 
     expect((await owner.api.post(`/api/files/${file.id}/restore`)).status).toBe(200);
     expect((await (await owner.api.get(`/api/models/${file.id}`)).json()).settings).toEqual(
@@ -478,5 +513,110 @@ describe('soft delete', () => {
     expect((await owner.api.patch(`/api/files/${file.id}`, { folder_id: inner.id })).status).toBe(
       404
     );
+  });
+
+  it('refuses to move a folder into a deleted subtree', async () => {
+    const gone = await folder('Move Blocked');
+    const live = await folder('Move Blocked Inner', gone.id);
+    const moving = await folder('Moving');
+    expect((await owner.api.delete(`/api/files/folders/${gone.id}`)).status).toBe(204);
+
+    expect(
+      (await owner.api.patch(`/api/files/folders/${moving.id}`, { parent_id: gone.id })).status
+    ).toBe(404);
+    // The live folder is the worse half: that move takes the whole of the
+    // folder being moved out of sight without deleting any of it.
+    expect(
+      (await owner.api.patch(`/api/files/folders/${moving.id}`, { parent_id: live.id })).status
+    ).toBe(404);
+
+    expect((await listing()).folders.map((f) => f.id)).toContain(moving.id);
+  });
+
+  // Every ancestor walk stops at MAX_BREADCRUMB_DEPTH, and what it did not
+  // reach is unknown rather than clean. Planted through db: no caller is going
+  // to be talked into building 66 levels one request at a time.
+  it('denies a folder chain too deep to walk, wherever the walk is read', async () => {
+    const deep = (await (await owner.api.post('/api/projects', { name: 'Too Deep' })).json()).id;
+
+    const ids = Array.from({ length: 66 }, () => newId());
+    await db
+      .insertInto('folder')
+      .values(
+        ids.map((id, index) => ({
+          id,
+          project_id: deep,
+          parent_id: index === 0 ? null : ids[index - 1],
+          name: `Level ${index + 1}`,
+          created_by: owner.id,
+        }))
+      )
+      .execute();
+    const deepest = ids[ids.length - 1];
+
+    const browsed = await owner.api.get(
+      `/api/files/directory?project_id=${deep}&folder_id=${deepest}`
+    );
+    expect(browsed.status).toBe(404);
+    expect((await sendUpload('too-deep.txt', 'x', deepest, deep)).status).toBe(404);
+
+    // Deleted while its folder was still shallow and buried afterwards, which
+    // is the only way to have something to restore down there at all.
+    const created = await owner.api.post('/api/files/folders', { project_id: deep, name: 'Sunk' });
+    expect(created.status).toBe(201);
+    const sunk = (await created.json()).id;
+    const uploaded = await sendUpload('sunk.txt', 'x', sunk, deep);
+    expect(uploaded.status).toBe(201);
+    const fileId = (await uploaded.json()).id;
+    expect((await owner.api.delete(`/api/files/${fileId}`)).status).toBe(204);
+    await db
+      .updateTable('folder')
+      .set({ parent_id: deepest })
+      .where('folder.id', '=', sunk)
+      .execute();
+
+    const refused = await owner.api.post(`/api/files/${fileId}/restore`);
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toContain('too deep');
+    expect((await deletedEntries(owner, deep)).find((e) => e.id === fileId)?.blocked_by).toBe(
+      'a folder too deep to check'
+    );
+  });
+
+  // The listing's queries are three snapshots, not one, so a purge can take a
+  // folder out from under the walk. A parent outside the project stands in for
+  // that: either way the chain leaves the set of rows being walked.
+  it('names the deleted folder it did find when the chain runs out', async () => {
+    const elsewhere = await folder('Elsewhere');
+    const half = (await (await owner.api.post('/api/projects', { name: 'Half A Chain' })).json())
+      .id;
+
+    const outerRes = await owner.api.post('/api/files/folders', {
+      project_id: half,
+      name: 'Blocking Outer',
+    });
+    expect(outerRes.status).toBe(201);
+    const outer = (await outerRes.json()).id;
+    const innerRes = await owner.api.post('/api/files/folders', {
+      project_id: half,
+      parent_id: outer,
+      name: 'Kept Inner',
+    });
+    expect(innerRes.status).toBe(201);
+    const inner = (await innerRes.json()).id;
+
+    const uploaded = await sendUpload('half-chained.txt', 'x', inner, half);
+    expect(uploaded.status).toBe(201);
+    const fileId = (await uploaded.json()).id;
+    expect((await owner.api.delete(`/api/files/${fileId}`)).status).toBe(204);
+    expect((await owner.api.delete(`/api/files/folders/${outer}`)).status).toBe(204);
+    await db
+      .updateTable('folder')
+      .set({ parent_id: elsewhere.id })
+      .where('folder.id', '=', outer)
+      .execute();
+
+    const entry = (await deletedEntries(owner, half)).find((e) => e.id === fileId);
+    expect(entry?.blocked_by).toBe('Blocking Outer');
   });
 });

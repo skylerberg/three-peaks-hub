@@ -3,7 +3,7 @@
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
-  import { type DeletedEntry, deleted } from '../lib/deleted.svelte.ts';
+  import { type DeletedEntry, deleted, isNameConflict } from '../lib/deleted.svelte.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage, session } from '../lib/session.svelte.ts';
@@ -100,9 +100,10 @@
         await send(entry, undefined);
         toasts.success(`${entry.name} is back in ${where(entry)}.`);
       } catch (caught) {
-        // 409 is the one refusal a person can answer: the old name has been
-        // taken since. Anything else is not theirs to fix from here.
-        if (!(caught instanceof ApiError) || caught.status !== 409) throw caught;
+        // A taken name is the only refusal a prompt can get past. Offering one
+        // for a folder standing in the way would ask for a second answer to a
+        // question the first answer never reached.
+        if (!isNameConflict(caught)) throw caught;
         const chosen = prompt(
           `${caught.message}.\n\nRestore ${entry.name} under a different name, or cancel.`,
           suffixed(entry)

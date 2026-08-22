@@ -2,7 +2,7 @@ import '../api/testUtils.ts';
 import { fetchMock, jsonResponse } from '../api/testUtils.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client.ts';
-import { deleted } from './deleted.svelte.ts';
+import { deleted, isNameConflict } from './deleted.svelte.ts';
 
 const PROJECT = '2f1c9e5a-8b3d-4f1e-9c2a-7d6b5e4f3a21';
 const FILE = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
@@ -108,6 +108,24 @@ describe('DeletedStore restore', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
     await deleted.restoreFile(FILE);
     expect(requestAt(2).search).toBe('');
+  });
+
+  // Whether the screen offers a new name turns on this, and a folder deleted
+  // after the listing loaded is how the wrong branch is reached.
+  it('tells a taken name apart from a folder standing in the way', () => {
+    expect(isNameConflict(new ApiError(409, 'A file named "card.png" is already there'))).toBe(
+      true
+    );
+    expect(isNameConflict(new ApiError(409, 'A folder named "Decks" is already here'))).toBe(true);
+    expect(
+      isNameConflict(
+        new ApiError(409, 'That file is inside the deleted folder "Decks". Restore that first')
+      )
+    ).toBe(false);
+    expect(
+      isNameConflict(new ApiError(409, 'That file sits too deep for its folders to be checked'))
+    ).toBe(false);
+    expect(isNameConflict(new ApiError(404, 'File not found'))).toBe(false);
   });
 
   it('surfaces a refused restore as an error naming the folder in the way', async () => {

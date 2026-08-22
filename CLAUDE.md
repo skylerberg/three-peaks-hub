@@ -196,7 +196,10 @@ card that came back in Canva would hit a 409 nothing could resolve.
 
 Access checks deliberately ignore `deleted_at` — a tombstone's bytes and its
 history are exactly what someone deciding whether to restore it reads first.
-Listings filter it, and the one thing refused on a tombstone is a write.
+Listings filter it, and what a tombstone refuses is a write to its _contents_:
+its name, its folder, or a new version. Purge and restore are writes of their
+own, and so is `PUT /api/models/:fileId`, which stays allowed on one — a
+component's settings are not the file.
 
 **A folder's tombstone is never copied onto its contents.** Visibility is derived
 instead: a row is reachable only while its own `deleted_at` is null _and_ no
@@ -207,6 +210,14 @@ validated by walking that chain rather than by testing one column, because a liv
 folder inside a deleted one is ordinary and a row planted there would be visible
 in no listing and recoverable by no route; and a walk that hits the depth bound
 denies, because an unverified chain is not a clean one.
+
+**That bound puts a cliff at 64 levels of nesting.** Past it every read of the
+chain denies: `GET /directory` answers 404 where the release before this one
+answered 200 with a partial breadcrumb, and creating a folder under a parent that
+deep answers "Parent folder not found" for a parent that plainly exists. It is
+the deliberate trade rather than something to fix by raising
+`MAX_BREADCRUMB_DEPTH`, which would only move it — the alternative is trusting a
+chain nothing has checked, and that is what leaves a deleted subtree browsable.
 
 Tombstoned bytes still count against the quota. They are still stored, and only a
 purge gets them back.

@@ -1,9 +1,21 @@
 import type { components } from '@three-peaks/shared/api';
-import { api, assertOk } from '../api/client.ts';
+import { ApiError, api, assertOk } from '../api/client.ts';
 
 // An entry only ever appears nested in the listing, so the spec has no named
 // component for one; derived rather than restated.
 export type DeletedEntry = components['schemas']['DeletedListing']['entries'][number];
+
+// A restore is refused with 409 for two unrelated reasons, and only one of them
+// is a person's to answer: a sibling has taken the name back. The other is a
+// deleted folder above the row, which no name gets past. The wire carries them
+// apart only in their opening words, so an API test pins that shape.
+export function isNameConflict(error: unknown): error is ApiError {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    /^A (?:file|folder) named /.test(error.message)
+  );
+}
 
 class DeletedStore {
   entries = $state<DeletedEntry[]>([]);

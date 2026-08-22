@@ -132,6 +132,7 @@ export const deletedEntrySchema = type({
   // The folders above it, outermost first; empty at the project root.
   path: 'string',
   content_type: 'string | null',
+  // For a file, what purging it reclaims: every version of it, not the current one.
   byte_size: 'number | null',
   deleted_at: 'string',
   deleted_by: 'string | null',

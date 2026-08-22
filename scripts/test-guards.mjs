@@ -410,6 +410,19 @@ export const guards = [
     testName: 'purging a folder reclaims the objects of a tombstone inside it',
   },
   {
+    name: 'a purge walks through the deleted folders inside what it is reclaiming',
+    package: 'api',
+    file: 'src/routes/files.ts',
+    // The same plausible edit as the guard above, one construct higher, and it
+    // leaks strictly more: the cascade still takes every row under a deleted
+    // folder, so their objects are left with nothing naming them at all.
+    find: "              .select(['f.id as id'])",
+    replace:
+      "              .select(['f.id as id'])\n              .where('f.deleted_at', 'is', null)",
+    tests: ['tests/e2e/softDelete.test.ts'],
+    testName: 'purging a folder reclaims the objects of a tombstone inside it',
+  },
+  {
     name: 'a superseded deleted listing cannot overwrite a newer one',
     package: 'web',
     file: 'src/lib/deleted.svelte.ts',
