@@ -3,6 +3,7 @@
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
   import Deck from './routes/Deck.svelte';
+  import DeckImport from './routes/DeckImport.svelte';
   import Decks from './routes/Decks.svelte';
   import Deleted from './routes/Deleted.svelte';
   import FileVersions from './routes/FileVersions.svelte';
@@ -16,6 +17,7 @@
   import Projects from './routes/Projects.svelte';
   import ResetPassword from './routes/ResetPassword.svelte';
   import Signup from './routes/Signup.svelte';
+  import { deckImports } from './lib/deckImports.svelte.ts';
   import { decks } from './lib/decks.svelte.ts';
   import { deleted } from './lib/deleted.svelte.ts';
   import { files } from './lib/files.svelte.ts';
@@ -53,6 +55,7 @@
       projects.reset();
       files.reset();
       decks.reset();
+      deckImports.reset();
       deleted.reset();
       models.reset();
       versions.reset();
@@ -102,6 +105,8 @@
       <Decks projectId={route.params.projectId} />
     {:else if route.name === 'deck'}
       <Deck projectId={route.params.projectId} deckId={route.params.deckId} />
+    {:else if route.name === 'deck-import'}
+      <DeckImport projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'print'}
       <Print projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'model'}

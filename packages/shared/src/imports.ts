@@ -11,6 +11,18 @@ export const IMPORT_MATCHED_BY = ['identity', 'page_number'] as const;
 
 export const IMPORT_TITLE_MAX_LENGTH = 200;
 
+// What the API keeps when it is handed the name of an export: trimmed, cut to
+// the length above, and nothing at all when that leaves it empty. A run's label
+// is compared against the file offered to resume it, and the comparison is only
+// ever between two strings that have been through here -- a raw `File.name` is
+// the one the server never stored. Trimming precedes the cut, or a name cut
+// mid-space carries that space and the two sides differ by it.
+export function normalizeSourceLabel(label: string | null | undefined): string | null {
+  if (label === null || label === undefined) return null;
+  const trimmed = label.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, IMPORT_TITLE_MAX_LENGTH);
+}
+
 // What a run did, cached on the row and derived again on every read.
 export interface ImportRunSummary {
   pages: number;

@@ -474,4 +474,235 @@ export const guards = [
     tests: ['tests/e2e/decks.test.ts'],
     testName: 'refuses a viewer editing the cards with 403',
   },
+  {
+    // The route answers 404 for a deck that is not bound at all, which is not
+    // the same 404 as a deck nobody may read.
+    name: 'a deck with no import is offered a binding, not an error',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '      if (caught instanceof ApiError && caught.status === 404) {',
+    replace: '      if (false) {',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'treats a 404 from the binding route as a deck that is not bound yet',
+    runner: 'web',
+  },
+  {
+    name: 'a superseded binding load does not overwrite a newer one',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '      if (generation !== this.#bindingGeneration) return;',
+    replace: '      if (false) return;',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'discards a binding response that a newer request has already superseded',
+    runner: 'web',
+  },
+  {
+    // Info-ZIP and ditto both write a longer extra field locally than they
+    // record centrally, and the bytes that puts the read out by inflate fine.
+    name: "an entry's data offset comes from its own local header",
+    package: 'web',
+    file: 'src/lib/canva/zip.ts',
+    find: '          view.getUint16(localOffset + 28, true);',
+    replace: '          extraLength;',
+    tests: ['src/lib/canva/zip.test.ts'],
+    testName: "reads each entry's data offset from its own local header",
+    runner: 'web',
+  },
+  {
+    // Passing the export's own numbers through leaves a gap where a page was
+    // deleted in Canva, and the manifest is refused with a 422 nothing on the
+    // screen can act on.
+    name: "an export's pages are renumbered 1..n, not passed through",
+    package: 'web',
+    file: 'src/lib/canva/pages.ts',
+    find: '    page_number: index + 1,',
+    replace: '    page_number: page.parsedNumber ?? index + 1,',
+    tests: ['src/lib/canva/pages.test.ts'],
+    testName: 'numbers the pages 1..n even when the export skips one',
+    runner: 'web',
+  },
+  {
+    // Inflating first pays for the very bytes being refused, and the size was
+    // in hand before any of them were read.
+    name: 'an oversized page is refused on the size the directory declares',
+    package: 'web',
+    file: 'src/lib/canva/pages.ts',
+    find: '    if (entry.uncompressedSize > MAX_UPLOAD_BYTES) {',
+    replace: '    if (false) {',
+    tests: ['src/lib/canva/pages.test.ts'],
+    testName: 'refuses an oversized page on the size the directory declares',
+    runner: 'web',
+  },
+  {
+    // Version-needed 4.6 and 6.3 are BZIP2 and LZMA, so leaving the method to
+    // the ZIP64 test refuses those archives for a format they do not use.
+    name: 'a method this cannot read is named rather than blamed on ZIP64',
+    package: 'web',
+    file: 'src/lib/canva/zip.ts',
+    find: '    if (method !== 0 && method !== 8) {',
+    replace: '    if (false) {',
+    tests: ['src/lib/canva/zip.test.ts'],
+    testName: 'names the compression method for the versions APPNOTE gives',
+    runner: 'web',
+  },
+  {
+    // Bytes that disagree with the directory are a page's artwork, versioned
+    // over a real card by the import that follows.
+    name: "an entry's bytes are reconciled against the directory",
+    package: 'web',
+    file: 'src/lib/canva/zip.ts',
+    find: '        return reconciled(name, out, uncompressedSize, crc);',
+    replace: '        return out;',
+    tests: ['src/lib/canva/zip.test.ts'],
+    testName: 'refuses an entry whose bytes do not match the central directory checksum',
+    runner: 'web',
+  },
+  {
+    // The binding was read before this session's run existed, so the only id
+    // that can discard a plan nobody confirmed is the one the store holds.
+    name: 'a plan can be discarded by whoever just made it',
+    package: 'web',
+    file: 'src/routes/DeckImport.svelte',
+    find: '  const openRunId = $derived(startedRunId ?? knownRunId);',
+    replace: '  const openRunId = $derived(knownRunId);',
+    tests: ['src/routes/DeckImport.svelte.test.ts'],
+    testName: 'discards the run this session has just started',
+    runner: 'web',
+  },
+  {
+    // One store, and an unconfirmed plan deliberately outlives the screen.
+    name: 'a plan belongs to the deck it was made for',
+    package: 'web',
+    file: 'src/routes/DeckImport.svelte',
+    find: '  const plan = $derived(ours ? deckImports.plan : null);',
+    replace: '  const plan = $derived(deckImports.plan);',
+    tests: ['src/routes/DeckImport.svelte.test.ts'],
+    testName: 'does not offer one deck',
+    runner: 'web',
+  },
+  {
+    name: 'the store refuses to upload a plan made for another deck',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '    if (!run || !pages || this.runDeckId !== deckId) return;',
+    replace: '    if (!run || !pages) return;',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'will not confirm a plan that belongs to another deck',
+    runner: 'web',
+  },
+  {
+    // Choosing a file mid-upload starts a second run and abandons the first.
+    name: 'the export picker is gone while pages are going up',
+    package: 'web',
+    file: 'src/routes/DeckImport.svelte',
+    find: '      {#if binding?.folder_id && !openRunId && !busy}',
+    replace: '      {#if binding?.folder_id}',
+    tests: ['src/routes/DeckImport.svelte.test.ts'],
+    testName: 'takes the export picker away while pages are going up',
+    runner: 'web',
+  },
+  {
+    // The run numbers its pages from the manifest it opened with, so another
+    // export resumed into it writes its artwork onto these cards.
+    name: 'a resume is checked against the export the run named',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '      if (label !== null && normalizeSourceLabel(label) !== offered) {',
+    replace: '      if (false) {',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'refuses to resume a run with an export that is not the one it started from',
+    runner: 'web',
+  },
+  {
+    // The label the server kept went through a trim and a cut to the title
+    // limit, and the file offered to resume has been through neither.
+    name: 'a resume compares two labels the server would store',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '      if (label !== null && normalizeSourceLabel(label) !== offered) {',
+    replace: '      if (label !== null && label !== file.name) {',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'resumes when the run holds this file',
+    runner: 'web',
+  },
+  {
+    name: 'the manifest is sent the label the server will keep',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '            source_label: normalizeSourceLabel(this.#file?.name),',
+    replace: '            source_label: this.#file?.name ?? null,',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'starts the run with the label the server will keep',
+    runner: 'web',
+  },
+  {
+    // Canva names an export after the design it came from, so the name alone
+    // cannot tell a re-export after an edit from the file the run opened with.
+    name: 'a resume is checked against the shape of the export too',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find: '    if (pages.length !== planned) {',
+    replace: '    if (false) {',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'refuses to resume an export that is not the length',
+    runner: 'web',
+  },
+  {
+    // The screens are not remounted when the deck in the URL changes, so the
+    // binding left in the store is read as the next deck's, open run and all.
+    name: 'a binding belongs to the deck it was read for',
+    package: 'web',
+    file: 'src/lib/deckImports.svelte.ts',
+    find:
+      '    this.bindingDeckId = null;\n' +
+      '    this.binding = null;\n' +
+      '    this.folderName = null;\n',
+    replace: '',
+    tests: ['src/lib/deckImports.svelte.test.ts'],
+    testName: 'drops the previous deck',
+    runner: 'web',
+  },
+  {
+    // Unbinding is not a way out either: the refusal asks about the cards, not
+    // about the old folder id, so it stands after an unbind.
+    name: 'the folder copy names only a remedy that exists',
+    package: 'web',
+    file: 'src/routes/DeckImport.svelte',
+    find: '                them there, otherwise choosing another folder is refused.',
+    replace:
+      '                them there, or unbind this deck, otherwise choosing another folder is\n' +
+      '                refused.',
+    tests: ['src/routes/DeckImport.svelte.test.ts'],
+    testName: 'offers no remedy the screen has no control for',
+    runner: 'web',
+  },
+  {
+    // The count alone cannot say which card is about to be tombstoned, and the
+    // plan is the only place that can be seen coming.
+    name: 'the plan names the card each page overwrites',
+    package: 'web',
+    file: 'src/routes/DeckImport.svelte',
+    find: '                {:else if page.name}',
+    replace: '                {:else if false}',
+    tests: ['src/routes/DeckImport.svelte.test.ts'],
+    testName: 'names the card each page will write a new version of',
+    runner: 'web',
+  },
+  {
+    // One event per imported page, project-wide: a fifty-page run reloads the
+    // deck fifty times for everyone sitting on it.
+    name: 'a burst of realtime events reloads the deck once',
+    package: 'web',
+    file: 'src/routes/Deck.svelte',
+    find:
+      '      if (pending) clearTimeout(pending);\n' +
+      '      pending = setTimeout(() => {\n' +
+      '        pending = null;\n' +
+      '        void decks.refreshDeck().catch(() => {});\n' +
+      '      }, REFRESH_COALESCE_MS);',
+    replace: '      void decks.refreshDeck().catch(() => {});',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'reloads the deck once for a burst of realtime events',
+    runner: 'web',
+  },
 ];

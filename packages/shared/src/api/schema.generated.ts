@@ -653,7 +653,7 @@ export interface paths {
     put?: never;
     /**
      * Start an import run
-     * @description Takes the whole export up front — every page number and title — and answers with the plan it computed: which pages land on cards that already exist, which are new, and how many cards the export has stopped having. Nothing is matched again while the pages upload. One run at a time per deck; a second answers 409 and names the open one, which is the only route back to abandoning it.
+     * @description Takes the whole export up front — every page number and title — and answers with the plan it computed: which pages land on cards that already exist, which are new, and which cards the export has stopped having, by name. Nothing is matched again while the pages upload. One run at a time per deck; a second answers 409 and names the open one, which is the only route back to abandoning it.
      */
     post: operations['postApiDecksByDeckIdImportRuns'];
     delete?: never;
@@ -1120,10 +1120,14 @@ export interface components {
           /** @enum {unknown} */
           action: 'add' | 'update';
           matched_by: string | null;
+          name: string | null;
           page_number: number;
           title: string | null;
         }[];
-        removed: number;
+        removed: {
+          file_id: string;
+          name: string;
+        }[];
         updated: number;
       };
       source_label: string | null;

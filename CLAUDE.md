@@ -367,6 +367,61 @@ pays for and `apps/api` gains no PDF dependency.
   still a specifier Vite must resolve, so without the alias the build fails on a
   branch that cannot run.
 
+## Importing a Canva export
+
+`/projects/:projectId/decks/:deckId/import` reads the export **in the browser**
+and posts one page at a time. There is no ZIP dependency: `apps/web/src/lib/canva/`
+walks the central directory itself, because `DecompressionStream('deflate-raw')`
+is in every browser this targets — and `minimumReleaseAgeStrict` would refuse a
+freshly published package anyway.
+
+- **An entry's method, its sizes and its crc are read from the central
+  directory.** The local header is consulted for one thing only, where the data
+  begins: the two records disagree about how long the extra field is, and macOS
+  `ditto` leaves the sizes to a data descriptor it never writes into the header.
+- **Page numbers are reassigned before the manifest goes up.** A deleted Canva
+  page leaves a gap, and the run refuses anything but a contiguous list. The cost
+  lands on untitled pages, which are identified by number: one after the gap
+  moves onto the card the page before it made. A titled page is unaffected, and
+  the plan says per row which of the two matched it.
+- **The plan names the cards it is about to remove**: `removed` is
+  `{ file_id, name }[]` rather than a count, and each page carries the name of
+  the card it matched. Tombstoning artwork is the destructive half of a
+  re-import, and the confirmation step is the only place it can be seen coming.
+  Do not work that list out in the browser by diffing the deck against the plan:
+  the server's matching includes a tie-break nothing here can see.
+- **One store drives every deck's import, so every value in it carries the deck
+  it is for.** `runDeckId` scopes the run, the plan and the summary;
+  `bindingDeckId` scopes the binding and its folder name. The route block is not
+  keyed, so moving between two decks' screens swaps the props on the screen
+  already mounted: nothing unmounts and nothing resets. A plan nobody has
+  confirmed deliberately outlives the screen that made it — a run in flight has
+  to — and the next deck's screen would otherwise adopt it and upload into the
+  first deck, or offer to discard a run belonging to the deck just left.
+- **Resuming checks the export's name and its page count, before a page goes
+  up.** The run numbers its pages from the manifest it opened with, so a
+  different export replayed into it lands that artwork on these cards, under
+  those numbers. The name alone does not settle it: Canva names an export after
+  the design, so a second export taken after an edit arrives under the name the
+  run already holds. Both ends of the name comparison go through
+  `normalizeSourceLabel` in `packages/shared/src/imports.ts`, because the label
+  was stored through the trim-and-truncate every text field gets and a raw
+  `File.name` is what the server never saw.
+- **`GET /api/decks/:deckId/import` answers 404 for an unbound deck.** On that
+  one route a 404 is an invitation to pick a folder, not an error worth showing.
+- **Pages go up one at a time.** Each request asserts the storage quota, so a
+  parallel burst can have every one of them pass a check the set of them fails.
+- Nothing is uploaded until someone has read the plan and pressed Import.
+  Re-importing tombstones the cards the export has stopped having, which is too
+  destructive to happen on a drop.
+
+`check:canva-import` is the only thing that reads a whole round trip. Its
+fixture is built to reach two traps a unit test can build but not carry all the
+way to a deck: the local and central extra fields are deliberately different
+lengths, and the one non-ASCII entry name is UTF-8 with the flag left clear.
+Then it imports the same export twice, and the second pass must leave every card
+on the version it already had.
+
 # Running things
 
 ```sh

@@ -112,12 +112,23 @@ export const importPlanPageSchema = type({
   title: 'string | null',
   action: "'add' | 'update'",
   matched_by: 'string | null',
+  // The card this page matched, as it is named right now, and null for a page
+  // the plan calls new. What the file will be called afterwards is the page's
+  // own title, which the caller already has.
+  name: 'string | null',
+});
+
+// A card the export has stopped having, named rather than counted: this is the
+// destructive half of the plan and the only chance to see it before it happens.
+export const importPlanRemovalSchema = type({
+  file_id: 'string',
+  name: 'string',
 });
 
 export const importRunPlanSchema = type({
   added: 'number',
   updated: 'number',
-  removed: 'number',
+  removed: importPlanRemovalSchema.array(),
   pages: importPlanPageSchema.array(),
 });
 
