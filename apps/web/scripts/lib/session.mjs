@@ -25,8 +25,13 @@ const APP_NAME = 'three-peaks-hub';
  * and the third -- something is there and it is not this build -- is a failure
  * wherever it happens. Skipping that one would report a pass for a gate that
  * measured nothing; proceeding is the fifteen-second mystery this replaces.
+ *
+ * `also` names the routes one probe needs and the others do not, in the same
+ * `[method, path]` shape. They belong to the caller rather than to the shared
+ * list: a route only one probe drives should fail in that probe, by name, and
+ * not make every other one refuse an API that serves them perfectly well.
  */
-export async function inspectApi(api) {
+export async function inspectApi(api, also = []) {
   let root;
   try {
     root = await fetch(`${api}/`);
@@ -52,7 +57,7 @@ export async function inspectApi(api) {
 
   const response = await fetch(`${api}/api/openapi.json`);
   const spec = response.ok ? await response.json().catch(() => ({})) : {};
-  const missing = REQUIRED_PATHS.filter(
+  const missing = [...REQUIRED_PATHS, ...also].filter(
     ([method, path]) => spec.paths?.[path]?.[method] === undefined
   );
   if (missing.length > 0) {

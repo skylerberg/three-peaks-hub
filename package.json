@@ -39,6 +39,7 @@
     "check:upload": "pnpm --filter @three-peaks/web run check:upload",
     "check:model3d": "pnpm --filter @three-peaks/web run check:model3d",
     "check:print": "pnpm --filter @three-peaks/web run check:print",
+    "check:canva-import": "pnpm --filter @three-peaks/web run check:canva-import",
     "check:dockerfiles": "node scripts/check-dockerfiles.mjs",
     "check:k8s": "node scripts/check-k8s.mjs"
   },

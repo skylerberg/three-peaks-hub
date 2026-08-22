@@ -51,6 +51,19 @@ class FileStore {
     await this.load(this.listing.project_id, this.listing.folder?.id ?? null);
   }
 
+  // One folder, read without disturbing the listing the explorer is showing:
+  // the import screen resolves the folder its deck is bound to while the
+  // explorer may be sitting somewhere else entirely.
+  async readDirectory(projectId: string, folderId: string | null): Promise<DirectoryListing> {
+    return assertOk(
+      await api.GET('/api/files/directory', {
+        params: {
+          query: { project_id: projectId, ...(folderId ? { folder_id: folderId } : {}) },
+        },
+      })
+    );
+  }
+
   async upload(projectId: string, folderId: string | null, file: File): Promise<void> {
     const key = `${file.name}-${crypto.randomUUID()}`;
     this.pending = [...this.pending, { key, filename: file.name }];

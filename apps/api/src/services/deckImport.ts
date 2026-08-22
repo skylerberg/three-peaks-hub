@@ -425,12 +425,20 @@ interface RunPlanPage {
   title: string | null;
   action: 'add' | 'update';
   matched_by: string | null;
+  name: string | null;
+}
+
+// Named, not counted: the confirmation step exists to say which artwork a
+// re-import is about to tombstone, and a bare number cannot.
+interface RunPlanRemoval {
+  file_id: string;
+  name: string;
 }
 
 interface RunPlan {
   added: number;
   updated: number;
-  removed: number;
+  removed: RunPlanRemoval[];
   pages: RunPlanPage[];
 }
 
@@ -443,6 +451,8 @@ export interface StartedRun extends SerializedRun {
 // tombstone -- and a tombstone is what a returning card is found as.
 interface MappingRow {
   card_id: string;
+  file_id: string;
+  filename: string;
   identity_key: string;
   page_number: number;
   added_to_deck_at: Date | string | null;
@@ -455,6 +465,7 @@ interface PlannedPage {
   cardId: string;
   matchedBy: 'identity' | 'page_number' | null;
   identityKey: string;
+  name: string | null;
 }
 
 // Numbered 1..n, each exactly once. That is what an export is, and it is what
@@ -480,6 +491,8 @@ async function readLiveMapping(
     .innerJoin('file', 'file.id', 'deck_import_card.file_id')
     .select([
       'deck_import_card.id as card_id',
+      'deck_import_card.file_id as file_id',
+      'file.filename as filename',
       'deck_import_card.identity_key as identity_key',
       'deck_import_card.page_number as page_number',
       'deck_import_card.added_to_deck_at as added_to_deck_at',
@@ -551,6 +564,7 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
       cardId: match?.row.card_id ?? newId(),
       matchedBy: match?.matchedBy ?? null,
       identityKey: keys[index],
+      name: match?.row.filename ?? null,
     };
   });
 
@@ -575,12 +589,15 @@ function summarizePlan(planned: PlannedPage[], mapping: MappingRow[]): RunPlan {
   return {
     added,
     updated: planned.length - added,
-    removed: mapping.filter((row) => !claimed.has(row.card_id) && row.file_live).length,
+    removed: mapping
+      .filter((row) => !claimed.has(row.card_id) && row.file_live)
+      .map((row) => ({ file_id: row.file_id, name: row.filename })),
     pages: planned.map((page) => ({
       page_number: page.pageNumber,
       title: page.title,
       action: page.matchedBy === null ? 'add' : 'update',
       matched_by: page.matchedBy,
+      name: page.name,
     })),
   };
 }

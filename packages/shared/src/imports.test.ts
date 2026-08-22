@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { IMPORT_TITLE_MAX_LENGTH, deckIdentityKey, deckPageFilename } from './imports.ts';
+import {
+  IMPORT_TITLE_MAX_LENGTH,
+  deckIdentityKey,
+  deckPageFilename,
+  normalizeSourceLabel,
+} from './imports.ts';
 
 describe('deckIdentityKey', () => {
   it('gives a composed and a decomposed title the same key', () => {
@@ -45,5 +50,38 @@ describe('deckPageFilename', () => {
   it('leaves room for the suffix a taken name gets', () => {
     const name = deckPageFilename(9, 'x'.repeat(400), 'png');
     expect(name.length).toBeLessThanOrEqual(255 - 6);
+  });
+});
+
+describe('normalizeSourceLabel', () => {
+  it('leaves an ordinary export name alone', () => {
+    expect(normalizeSourceLabel('Base game.zip')).toBe('Base game.zip');
+  });
+
+  it('trims, so a padded name and the label stored from it are one value', () => {
+    expect(normalizeSourceLabel('  Base game.zip  ')).toBe('Base game.zip');
+  });
+
+  it('truncates to the length the label column takes', () => {
+    const name = `${'a'.repeat(IMPORT_TITLE_MAX_LENGTH)}.zip`;
+    expect(normalizeSourceLabel(name)).toBe(name.slice(0, IMPORT_TITLE_MAX_LENGTH));
+  });
+
+  // Trimming after truncating would leave the space a cut in the middle of one
+  // exposes, and the two sides would disagree by exactly that.
+  it('trims before it truncates', () => {
+    const name = ` ${'a'.repeat(IMPORT_TITLE_MAX_LENGTH + 5)}`;
+    expect(normalizeSourceLabel(name)).toBe('a'.repeat(IMPORT_TITLE_MAX_LENGTH));
+  });
+
+  it('reads a name that is nothing but whitespace as no label at all', () => {
+    expect(normalizeSourceLabel('   ')).toBeNull();
+    expect(normalizeSourceLabel(null)).toBeNull();
+    expect(normalizeSourceLabel(undefined)).toBeNull();
+  });
+
+  it('is idempotent, so a stored label folds to itself', () => {
+    const once = normalizeSourceLabel(` ${'b'.repeat(400)} `);
+    expect(normalizeSourceLabel(once)).toBe(once);
   });
 });

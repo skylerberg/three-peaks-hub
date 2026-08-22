@@ -9,6 +9,7 @@ export type Route =
   | { name: 'deleted'; params: { projectId: string } }
   | { name: 'decks'; params: { projectId: string } }
   | { name: 'deck'; params: { projectId: string; deckId: string } }
+  | { name: 'deck-import'; params: { projectId: string; deckId: string } }
   | { name: 'print'; params: { projectId: string; deckId: string | null } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
   | { name: 'versions'; params: { projectId: string; fileId: string } }
@@ -40,6 +41,11 @@ export function matchRoute(path: string, search = ''): Route {
 
   const deleted = new RegExp(`^/projects/(${UUID})/deleted$`).exec(clean);
   if (deleted) return { name: 'deleted', params: { projectId: deleted[1] } };
+
+  const deckImport = new RegExp(`^/projects/(${UUID})/decks/(${UUID})/import$`).exec(clean);
+  if (deckImport) {
+    return { name: 'deck-import', params: { projectId: deckImport[1], deckId: deckImport[2] } };
+  }
 
   const deck = new RegExp(`^/projects/(${UUID})/decks/(${UUID})$`).exec(clean);
   if (deck) return { name: 'deck', params: { projectId: deck[1], deckId: deck[2] } };

@@ -43,6 +43,7 @@ const SCREENS = [
   { name: 'file-versions', authed: true, reach: reachFileVersions },
   { name: 'deleted', authed: true, reach: reachDeleted },
   { name: 'deck-editor', authed: true, reach: reachDeckEditor },
+  { name: 'deck-import', authed: true, reach: reachDeckImport },
   { name: 'print', authed: true, reach: reachPrint },
 ];
 
@@ -128,6 +129,18 @@ async function reachDeckEditor(browser, base, scheme) {
   await browser.page.waitForSelector('button:has-text("Add every image here")', {
     timeout: 15_000,
   });
+}
+
+// The import screen with its folder picker open: a file input, a breadcrumb of
+// buttons and a form that names a new folder, none of which the deck editor has.
+async function reachDeckImport(browser, base, scheme) {
+  await reachDeckEditor(browser, base, `import-${scheme}`);
+  await browser.click('a:has-text("Import from Canva")');
+  await browser.page.waitForSelector('button:has-text("Choose a folder")', { timeout: 15_000 });
+  await browser.click('button:has-text("Choose a folder")');
+  await browser.page.waitForSelector('button:has-text("Use this folder")', { timeout: 15_000 });
+  await browser.click('button:has-text("New folder")');
+  await browser.page.waitForSelector('button:has-text("Create")', { timeout: 15_000 });
 }
 
 async function reachPrint(browser, base, scheme) {

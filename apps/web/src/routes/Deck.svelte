@@ -16,6 +16,7 @@
   import Input from '../components/ui/Input.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
+  import { deckImports } from '../lib/deckImports.svelte.ts';
   import { type DeckCard, decks } from '../lib/decks.svelte.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
   import { link } from '../lib/router.svelte.ts';
@@ -41,9 +42,16 @@
   const [minQuantity, maxQuantity] = DECK_QUANTITY_LIMITS;
   const limits = MODEL_LIMITS.card;
   const uid = $props.id();
+  const REFRESH_COALESCE_MS = 300;
 
   const presetId = $derived(deck ? (matchingCardPreset(deckCardSize(deck))?.id ?? '') : '');
   const totalCopies = $derived(cards.reduce((sum, card) => sum + card.quantity, 0));
+  const importStatus = $derived.by(() => {
+    if (deckImports.binding?.open_run_id) return 'An import is open.';
+    if (deckImports.folderName) return `Artwork lands in ${deckImports.folderName}.`;
+    if (deckImports.binding?.folder_id) return 'The folder this deck imported into is gone.';
+    return 'Not set up yet.';
+  });
 
   $effect(() => {
     const id = deckId;
@@ -100,14 +108,28 @@
   $effect(() => {
     const id = projectId;
     realtime.subscribe(id);
+    // Coalesced on a trailing edge: an import publishes one file event per page,
+    // so a fifty-page run would otherwise reload this deck fifty times over.
+    let pending: ReturnType<typeof setTimeout> | null = null;
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
-      void decks.refreshDeck().catch(() => {});
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        void decks.refreshDeck().catch(() => {});
+      }, REFRESH_COALESCE_MS);
     });
     return () => {
+      if (pending) clearTimeout(pending);
       off();
       realtime.unsubscribe(id);
     };
+  });
+
+  $effect(() => {
+    const project = projectId;
+    const id = deckId;
+    void deckImports.loadBinding(project, id).catch(() => {});
   });
 
   function asInput(list: readonly DeckCard[]) {
@@ -299,6 +321,22 @@
         <FilePicker {projectId} onpick={chooseBack} oncancel={() => (picking = null)} />
       {/if}
     </section>
+
+    {#if canEdit}
+      <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
+        <h2 class="text-lg font-semibold">Import from Canva</h2>
+        <p class="text-sm text-muted">{importStatus}</p>
+        <div>
+          <a
+            class="focus-ring inline-flex min-h-11 items-center rounded-md border border-edge px-4
+                   text-sm font-medium hover:bg-accent-soft"
+            href="/projects/{projectId}/decks/{deckId}/import"
+          >
+            Import from Canva
+          </a>
+        </div>
+      </section>
+    {/if}
 
     <section class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-2">

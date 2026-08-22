@@ -158,7 +158,7 @@ deckImportsRouter.post(
     tags: ['Deck imports'],
     summary: 'Start an import run',
     description:
-      'Takes the whole export up front — every page number and title — and answers with the plan it computed: which pages land on cards that already exist, which are new, and how many cards the export has stopped having. Nothing is matched again while the pages upload. One run at a time per deck; a second answers 409 and names the open one, which is the only route back to abandoning it.',
+      'Takes the whole export up front — every page number and title — and answers with the plan it computed: which pages land on cards that already exist, which are new, and which cards the export has stopped having, by name. Nothing is matched again while the pages upload. One run at a time per deck; a second answers 409 and names the open one, which is the only route back to abandoning it.',
     security: [{ bearerAuth: [] }],
     responses: {
       201: {

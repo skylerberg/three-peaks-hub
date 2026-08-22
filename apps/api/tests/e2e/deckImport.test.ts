@@ -52,6 +52,23 @@ interface Run {
   counts: RunCounts;
 }
 
+interface PlanPage {
+  page_number: number;
+  title: string | null;
+  action: string;
+  matched_by: string | null;
+  name: string | null;
+}
+
+interface StartedRun extends Run {
+  plan: {
+    added: number;
+    updated: number;
+    removed: { file_id: string; name: string }[];
+    pages: PlanPage[];
+  };
+}
+
 interface RunCard {
   page_number: number | null;
   outcome: string;
@@ -139,10 +156,14 @@ describe('deck imports', () => {
     });
   }
 
-  async function openRun(deckId: string, pageCount: number, pages: Page[] = []): Promise<Run> {
+  async function openRun(
+    deckId: string,
+    pageCount: number,
+    pages: Page[] = []
+  ): Promise<StartedRun> {
     const res = await startRun(deckId, pageCount, owner, pages);
     expect(res.status).toBe(201);
-    return (await res.json()) as Run;
+    return (await res.json()) as StartedRun;
   }
 
   function postPage(
@@ -615,6 +636,36 @@ describe('deck imports', () => {
         first.pages.get(1)!.file_id,
         first.pages.get(2)!.file_id,
       ]);
+    });
+
+    it('names the card it is about to remove, before a single page is uploaded', async () => {
+      const { deckId } = await scenario('named-removal');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+        { title: 'Gamma', bytes: png('gamma') },
+      ]);
+
+      // Delta first, so the two titles that survive move down a page and the
+      // page-number fallback has nothing left to give Delta.
+      const run = await openRun(deckId, 3, [
+        { title: 'Delta', bytes: png('delta') },
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+
+      expect(run.plan.removed).toEqual([
+        { file_id: first.pages.get(3)!.file_id, name: '3 - Gamma.png' },
+      ]);
+      // A page that lands on a card says which one; a new page has none to say.
+      expect(run.plan.pages.map((page) => page.name)).toEqual([
+        null,
+        '1 - Alpha.png',
+        '2 - Beta.png',
+      ]);
+      expect((await abandon(run.id)).status).toBe(200);
+      // Nothing was tombstoned by reading the plan.
+      expect((await readFile(first.pages.get(3)!.file_id!)).body.deleted_at).toBeNull();
     });
 
     it('restores the card when it comes back instead of adding a second one', async () => {
