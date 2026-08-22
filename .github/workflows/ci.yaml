@@ -38,6 +38,10 @@ jobs:
             || { echo '::error::The generated client is stale. Run `pnpm run generate` and commit the result.'; exit 1; }
 
       - run: pnpm run check:comments
+      # Fails if any check:* script is run by neither check:all nor a workflow.
+      # This job is a hand-copy of check:all, so it is exactly the list that
+      # drifts.
+      - run: pnpm run check:scripts
       # Catches a COPY the .dockerignore excludes, which otherwise only an
       # actual image build can see -- and does so before the images job spends
       # a build on it.
@@ -130,6 +134,86 @@ jobs:
       - run: pnpm --filter @three-peaks/shared test
       - run: pnpm --filter @three-peaks/web test
       - run: pnpm --filter @three-peaks/web run build
+
+  # The browser probes, and the only job with an API to drive. They cover what
+  # nothing else can: a real file picker, a real WebGL canvas, and axe against a
+  # screen that only exists behind a session. Each one skips locally when no API
+  # answers and fails here instead, so this job is what makes that promise mean
+  # something -- for a year they ran nowhere and the promise was decorative.
+  probes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: three_peaks_hub
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @three-peaks/web exec playwright install --with-deps chromium
+
+      # The probes drive the app the way a person does, so this is the real
+      # server against a real database, not the test harness.
+      - name: Write apps/api/.env
+        run: |
+          cat > apps/api/.env <<'EOF'
+          PORT=3001
+          ENVIRONMENT=development
+          DB_HOSTNAME=127.0.0.1
+          DB_PORT=5432
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_DATABASE=three_peaks_hub
+          DB_POOL_MAX=10
+          STORAGE_DRIVER=disk
+          STORAGE_DISK_ROOT=./data/uploads
+          CORS_ORIGINS=http://localhost:5173
+          APP_URL_BASE=http://localhost:5173
+          PASSWORD_RESET_SECRET=ci-only-password-reset-secret
+          EMAIL_DRIVER=console
+          TRUST_PROXY=false
+          TRUST_PROXY_HOPS=1
+          EOF
+
+      - run: pnpm run migrate
+
+      - name: Start the API
+        run: pnpm run dev:api > /tmp/api.log 2>&1 &
+
+      # /health reaches the database, so waiting for it also waits out the
+      # connection coming up -- and a server that never bound fails here rather
+      # than as a pile of timeouts inside the probes.
+      - name: Wait for the API
+        run: |
+          for _ in $(seq 60); do
+            if curl -fsS http://localhost:3001/health > /dev/null; then
+              curl -sS http://localhost:3001/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::The API never became healthy" >&2
+          cat /tmp/api.log >&2
+          exit 1
+
+      - run: pnpm run check:upload
+      - run: pnpm run check:model3d
+      - run: pnpm run check:a11y
 
   # Mutation testing: every guard names a bug and the edit that puts it back,
   # and the named tests must FAIL with that edit in place. A guard whose tests

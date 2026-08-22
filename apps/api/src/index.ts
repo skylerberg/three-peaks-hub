@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { compress } from 'hono/compress';
 import { secureHeaders } from 'hono/secure-headers';
+import { buildInfo } from './config/buildInfo.ts';
 import { assertEmailConfig, assertProxyConfig, assertStorageConfig, env } from './config/env.ts';
 import { authMiddleware, skipAuth } from './middleware/auth.ts';
 import { corsMiddleware } from './middleware/cors.ts';
@@ -10,12 +11,14 @@ import { transactionMiddleware } from './middleware/transaction.ts';
 import { authRouter, publicAuthRouter } from './routes/auth.ts';
 import { docsRouter } from './routes/docs.ts';
 import { filesRouter } from './routes/files.ts';
+import { healthCheck } from './routes/health.ts';
 import { modelsRouter } from './routes/models.ts';
 import { projectsRouter } from './routes/projects.ts';
 import { openApiSpec } from './spec/openapi.ts';
 import { attachRealtime, realtimeEventsDocument, startBus } from './services/realtime/index.ts';
 import { assertPublicRoutes } from './utils/assert-public-routes.ts';
 import { logger } from './utils/logger.ts';
+import { startupFailureMessage } from './utils/serverStartup.ts';
 import type { Variables } from './types/index.ts';
 
 // Fail the boot rather than the request. Each of these misconfigurations is
@@ -42,8 +45,8 @@ app.use('*', async (c, next) => {
 app.use('*', transactionMiddleware);
 app.use('*', authMiddleware);
 
-app.get('/', skipAuth, (c) => c.json({ name: 'three-peaks-hub', status: 'ok' }));
-app.get('/health', skipAuth, (c) => c.json({ status: 'ok' }));
+app.get('/', skipAuth, healthCheck);
+app.get('/health', skipAuth, healthCheck);
 
 app.get('/api/openapi.json', skipAuth, async (c) => c.json(await openApiSpec()));
 // A second document, because /ws has no HTTP request or response the OpenAPI
@@ -70,7 +73,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   await startBus();
 
   const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
-    logger.info(`listening on :${info.port}`, { environment: env.environment });
+    const build = buildInfo();
+    logger.info(`listening on :${info.port}`, {
+      environment: env.environment,
+      branch: build.branch,
+      commit: build.commit,
+    });
+  });
+
+  // Without this the process stays up under --watch with nothing bound, and the
+  // port answers from whoever already owns it.
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    logger.error(startupFailureMessage(error, env.port));
+    process.exit(1);
   });
 
   // /ws rides the raw HTTP upgrade on the same server, so it is same-origin with

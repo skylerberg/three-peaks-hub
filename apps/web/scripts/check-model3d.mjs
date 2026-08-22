@@ -20,6 +20,10 @@ const PORT = Number(process.env.MODEL_PROBE_PORT ?? 5230);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
 const selftest = process.argv.includes('--selftest');
 
+// Building the model, serialising four generated textures into a .glb and
+// uploading it, on a machine that may be rendering the preview in software.
+const SAVE_TIMEOUT_MS = 120_000;
+
 const failures = [];
 function check(name, condition, detail = '') {
   if (condition) {
@@ -152,6 +156,15 @@ async function run() {
     return 0;
   }
 
+  // A build that throws inside the dynamic import or the exporter rejects a
+  // promise nothing else reads, and the screen simply never changes. Without
+  // this the only evidence is a selector that timed out.
+  const pageErrors = [];
+  browser.page.on('pageerror', (error) => pageErrors.push(error.message));
+  browser.page.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text());
+  });
+
   try {
     await signUp(browser, base, { name: 'Model Probe', stamp: Date.now() });
     await createProject(browser, 'Model Project');
@@ -180,8 +193,55 @@ async function run() {
     await browser.page.waitForSelector('text=Longest side', { timeout: 10_000 });
     check('the wooden settings replace the card settings', true);
 
+    // The model is built from bytes that have to be fetched and decoded first,
+    // and the viewer shows this spinner until it has one. Clicking Save before
+    // it clears exports nothing and toasts "There is no model to export yet" --
+    // which is what CI did, in under a second, while a laptop had always
+    // finished decoding before the click landed and so passed for the wrong
+    // reason.
+    await browser.page.waitForSelector('text=Building the model', {
+      state: 'hidden',
+      timeout: 60_000,
+    });
+    check('the model finishes building', true);
+
     await browser.click('button:has-text("Save to project")');
-    await browser.page.waitForSelector('text=/Saved token\\.glb/', { timeout: 30_000 });
+
+    // Generous, and deliberately so. The viewer renders continuously, and on a
+    // runner with no GPU that loop is software-rasterised on the same core the
+    // export is serialising four generated textures on -- so this step is
+    // legitimately an order of magnitude slower here than on a laptop. The
+    // elapsed time is printed so "slow" stays distinguishable from "hung".
+    // Raced, not read afterwards. An error toast dismisses itself after eight
+    // seconds, so reading the DOM once a two-minute success wait has expired
+    // finds nothing and reports "no toast" for a save that failed loudly and
+    // early -- which is exactly what the first run of this in CI reported.
+    const started = Date.now();
+    const outcome = await Promise.race([
+      browser.page
+        .waitForSelector('text=/Saved token\\.glb/', { timeout: SAVE_TIMEOUT_MS })
+        .then(() => ({ saved: true, said: '' })),
+      browser.page
+        .waitForSelector('[role="alert"]', { timeout: SAVE_TIMEOUT_MS })
+        .then(async (node) => ({ saved: false, said: (await node.textContent())?.trim() ?? '' })),
+    ]).catch(() => ({ saved: false, said: '' }));
+
+    if (!outcome.saved) {
+      const said = browser.serverErrors;
+      check(
+        'the export is saved to the project',
+        false,
+        [
+          outcome.said && `the app said: ${outcome.said}`,
+          said.length > 0 && `the API answered: ${said.join(', ')}`,
+          pageErrors.length > 0 && `the page threw: ${pageErrors.join(' | ')}`,
+        ]
+          .filter(Boolean)
+          .join('; ') || `nothing was reported in ${SAVE_TIMEOUT_MS}ms; the export hung`
+      );
+      return 1;
+    }
+    console.log(`  ok   the export is saved to the project (${Date.now() - started}ms)`);
 
     const stored = await browser.page.evaluate(async () => {
       const token = localStorage.getItem('tph.token');

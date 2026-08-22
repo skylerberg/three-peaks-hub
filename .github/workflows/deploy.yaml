@@ -152,7 +152,10 @@ jobs:
 
       - name: 'Roll out'
         run: |
-          sed "s/{COMMITHASH}/$GITHUB_SHA/g" infra/k8s/deployment.yaml | kubectl apply -f -
+          # A branch name may contain a slash, so that substitution cannot use
+          # sed's default delimiter.
+          sed -e "s/{COMMITHASH}/$GITHUB_SHA/g" -e "s|{BRANCH}|$GITHUB_REF_NAME|g" \
+            infra/k8s/deployment.yaml | kubectl apply -f -
           kubectl -n "$NAMESPACE" rollout status deployment/three-peaks-hub-api --timeout=300s
 
   web:
