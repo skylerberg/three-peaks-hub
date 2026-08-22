@@ -74,11 +74,13 @@ async function run() {
     // setInputFiles is the real picker's effect; there is no way to reach this
     // path from jsdom at all.
     await browser.setInputFiles('input[type="file"]', filePath);
-    // The download link, not the filename: the explorer draws the name on an
+    // The download control, not the filename: the explorer draws the name on an
     // optimistic row the moment the upload starts, so waiting for the text
     // waits for nothing and every assertion below it then races the transfer.
-    // Only a row from a real listing carries a link to the stored bytes.
-    await browser.page.waitForSelector('a[download="probe-card.txt"]', { timeout: 15_000 });
+    // Only a row from a real listing offers to fetch the stored bytes.
+    await browser.page.waitForSelector('button[aria-label="Download probe-card.txt"]', {
+      timeout: 15_000,
+    });
     check('the uploaded file is drawn in the explorer', true);
 
     // The row is not proof the bytes arrived. Read them back through the API,
@@ -109,6 +111,34 @@ async function run() {
       'the recorded size matches the bytes',
       stored.byteSize === contents.length,
       `${stored.byteSize} vs ${contents.length}`
+    );
+
+    // --- the Download control actually downloads ---------------------------
+    // Clicked, not merely present. Everything downstream of the click -- the
+    // authorized fetch, the object URL, and how long it has to stay alive for
+    // the browser to read it -- exists only in a real engine, and a revoke that
+    // races that read produces a control that does nothing at all.
+    const saved = await Promise.all([
+      browser.page.waitForEvent('download', { timeout: 15_000 }),
+      browser.click('button[aria-label="Download probe-card.txt"]'),
+    ])
+      .then(async ([download]) => {
+        const stream = await download.createReadStream();
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        return { name: download.suggestedFilename(), body: Buffer.concat(chunks).toString() };
+      })
+      .catch((error) => ({ name: null, body: null, detail: error.message }));
+
+    check(
+      'clicking Download saves the file under its own name',
+      saved.name === 'probe-card.txt',
+      saved.detail ?? String(saved.name)
+    );
+    check(
+      'the downloaded bytes are the ones that were uploaded',
+      saved.body === contents,
+      saved.detail ?? String(saved.body)
     );
 
     // --- the quota meter reflects the upload -------------------------------

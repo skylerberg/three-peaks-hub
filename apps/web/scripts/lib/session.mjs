@@ -28,6 +28,28 @@ export async function signUp(browser, base, { name, stamp }) {
   return { email, password };
 }
 
+// One browser context serves every screen of a colour scheme, and the session
+// guard bounces an already-signed-in visitor straight off /signup -- where the
+// next signUp's page.fill then waits for a field that is not there. Signing out
+// first makes each authenticated screen independent of the order they run in.
+//
+// Through the real control rather than by emptying localStorage: init() adopts
+// the stored token and writes it back, so a clear that lands mid-boot is undone
+// a moment later.
+export async function signOut(browser, base) {
+  // Asked for on a public route: the guard remembers where a signed-out visitor
+  // was headed and sends them back to it after the next sign-up, so probing for
+  // a session on /account is what lands the account screen instead of Projects.
+  await browser.goto(`${base}/login`, { wait: 0 });
+  const signedIn = await browser.page.evaluate(() => localStorage.getItem('tph.token') !== null);
+  if (!signedIn) return;
+
+  await browser.goto(`${base}/account`, { wait: 0 });
+  await browser.page.waitForSelector('button:has-text("Sign out")', { timeout: 10_000 });
+  await browser.click('button:has-text("Sign out")');
+  await browser.page.waitForSelector('h1:has-text("Sign in")', { timeout: 10_000 });
+}
+
 export async function createProject(browser, projectName) {
   await browser.click('button:has-text("New project")');
   await browser.page.fill('input[placeholder="Colori"]', projectName);

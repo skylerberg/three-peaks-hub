@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { apiReachable, createProject, signUp } from './lib/session.mjs';
+import { apiReachable, createProject, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
@@ -39,6 +39,7 @@ const SCREENS = [
   { name: 'signup', path: '/signup' },
   { name: 'forgot-password', path: '/forgot-password' },
   { name: 'model-studio', authed: true, reach: reachModelStudio },
+  { name: 'file-versions', authed: true, reach: reachFileVersions },
 ];
 
 const SCHEMES = ['light', 'dark'];
@@ -54,19 +55,40 @@ const TINY_PNG = Buffer.from(
   'base64'
 );
 
-async function reachModelStudio(browser, base, scheme) {
+// A fresh account per screen and per colour scheme: the probes upload files, and
+// an account carried from one screen to the next would make each run depend on
+// what the one before it left behind.
+async function freshProject(browser, base, label) {
   const dir = mkdtempSync(join(tmpdir(), 'tph-a11y-'));
   const pngPath = join(dir, 'token.png');
   writeFileSync(pngPath, TINY_PNG);
 
-  // A fresh account per colour scheme: the browser context is recreated for
-  // each, and with it the storage the session lives in.
-  await signUp(browser, base, { name: 'A11y Probe', stamp: `${Date.now()}-${scheme}` });
-  await createProject(browser, `A11y ${scheme}`);
+  await signOut(browser, base);
+  await signUp(browser, base, { name: 'A11y Probe', stamp: `${Date.now()}-${label}` });
+  await createProject(browser, `A11y ${label}`);
   await browser.setInputFiles('input[type="file"]', pngPath);
+  return 'token.png';
+}
+
+async function reachModelStudio(browser, base, scheme) {
+  await freshProject(browser, base, `studio-${scheme}`);
   await browser.page.waitForSelector('a:has-text("Make 3D")', { timeout: 15_000 });
   await browser.click('a:has-text("Make 3D")');
   await browser.page.waitForSelector('canvas', { timeout: 15_000 });
+}
+
+async function reachFileVersions(browser, base, scheme) {
+  const filename = await freshProject(browser, base, `versions-${scheme}`);
+  await browser.page.waitForSelector(`button[aria-label="Download ${filename}"]`, {
+    timeout: 15_000,
+  });
+  await browser.click('a:has-text("Versions")');
+  // The upload control appears only once the member roster has answered, so
+  // waiting for it is what keeps axe from reading a half-drawn screen.
+  await browser.page.waitForSelector('button:has-text("Upload new version")', { timeout: 15_000 });
+  await browser.page.waitForSelector(`button[aria-label="Download version 1 of ${filename}"]`, {
+    timeout: 15_000,
+  });
 }
 
 async function run() {

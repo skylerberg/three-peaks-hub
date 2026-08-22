@@ -105,7 +105,7 @@ tree.
    component-name registry reads that barrel; a schema left out appears inline
    and the generated client gets an anonymous duplicate instead of a named type.
 7. Length limits in ArkType, not CHECK constraints. All FKs cascade except
-   `project.created_by`, which is RESTRICT.
+   `project.created_by` and `file_version.created_by`, which are RESTRICT.
 8. **Query and path parameters are declared, not just read.** `c.req.query()`
    alone leaves them out of the spec, so the generated client cannot type them.
 9. **Take `validator` and `resolver` from `hono-openapi`, never from
@@ -147,6 +147,41 @@ introspects that and drops it. It never reads the database you develop against;
 introspecting that is how a column left behind by an abandoned branch gets
 committed looking exactly like a real one.
 
+## File versions
+
+A file is the newest of a stack. `file_version` holds the stack and the current
+version is **`max(version_number)`** — there is no pointer column, because a
+pointer is a second answer to "which one is current" that can disagree with the
+list itself.
+
+`file` keeps `storage_key`, `content_type`, `byte_size`, `checksum` and the
+image dimensions as a mirror of that newest version, for two reasons: a rolling
+deploy leaves pods on the previous release reading those columns, and the
+directory listing stays a single query. `appendFileVersion` writes every
+`file_version` row and every later change to the mirror, inside the caller's
+transaction; the only other writer is `/upload`, which inserts the `file` row
+with its first set of values before handing over.
+
+**History only grows.** A restore copies the old object to a new key and appends
+that as a further version; nothing rewinds a number and no version row is ever
+mutated. Bytes identical to the current version append nothing at all and say so,
+which is what stops a re-import of an unchanged deck from writing a version per
+card.
+
+Two consequences that are easy to get wrong. The quota sums `file_version`, and
+every path that deletes a file, a folder or a project has to collect **every**
+version's key — the mirror names one object out of N and the rest would be
+orphaned in the bucket with nothing pointing at them. And a row written before
+this table existed has bytes and no version: the read paths present the mirror as
+version 1, and the first append adopts it before adding anything, or that append
+would overwrite the only reference to those bytes. Its bytes count nothing
+towards the quota until that append, because the sum has no row to reach — the
+one residual a pod on the previous release can still leave after the migration.
+
+The 3D studio deliberately follows the current version. `component_model` is one
+row per file, so a card that gains new artwork keeps the dial-in someone already
+gave it.
+
 # Web conventions
 
 Svelte 5 **runes only** (`runes: true` in `svelte.config.js`, so `export let`,
@@ -165,6 +200,10 @@ router library.
   configure anywhere.
 - Optimistic updates: apply, send, and on failure toast and refetch — never
   snapshot-rollback.
+- **A download is a `<button>` calling `downloadFile`, never an `<a href>`.** The
+  API takes its credential from the `Authorization` header only, and a
+  browser-initiated GET sends none, so a plain link 401s silently. An anchor
+  without a `download` attribute is also swallowed by the router's `use:link`.
 - Styling uses the tokens in `src/app.css` (`bg-canvas`, `bg-surface`,
   `border-edge`, `text-ink`, `text-muted`, `bg-accent`). Never hardcode
   `gray-*`. Tap targets ≥ 44px (`min-h-11`).

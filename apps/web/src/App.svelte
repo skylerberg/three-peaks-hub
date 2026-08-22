@@ -2,6 +2,7 @@
   import Toasts from './components/ui/Toasts.svelte';
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
+  import FileVersions from './routes/FileVersions.svelte';
   import ForgotPassword from './routes/ForgotPassword.svelte';
   import Login from './routes/Login.svelte';
   import Members from './routes/Members.svelte';
@@ -17,6 +18,7 @@
   import { realtime } from './lib/realtime.svelte.ts';
   import { isSignedIn, session } from './lib/session.svelte.ts';
   import { link, router } from './lib/router.svelte.ts';
+  import { versions } from './lib/versions.svelte.ts';
 
   router.start();
   router.beforeNavigate = session.guardRoute;
@@ -45,6 +47,7 @@
       projects.reset();
       files.reset();
       models.reset();
+      versions.reset();
       realtime.stop();
     }
   });
@@ -87,6 +90,8 @@
       <Members projectId={route.params.projectId} />
     {:else if route.name === 'model'}
       <Model3d projectId={route.params.projectId} fileId={route.params.fileId} />
+    {:else if route.name === 'versions'}
+      <FileVersions projectId={route.params.projectId} fileId={route.params.fileId} />
     {:else if route.name === 'account'}
       <Account />
     {:else if route.name === 'login'}
