@@ -38,10 +38,10 @@ pnpm install
 pnpm setup:env          # writes apps/api/.env and .env.test from the examples
 createdb three_peaks_hub
 pnpm run migrate
-pnpm dev                # api on :3001, web on :5173
+pnpm dev                # api on :17310, web on :17300
 ```
 
-Then open http://localhost:5173 and create an account. Password-reset emails go
+Then open http://localhost:17300 and create an account. Password-reset emails go
 to the console driver by default, so the reset link is printed in the API log.
 
 ## Everyday commands

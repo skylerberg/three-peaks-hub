@@ -4,6 +4,7 @@ import { compress } from 'hono/compress';
 import { secureHeaders } from 'hono/secure-headers';
 import { buildInfo } from './config/buildInfo.ts';
 import { assertEmailConfig, assertProxyConfig, assertStorageConfig, env } from './config/env.ts';
+import { reportPendingMigrations } from './db/migrate.ts';
 import { authMiddleware, skipAuth } from './middleware/auth.ts';
 import { corsMiddleware } from './middleware/cors.ts';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
@@ -71,6 +72,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // Redis fan-out is a no-op without REDIS_URL, which is right for a single dev
   // process and wrong for the two-replica deployment.
   await startBus();
+
+  // Before the port is announced, so a database that is behind is the first
+  // thing in the log rather than something to work back to from a 500.
+  await reportPendingMigrations();
 
   const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
     const build = buildInfo();
