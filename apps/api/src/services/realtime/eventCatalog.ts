@@ -15,6 +15,9 @@ export const EVENT_CATALOG = {
   file_deleted: { carriesActor: true },
   file_version_created: { carriesActor: true },
   model_updated: { carriesActor: true },
+  deck_created: { carriesActor: true },
+  deck_updated: { carriesActor: true },
+  deck_deleted: { carriesActor: true },
   members_changed: { carriesActor: true },
 } as const;
 

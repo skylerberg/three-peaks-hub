@@ -7,6 +7,9 @@ export type Route =
   | { name: 'project'; params: { projectId: string; folderId: string | null } }
   | { name: 'members'; params: { projectId: string } }
   | { name: 'deleted'; params: { projectId: string } }
+  | { name: 'decks'; params: { projectId: string } }
+  | { name: 'deck'; params: { projectId: string; deckId: string } }
+  | { name: 'print'; params: { projectId: string; deckId: string | null } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
   | { name: 'versions'; params: { projectId: string; fileId: string } }
   | { name: 'account' }
@@ -37,6 +40,23 @@ export function matchRoute(path: string, search = ''): Route {
 
   const deleted = new RegExp(`^/projects/(${UUID})/deleted$`).exec(clean);
   if (deleted) return { name: 'deleted', params: { projectId: deleted[1] } };
+
+  const deck = new RegExp(`^/projects/(${UUID})/decks/(${UUID})$`).exec(clean);
+  if (deck) return { name: 'deck', params: { projectId: deck[1], deckId: deck[2] } };
+
+  const decks = new RegExp(`^/projects/(${UUID})/decks$`).exec(clean);
+  if (decks) return { name: 'decks', params: { projectId: decks[1] } };
+
+  const print = new RegExp(`^/projects/(${UUID})/print$`).exec(clean);
+  if (print) {
+    // A deck named in the query arrives pre-selected, so "print this deck" from
+    // the editor is one click rather than a screen and then a checkbox.
+    const deckId = params.get('deck');
+    return {
+      name: 'print',
+      params: { projectId: print[1], deckId: deckId && deckId.length > 0 ? deckId : null },
+    };
+  }
 
   const model = new RegExp(`^/projects/(${UUID})/files/(${UUID})/3d$`).exec(clean);
   if (model) return { name: 'model', params: { projectId: model[1], fileId: model[2] } };

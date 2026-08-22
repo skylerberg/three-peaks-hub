@@ -111,3 +111,54 @@ export async function assertFileAccess(
     ? await assertProjectWrite(c, row.project_id)
     : await assertProjectAccess(c, row.project_id);
 }
+
+export async function assertDeckAccess(
+  c: Pick<AppContext, 'get'>,
+  deckId: string,
+  mode: 'read' | 'write' = 'read'
+): Promise<ProjectAccess> {
+  const db = c.get('db');
+  const row = await db
+    .selectFrom('deck')
+    .select(['deck.project_id as project_id'])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirst();
+
+  if (!row) throw new AppError(404, 'Deck not found');
+  return mode === 'write'
+    ? await assertProjectWrite(c, row.project_id)
+    : await assertProjectAccess(c, row.project_id);
+}
+
+/**
+ * Refuses a set of file ids that does not lie entirely inside one project.
+ *
+ * The ids these guard are stored and never dereferenced -- a card back, a deck's
+ * contents -- so without this a row can name a file in a project the caller
+ * cannot see, and go on naming it. 422 rather than 404: the request is
+ * well-formed and refers to something real, it just does not belong here.
+ *
+ * One query for the whole set, so a 200-card deck costs the same round trip as
+ * a single card back.
+ */
+export async function assertFilesInProject(
+  c: Pick<AppContext, 'get'>,
+  fileIds: readonly string[],
+  projectId: string,
+  what: string
+): Promise<void> {
+  const unique = [...new Set(fileIds)];
+  if (unique.length === 0) return;
+
+  const rows = await c
+    .get('db')
+    .selectFrom('file')
+    .select(['file.id as id'])
+    .where('file.id', 'in', unique)
+    .where('file.project_id', '=', projectId)
+    .execute();
+
+  if (rows.length !== unique.length) {
+    throw new AppError(422, `${what} must be a file in the same project`);
+  }
+}

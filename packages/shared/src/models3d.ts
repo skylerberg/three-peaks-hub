@@ -4,6 +4,8 @@
 // Every length is millimetres, because that is what a manufacturer's spec sheet
 // is written in. The exporter is the only place that converts.
 
+import { PANDA_CORNER_RADIUS_MM, cardPreset } from './cards.ts';
+
 export const MODEL_KINDS = ['card', 'wood'] as const;
 export type ModelKind = (typeof MODEL_KINDS)[number];
 
@@ -43,23 +45,6 @@ export interface WoodModelSettings {
 
 export type ModelSettings = CardModelSettings | WoodModelSettings;
 
-export interface CardPreset {
-  id: string;
-  name: string;
-  width_mm: number;
-  height_mm: number;
-}
-
-// The sizes a print house actually quotes. Poker is first because it is the
-// default for anything that does not say otherwise.
-export const CARD_PRESETS: readonly CardPreset[] = [
-  { id: 'poker', name: 'Poker (63.5 × 88.9 mm)', width_mm: 63.5, height_mm: 88.9 },
-  { id: 'bridge', name: 'Bridge (56 × 87 mm)', width_mm: 56, height_mm: 87 },
-  { id: 'tarot', name: 'Tarot (70 × 120 mm)', width_mm: 70, height_mm: 120 },
-  { id: 'mini-euro', name: 'Mini euro (44 × 68 mm)', width_mm: 44, height_mm: 68 },
-  { id: 'square', name: 'Square (70 × 70 mm)', width_mm: 70, height_mm: 70 },
-];
-
 export interface WoodPreset {
   id: string;
   name: string;
@@ -72,13 +57,15 @@ export const WOOD_PRESETS: readonly WoodPreset[] = [
   { id: 'thick', name: 'Thick (10 mm)', thickness_mm: 10 },
 ];
 
+const DEFAULT_CARD_PRESET = cardPreset('poker');
+
 export const DEFAULT_CARD_SETTINGS: CardModelSettings = {
   kind: 'card',
-  width_mm: 63.5,
-  height_mm: 88.9,
+  width_mm: DEFAULT_CARD_PRESET?.width_mm ?? 63,
+  height_mm: DEFAULT_CARD_PRESET?.height_mm ?? 88,
   // 300 gsm card stock, which is what most print houses default to.
   thickness_mm: 0.32,
-  corner_radius_mm: 3,
+  corner_radius_mm: PANDA_CORNER_RADIUS_MM,
   bevel_mm: 0.08,
   back_file_id: null,
   back_color: '#1f2933',
@@ -140,20 +127,8 @@ export function clampCornerRadius(settings: CardModelSettings): number {
   return Math.max(0, Math.min(settings.corner_radius_mm, limit));
 }
 
-export function cardPreset(id: string): CardPreset | undefined {
-  return CARD_PRESETS.find((preset) => preset.id === id);
-}
-
 export function woodPreset(id: string): WoodPreset | undefined {
   return WOOD_PRESETS.find((preset) => preset.id === id);
-}
-
-// Which preset a set of settings currently matches, so reopening the studio
-// shows the named size rather than resetting the dropdown to the first entry.
-export function matchingCardPreset(settings: CardModelSettings): CardPreset | undefined {
-  return CARD_PRESETS.find(
-    (preset) => preset.width_mm === settings.width_mm && preset.height_mm === settings.height_mm
-  );
 }
 
 export function matchingWoodPreset(settings: WoodModelSettings): WoodPreset | undefined {

@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { CARD_PRESETS, matchingCardPreset } from './cards.ts';
 import {
-  CARD_PRESETS,
   DEFAULT_CARD_SETTINGS,
   DEFAULT_WOOD_SETTINGS,
   MODEL_LIMITS,
   WOOD_PRESETS,
   clampCornerRadius,
   defaultSettingsFor,
-  matchingCardPreset,
   matchingWoodPreset,
 } from './models3d.ts';
 
@@ -28,7 +27,7 @@ describe('presets', () => {
   it('hands back a copy, so editing one model does not move the default', () => {
     const settings = defaultSettingsFor('card');
     settings.width_mm = 999;
-    expect(DEFAULT_CARD_SETTINGS.width_mm).toBe(63.5);
+    expect(DEFAULT_CARD_SETTINGS.width_mm).toBe(63);
   });
 });
 

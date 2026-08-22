@@ -538,6 +538,78 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/decks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the decks in a project
+     * @description Each deck carries how many distinct cards it holds and how many pieces of card those add up to, so the screen needs no follow-up request per deck. The cards themselves come from the single-deck route.
+     */
+    get: operations['getApiDecks'];
+    put?: never;
+    /**
+     * Create a deck
+     * @description Starts empty. Cards are added with the card-list route.
+     */
+    post: operations['postApiDecks'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/{deckId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a deck and its cards
+     * @description Cards come back in print order, each with the whole file row behind it. A card whose image has been deleted is still listed — restoring the image puts it back in the run.
+     */
+    get: operations['getApiDecksByDeckId'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a deck
+     * @description Editors only, and unlike a file this is not recoverable — a deck stores no bytes, so there is nothing for a tombstone to protect and no purge to reclaim. The images it named are untouched.
+     */
+    delete: operations['deleteApiDecksByDeckId'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a deck
+     * @description Editors only. Every field is optional; an absent one is left alone.
+     */
+    patch: operations['patchApiDecksByDeckId'];
+    trace?: never;
+  };
+  '/api/decks/{deckId}/cards': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace a deck’s cards
+     * @description The whole ordered list in one request. Position is the array index, so adding, removing and reordering are the same call and none of them can interleave with another.
+     */
+    put: operations['putApiDecksByDeckIdCards'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -592,6 +664,68 @@ export interface components {
       source_file_id: string;
       updated_at: string;
       updated_by: string;
+    };
+    Deck: {
+      back_file_id: string | null;
+      card_count: number;
+      card_height_mm: number;
+      card_width_mm: number;
+      created_at: string;
+      created_by: string;
+      id: string;
+      name: string;
+      project_id: string;
+      total_copies: number;
+      updated_at: string;
+    };
+    DeckList: {
+      decks: {
+        back_file_id: string | null;
+        card_count: number;
+        card_height_mm: number;
+        card_width_mm: number;
+        created_at: string;
+        created_by: string;
+        id: string;
+        name: string;
+        project_id: string;
+        total_copies: number;
+        updated_at: string;
+      }[];
+    };
+    DeckWithCards: {
+      cards: {
+        file: {
+          byte_size: number;
+          content_type: string;
+          created_at: string;
+          deleted_at: string | null;
+          filename: string;
+          folder_id: string | null;
+          id: string;
+          image_height: number | null;
+          image_width: number | null;
+          project_id: string;
+          updated_at: string;
+          uploaded_by: string;
+        };
+        file_id: string;
+        position: number;
+        quantity: number;
+      }[];
+      deck: {
+        back_file_id: string | null;
+        card_count: number;
+        card_height_mm: number;
+        card_width_mm: number;
+        created_at: string;
+        created_by: string;
+        id: string;
+        name: string;
+        project_id: string;
+        total_copies: number;
+        updated_at: string;
+      };
     };
     DeletedListing: {
       entries: {
@@ -3123,6 +3257,482 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ComponentModel'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecks: {
+    parameters: {
+      query: {
+        /** @description a UUID */
+        project_id:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Decks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckList'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiDecks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          card_height_mm: number;
+          card_width_mm: number;
+          name: string;
+          project_id: components['schemas']['Uuid'];
+          back_file_id?:
+            | string
+            | '00000000-0000-0000-0000-000000000000'
+            | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+            | null;
+          id?: components['schemas']['Uuid'];
+        };
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Deck'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksByDeckId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The deck */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckWithCards'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiDecksByDeckId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  patchApiDecksByDeckId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          back_file_id?:
+            | string
+            | '00000000-0000-0000-0000-000000000000'
+            | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+            | null;
+          card_height_mm?: number;
+          card_width_mm?: number;
+          name?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Deck'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  putApiDecksByDeckIdCards: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          cards: {
+            file_id: components['schemas']['Uuid'];
+            quantity: number;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description The deck as it now stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckWithCards'];
         };
       };
       /** @description Unauthorized */

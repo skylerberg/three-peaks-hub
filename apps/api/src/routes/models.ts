@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { describeRoute, resolver } from 'hono-openapi';
 import type { ModelSettings } from '@three-peaks/shared';
-import { assertFileAccess } from '../services/authorization.ts';
+import { assertFileAccess, assertFilesInProject } from '../services/authorization.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator } from '../middleware/validators.ts';
 import { AppError } from '../utils/errors.ts';
@@ -42,25 +42,13 @@ function serialize(row: {
   };
 }
 
-// A card's reverse names another file, and nothing else checks it: the id is
-// stored, not dereferenced, so a settings row could otherwise point at a
-// project the caller cannot see and quietly keep pointing there.
 async function assertBackFileInProject(
   c: Pick<AppContext, 'get'>,
   settings: ModelSettings,
   projectId: string
 ): Promise<void> {
   if (settings.kind !== 'card' || settings.back_file_id === null) return;
-
-  const row = await c
-    .get('db')
-    .selectFrom('file')
-    .select(['file.id as id'])
-    .where('file.id', '=', settings.back_file_id)
-    .where('file.project_id', '=', projectId)
-    .executeTakeFirst();
-
-  if (!row) throw new AppError(422, 'The card back must be a file in the same project');
+  await assertFilesInProject(c, [settings.back_file_id], projectId, 'The card back');
 }
 
 modelsRouter.get(

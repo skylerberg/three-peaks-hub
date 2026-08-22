@@ -108,10 +108,6 @@ export const purgeQuerySchema = type({
   'purge?': "'true'",
 });
 
-export const deletedQuerySchema = type({
-  project_id: uuid,
-});
-
 // A restore may hand over a new name in the same request. Two steps instead
 // would leave a window where the tombstone still holds the old one.
 export const restoreFileQuerySchema = type({

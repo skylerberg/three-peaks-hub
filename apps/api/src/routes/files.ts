@@ -20,10 +20,10 @@ import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
+import { projectQuerySchema } from '../schemas/common.ts';
 import {
   createFolderRequestSchema,
   deletedListingSchema,
-  deletedQuerySchema,
   directoryListingSchema,
   directoryQuerySchema,
   fileSchema,
@@ -453,7 +453,7 @@ filesRouter.get(
       ...standardErrors,
     },
   }),
-  queryValidator(deletedQuerySchema),
+  queryValidator(projectQuerySchema),
   async (c) => {
     const query = c.req.valid('query') as { project_id: string };
     const projectId = query.project_id;

@@ -213,6 +213,7 @@ jobs:
 
       - run: pnpm run check:upload
       - run: pnpm run check:model3d
+      - run: pnpm run check:print
       - run: pnpm run check:a11y
 
   # Mutation testing: every guard names a bug and the edit that puts it back,

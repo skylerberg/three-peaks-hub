@@ -62,6 +62,19 @@ allowBuilds:
 # clear it. Off is what npm did.
 verifyDepsBeforeRun: false
 
+# jspdf declares four optional dependencies -- canvg, html2canvas, dompurify and
+# core-js -- for its `html()` and `addSvgAsImage()` methods, neither of which the
+# print sheets use. Its ESM build imports only fflate, fast-png and
+# @babel/runtime statically and reaches for these four dynamically, so refusing
+# them costs nothing and keeps html2canvas out of the dependency graph. It also
+# settles core-js's install script, which `strictDepBuilds` would otherwise
+# require a ruling on above.
+ignoredOptionalDependencies:
+  - canvg
+  - core-js
+  - dompurify
+  - html2canvas
+
 # Supply-chain gate: a version published in the last few days is not installed.
 # The window is what turns "a maintainer account was compromised an hour ago"
 # from an install into a non-event. Dependency ranges here are deliberately

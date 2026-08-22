@@ -51,12 +51,26 @@
           <p class="text-sm text-muted">{project.description}</p>
         {/if}
       </div>
-      <a
-        class="focus-ring rounded px-3 py-2 text-sm underline"
-        href="/projects/{project.id}/members"
-      >
-        Members
-      </a>
+      <div class="flex items-center gap-1">
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{project.id}/decks"
+        >
+          Decks
+        </a>
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{project.id}/print"
+        >
+          Print
+        </a>
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{project.id}/members"
+        >
+          Members
+        </a>
+      </div>
     </div>
 
     <FileExplorer projectId={project.id} {folderId} canEdit={project.role === 'editor'} />

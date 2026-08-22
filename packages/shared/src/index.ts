@@ -1,4 +1,7 @@
 export * from './auth.ts';
+export * from './cards.ts';
+export * from './decks.ts';
 export * from './models3d.ts';
+export * from './print.ts';
 export * from './roles.ts';
 export * from './uploads.ts';
