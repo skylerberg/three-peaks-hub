@@ -191,8 +191,11 @@ router library.
 - Shared state is a class instance exported from a `*.svelte.ts` module.
 - `src/lib/router.svelte.ts` is a hand-rolled History router with a
   discriminated-union `Route`. `beforeNavigate` **does not run on the initial
-  page load** — `App.svelte` guards that once by hand, after the session store
-  settles.
+  page load** — `App.svelte` guards that once by hand, and renders nothing at
+  all until that guard has run. Gating the first render on `session.status`
+  instead is not the same thing and was a bug: the store leaves `unknown` a
+  microtask before the guard redirects, and the screen that mounted in the gap
+  fetched with a token that had just been cleared.
 - Session status is four-valued. `offline` is a signed-in session whose token
   could not be _checked_; collapsing it into `anon` is what makes launching
   without a network land on the login screen with every store reset.
