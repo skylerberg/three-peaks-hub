@@ -70,6 +70,44 @@ describe('matchRoute', () => {
     });
   });
 
+  describe('the deck history screens', () => {
+    const DECK = '3c7f1b2e-9a4d-4c6b-8e1f-2a3b4c5d6e7f';
+    const RUN = '5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a';
+
+    it("matches a deck's history path", () => {
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/history`)).toEqual({
+        name: 'deck-history',
+        params: { projectId: UUID, deckId: DECK },
+      });
+    });
+
+    it("matches one run's path", () => {
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/${RUN}`)).toEqual({
+        name: 'deck-run',
+        params: { projectId: UUID, deckId: DECK, runId: RUN },
+      });
+    });
+
+    it('matches the as-of path', () => {
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/${RUN}/deck`)).toEqual({
+        name: 'deck-as-of',
+        params: { projectId: UUID, deckId: DECK, runId: RUN },
+      });
+    });
+
+    // The deck editor's own path is a prefix of all three.
+    it('does not fall through to the deck editor', () => {
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/history`).name).not.toBe('deck');
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/${RUN}`).name).not.toBe('deck');
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/${RUN}/deck`).name).not.toBe('deck');
+    });
+
+    it('is not found when a run id is not a uuid', () => {
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/nope`).name).toBe('not-found');
+      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/runs/nope/deck`).name).toBe('not-found');
+    });
+  });
+
   describe('the 3D studio', () => {
     const FILE = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 

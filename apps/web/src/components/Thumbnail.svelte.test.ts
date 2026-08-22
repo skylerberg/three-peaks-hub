@@ -77,6 +77,35 @@ describe('Thumbnail', () => {
     expect(revoke).toHaveBeenCalledWith(OBJECT_URL);
   });
 
+  function requested(): string[] {
+    return fetchMock.mock.calls.map((call) =>
+      typeof call[0] === 'string' ? call[0] : (call[0] as Request).url
+    );
+  }
+
+  it('asks for the version it was given', async () => {
+    fetchMock.mockImplementation(async () => png());
+
+    render(Thumbnail, { props: { fileId: FILE, version: 2 } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(requested()[0]).toContain(`/api/files/${FILE}/download?version=2`);
+  });
+
+  // The trap this pins: a prop read only inside the async closure is not a
+  // dependency of the effect, so the frame keeps the first version for ever.
+  it('fetches again when the version changes', async () => {
+    fetchMock.mockImplementation(async () => png());
+
+    const view = render(Thumbnail, { props: { fileId: FILE, version: 1 } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await view.rerender({ fileId: FILE, version: 3 });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(requested()[1]).toContain('?version=3');
+  });
+
   // jsdom has no IntersectionObserver, so every case above takes the branch that
   // reads immediately. This one supplies the observer the browser has.
   describe('where the engine can say what is on screen', () => {

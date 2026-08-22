@@ -9,8 +9,13 @@
   interface Props {
     fileId: string;
     alt?: string;
+    // A history screen has to draw the artwork a run left, not the artwork the
+    // file carries now.
+    version?: number;
+    class?: string;
+    fit?: 'cover' | 'contain';
   }
-  let { fileId, alt = '' }: Props = $props();
+  let { fileId, alt = '', version, class: className = 'size-12', fit = 'cover' }: Props = $props();
 
   let frame = $state<HTMLElement | null>(null);
   let url = $state<string | null>(null);
@@ -26,6 +31,10 @@
 
   $effect(() => {
     const id = fileId;
+    // Read out here rather than inside read(): a prop touched only from the
+    // async closure is not a dependency of this effect, so moving between two
+    // versions would leave the first image on screen.
+    const wanted = version;
     const node = frame;
     url = null;
     if (!node) return;
@@ -34,7 +43,10 @@
 
     async function read(): Promise<void> {
       try {
-        const response = await fetch(`/api/files/${id}/download`, { headers: authHeader() });
+        const query = wanted === undefined ? '' : `?version=${wanted}`;
+        const response = await fetch(`/api/files/${id}/download${query}`, {
+          headers: authHeader(),
+        });
         if (!response.ok || stale) return;
         const blob = await response.blob();
         if (stale) return;
@@ -74,8 +86,14 @@
   });
 </script>
 
-<span bind:this={frame} class="block size-12 shrink-0 overflow-hidden rounded bg-canvas">
+<span bind:this={frame} class="block shrink-0 overflow-hidden rounded bg-canvas {className}">
   {#if url}
-    <img src={url} {alt} class="size-full object-cover" />
+    <!-- Both literals spelled out: Tailwind scans source text, and a class name
+         built by interpolation is never generated. -->
+    <img
+      src={url}
+      {alt}
+      class={fit === 'contain' ? 'size-full object-contain' : 'size-full object-cover'}
+    />
   {/if}
 </span>

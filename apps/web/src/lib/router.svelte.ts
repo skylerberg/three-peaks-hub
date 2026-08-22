@@ -10,6 +10,9 @@ export type Route =
   | { name: 'decks'; params: { projectId: string } }
   | { name: 'deck'; params: { projectId: string; deckId: string } }
   | { name: 'deck-import'; params: { projectId: string; deckId: string } }
+  | { name: 'deck-history'; params: { projectId: string; deckId: string } }
+  | { name: 'deck-run'; params: { projectId: string; deckId: string; runId: string } }
+  | { name: 'deck-as-of'; params: { projectId: string; deckId: string; runId: string } }
   | { name: 'print'; params: { projectId: string; deckId: string | null } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
   | { name: 'versions'; params: { projectId: string; fileId: string } }
@@ -45,6 +48,31 @@ export function matchRoute(path: string, search = ''): Route {
   const deckImport = new RegExp(`^/projects/(${UUID})/decks/(${UUID})/import$`).exec(clean);
   if (deckImport) {
     return { name: 'deck-import', params: { projectId: deckImport[1], deckId: deckImport[2] } };
+  }
+
+  // Most specific first: every one of these is a prefix of the deck editor's
+  // own path, and the as-of path is a prefix-extension of one run's.
+  const deckAsOf = new RegExp(`^/projects/(${UUID})/decks/(${UUID})/runs/(${UUID})/deck$`).exec(
+    clean
+  );
+  if (deckAsOf) {
+    return {
+      name: 'deck-as-of',
+      params: { projectId: deckAsOf[1], deckId: deckAsOf[2], runId: deckAsOf[3] },
+    };
+  }
+
+  const deckRun = new RegExp(`^/projects/(${UUID})/decks/(${UUID})/runs/(${UUID})$`).exec(clean);
+  if (deckRun) {
+    return {
+      name: 'deck-run',
+      params: { projectId: deckRun[1], deckId: deckRun[2], runId: deckRun[3] },
+    };
+  }
+
+  const deckHistory = new RegExp(`^/projects/(${UUID})/decks/(${UUID})/history$`).exec(clean);
+  if (deckHistory) {
+    return { name: 'deck-history', params: { projectId: deckHistory[1], deckId: deckHistory[2] } };
   }
 
   const deck = new RegExp(`^/projects/(${UUID})/decks/(${UUID})$`).exec(clean);

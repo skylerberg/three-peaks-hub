@@ -59,6 +59,41 @@ export const importRunDetailSchema = type({
   cards: importRunCardSchema.array(),
 });
 
+// One card the imports had put in a deck, as of one run. Not the same row as
+// importRunCardSchema: that one says what a run did, this one says what stood.
+export const importRunDeckCardSchema = type({
+  card_id: 'string',
+  // Never null here: a purged card's ledger rows lost their mapping row and are
+  // left out entirely. has_purged_history is how the screen learns that.
+  file_id: 'string',
+  name: 'string',
+  // The version that run left this card at -- not the version the file happened
+  // to be at when the run ran. A hand upload or a restore between runs moves the
+  // file and writes no ledger row.
+  file_version_number: 'number | null',
+  // The export page of the run that last touched this card, kept only so the
+  // order is stable. It is not a position in the deck, and two cards can share
+  // one when a card is carried forward from an older export.
+  page_number: 'number | null',
+  last_run_id: 'string',
+  outcome: 'string',
+  // When the image was tombstoned, or null while it is not. A boolean here is
+  // the present tense read as a claim about the past: the screen anchors this
+  // against the run it is showing, and a file deleted before that run was
+  // deleted before it. The card stood in the deck either way -- deleting a
+  // card's image does not take the card out of the deck.
+  image_deleted_at: 'string | null',
+});
+
+export const importRunDeckSchema = type({
+  run: importRunSchema,
+  cards: importRunDeckCardSchema.array(),
+  // A boolean and never a count. A purged card's rows carry a null
+  // import_card_id and nothing correlates them across runs, so how many there
+  // were is not recoverable -- only that there was at least one.
+  has_purged_history: 'boolean',
+});
+
 export const importPageResultSchema = type({
   page_number: 'number',
   outcome: 'string',

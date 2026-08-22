@@ -220,12 +220,20 @@
           {cards.length === 1 ? 'card' : 'cards'} · {totalCopies} to print
         </p>
       </div>
-      <a
-        class="focus-ring rounded px-3 py-2 text-sm underline"
-        href="/projects/{projectId}/print?deck={deck.id}"
-      >
-        Print this deck
-      </a>
+      <div class="flex flex-wrap gap-2">
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{projectId}/decks/{deck.id}/history"
+        >
+          Import history
+        </a>
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{projectId}/print?deck={deck.id}"
+        >
+          Print this deck
+        </a>
+      </div>
     </div>
 
     <section class="flex flex-col gap-4 rounded-md border border-edge bg-surface p-4">
