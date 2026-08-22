@@ -37,6 +37,20 @@ export async function createBrowser(options = {}) {
   });
   let page = await context.newPage();
 
+  // Every 5xx the app sees, kept for whoever reports a failure. A probe that
+  // waits for an element the screen could not draw otherwise times out naming
+  // the selector and nothing about the request that made drawing it impossible
+  // -- a migration the local database has not had, most recently.
+  const serverErrors = [];
+  const watchResponses = (target) => {
+    target.on('response', (response) => {
+      if (response.status() < 500) return;
+      const path = new URL(response.url()).pathname;
+      serverErrors.push(`${response.request().method()} ${path} -> ${response.status()}`);
+    });
+  };
+  watchResponses(page);
+
   return {
     async setViewport({ width, height, mobile = true }) {
       // Playwright fixes viewport and colour scheme per context, so changing
@@ -50,6 +64,7 @@ export async function createBrowser(options = {}) {
         hasTouch: mobile,
       });
       page = await next.newPage();
+      watchResponses(page);
     },
     async goto(url, { wait = 0 } = {}) {
       await page.goto(url, { waitUntil: 'load' });
@@ -80,6 +95,9 @@ export async function createBrowser(options = {}) {
     },
     get page() {
       return page;
+    },
+    get serverErrors() {
+      return [...serverErrors];
     },
   };
 }

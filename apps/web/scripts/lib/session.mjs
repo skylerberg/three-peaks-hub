@@ -2,13 +2,71 @@
 // need an authenticated screen to look at, and neither should be the one that
 // owns how an account comes into being.
 
-export async function apiReachable(api) {
+// The routes these probes drive, named the way the spec names them. `/health`
+// answers 200 from whatever holds the port -- on one machine that was a sibling
+// project's API, and on the same machine a copy of this one started before the
+// studio's cold-load route existed and never restarted. Both left a probe
+// failing fifteen seconds later inside a screen with nothing to say about why,
+// so the port is asked what it is and what it serves before a browser starts.
+const REQUIRED_PATHS = [
+  ['post', '/api/auth/signup'],
+  ['post', '/api/projects'],
+  ['post', '/api/files/upload'],
+  ['get', '/api/files/directory'],
+  ['get', '/api/files/{id}'],
+  ['get', '/api/files/{id}/versions'],
+];
+
+const APP_NAME = 'three-peaks-hub';
+
+/**
+ * Three outcomes, because they call for three different things: `ok` runs the
+ * probe, `absent` is the local convenience of a checkout with nothing running,
+ * and the third -- something is there and it is not this build -- is a failure
+ * wherever it happens. Skipping that one would report a pass for a gate that
+ * measured nothing; proceeding is the fifteen-second mystery this replaces.
+ */
+export async function inspectApi(api) {
+  let root;
   try {
-    const response = await fetch(`${api}/health`);
-    return response.ok;
+    root = await fetch(`${api}/`);
   } catch {
-    return false;
+    return { ok: false, absent: true, reason: `no API at ${api}` };
   }
+
+  if (!root.ok) {
+    return { ok: false, absent: true, reason: `no API at ${api} (GET / answered ${root.status})` };
+  }
+
+  const identity = await root.json().catch(() => ({}));
+  if (identity.name !== APP_NAME) {
+    return {
+      ok: false,
+      absent: false,
+      reason:
+        `the server at ${api} is not this API: GET / named ` +
+        `${JSON.stringify(identity.name ?? null)}, expected ${JSON.stringify(APP_NAME)}. ` +
+        'Point API_PROXY_TARGET at this checkout.',
+    };
+  }
+
+  const response = await fetch(`${api}/api/openapi.json`);
+  const spec = response.ok ? await response.json().catch(() => ({})) : {};
+  const missing = REQUIRED_PATHS.filter(
+    ([method, path]) => spec.paths?.[path]?.[method] === undefined
+  );
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      absent: false,
+      reason:
+        `the API at ${api} is older than this checkout: it does not serve ` +
+        `${missing.map(([method, path]) => `${method.toUpperCase()} ${path}`).join(', ')}. ` +
+        'Restart it.',
+    };
+  }
+
+  return { ok: true, absent: false, reason: '' };
 }
 
 // A fresh throwaway account per run: the probes upload files and save models,

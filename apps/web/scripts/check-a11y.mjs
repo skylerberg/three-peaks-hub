@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { apiReachable, createProject, signOut, signUp } from './lib/session.mjs';
+import { createProject, inspectApi, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
@@ -74,7 +74,26 @@ async function reachModelStudio(browser, base, scheme) {
   await freshProject(browser, base, `studio-${scheme}`);
   await browser.page.waitForSelector('a:has-text("Make 3D")', { timeout: 15_000 });
   await browser.click('a:has-text("Make 3D")');
-  await browser.page.waitForSelector('canvas', { timeout: 15_000 });
+  await expectCanvas(browser);
+}
+
+// A canvas that never appears is the studio having given up upstream -- an image
+// it could not read, a project it could not resolve -- and it says which in a
+// role="alert" that a bare selector timeout throws away.
+async function expectCanvas(browser) {
+  try {
+    await browser.page.waitForSelector('canvas', { timeout: 15_000 });
+  } catch (error) {
+    const said = await browser.page
+      .locator('[role="alert"]')
+      .first()
+      .textContent({ timeout: 1_000 })
+      .catch(() => null);
+    if (said === null) throw error;
+    throw new Error(`the model studio rendered no canvas; the screen says: ${said.trim()}`, {
+      cause: error,
+    });
+  }
 }
 
 async function reachFileVersions(browser, base, scheme) {
@@ -97,23 +116,36 @@ async function run() {
   // authenticated screen cannot be reached without one, so those are skipped
   // rather than allowed to fail, except under CI where an absent API is a
   // broken gate rather than a local convenience.
-  const authed = await apiReachable(API);
-  if (!authed) {
+  const api = await inspectApi(API);
+  // A server that is there but is not this build is a failure everywhere: the
+  // screens behind the session cannot be reached, and saying so beats both
+  // skipping them and letting them time out.
+  if (!api.ok && !api.absent) {
+    console.error(`[check:a11y] ${api.reason}`);
+    return 1;
+  }
+  if (!api.ok) {
     if (process.env.CI) {
-      console.error(`[check:a11y] no API at ${API}; refusing to skip its screens under CI`);
+      console.error(`[check:a11y] ${api.reason}; refusing to skip its screens under CI`);
       return 1;
     }
     console.warn(
-      `[check:a11y] no API at ${API}; skipping ${SCREENS.filter((s) => s.authed).length} ` +
+      `[check:a11y] ${api.reason}; skipping ${SCREENS.filter((s) => s.authed).length} ` +
         'screen(s) behind the session. Start one with `pnpm dev:api`.'
     );
   }
 
-  const screens = SCREENS.filter((screen) => authed || !screen.authed);
+  const screens = SCREENS.filter((screen) => api.ok || !screen.authed);
 
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
-    server: { port: PORT, strictPort: false, proxy: { '/api': API } },
+    // /ws as well as /api: without it the app's socket opens against this
+    // server, fails its handshake, and reconnects for the length of the run.
+    server: {
+      port: PORT,
+      strictPort: false,
+      proxy: { '/api': API, '/ws': { target: API, ws: true } },
+    },
     logLevel: 'error',
   });
   await server.listen();
@@ -131,8 +163,20 @@ async function run() {
     }
 
     for (const screen of screens) {
-      if (screen.reach) await screen.reach(browser, base, scheme);
-      else await browser.goto(`${base}${screen.path}`, { wait: 250 });
+      try {
+        if (screen.reach) await screen.reach(browser, base, scheme);
+        else await browser.goto(`${base}${screen.path}`, { wait: 250 });
+      } catch (error) {
+        // What the API said, not only which element never appeared: reaching a
+        // screen drives the real app, and its request failing is the reason far
+        // more often than the selector being wrong.
+        const said = browser.serverErrors;
+        throw new Error(
+          `[check:a11y] could not reach ${screen.name} (${scheme}): ${error.message}` +
+            (said.length > 0 ? `\n  the API answered: ${said.join(', ')}` : ''),
+          { cause: error }
+        );
+      }
       await browser.page.addScriptTag({ content: axeSource });
 
       const result = await browser.page.evaluate(

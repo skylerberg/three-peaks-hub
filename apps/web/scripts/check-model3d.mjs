@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { apiReachable, createProject, signUp } from './lib/session.mjs';
+import { createProject, inspectApi, signUp } from './lib/session.mjs';
 
 const PORT = Number(process.env.MODEL_PROBE_PORT ?? 5230);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
@@ -117,8 +117,13 @@ function positionExtent(json) {
 }
 
 async function run() {
-  if (!(await apiReachable(API))) {
-    const message = `[check:model3d] no API at ${API}`;
+  const api = await inspectApi(API);
+  if (!api.ok) {
+    const message = `[check:model3d] ${api.reason}`;
+    if (!api.absent) {
+      console.error(message);
+      return 1;
+    }
     // Same contract as check-upload.mjs, which explains why.
     if (process.env.CI) {
       console.error(`${message}; refusing to skip under CI`);
@@ -130,7 +135,11 @@ async function run() {
 
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
-    server: { port: PORT, strictPort: false, proxy: { '/api': API } },
+    server: {
+      port: PORT,
+      strictPort: false,
+      proxy: { '/api': API, '/ws': { target: API, ws: true } },
+    },
     logLevel: 'error',
   });
   await server.listen();
