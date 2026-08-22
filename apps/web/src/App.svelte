@@ -24,9 +24,18 @@
   // beforeNavigate does not run on the initial page load, so the first route has
   // to be guarded once by hand -- after the session store knows whether there
   // is a signed-in account.
+  //
+  // Nothing renders until that guard has run, which is why this is a flag of
+  // its own rather than a reading of session.status. init() leaves `unknown`
+  // one microtask before this callback, and a screen mounted in that window
+  // fetches with the token init has just cleared -- a 401 the visitor reads as
+  // an error on the login page they land on immediately afterwards.
+  let booted = $state(false);
+
   void session.init().then(() => {
     const redirected = session.guardRoute(router.current, router.path);
     if (typeof redirected === 'string') router.redirect(redirected);
+    booted = true;
   });
 
   // Another tab signing out, or a 401 clearing the session mid-session, must
@@ -49,7 +58,7 @@
   });
 
   const route = $derived(router.current);
-  const showChrome = $derived(isSignedIn(session.status));
+  const showChrome = $derived(booted && isSignedIn(session.status));
 </script>
 
 <div class="flex min-h-full flex-col">
@@ -68,7 +77,7 @@
   {/if}
 
   <main class="flex-1">
-    {#if session.status === 'unknown'}
+    {#if !booted}
       <div class="flex justify-center py-24"><Spinner label="Loading" /></div>
     {:else if route.name === 'projects'}
       <Projects />

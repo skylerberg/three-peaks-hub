@@ -211,4 +211,37 @@ export const guards = [
     testName: 'builds a card in metres, straddling the origin',
     runner: 'web',
   },
+  {
+    name: 'no screen is mounted before the first-load guard has run',
+    package: 'web',
+    file: 'src/App.svelte',
+    // Reading the status directly reopens the window the flag exists to close:
+    // init() leaves `unknown` a microtask before the guard redirects, and a
+    // screen mounted in between fetches with the token init has just cleared.
+    find: '    {#if !booted}',
+    replace: "    {#if session.status === 'unknown'}",
+    tests: ['src/boot.svelte.test.ts'],
+    testName: 'does not fetch with a token the session has just cleared',
+    runner: 'web',
+  },
+  {
+    name: 'the projects list is asked for once per screen',
+    package: 'web',
+    file: 'src/lib/projects.svelte.ts',
+    find: '    this.#attempt ??= this.#load();',
+    replace: '    this.#attempt = this.#load();',
+    tests: ['src/lib/projects.svelte.test.ts'],
+    testName: 'asks the server once even when the screen asks again',
+    runner: 'web',
+  },
+  {
+    name: 'a reset forgets the attempt the previous account made',
+    package: 'web',
+    file: 'src/lib/projects.svelte.ts',
+    find: '    this.loading = false;\n    this.#attempt = null;',
+    replace: '    this.loading = false;',
+    tests: ['src/lib/projects.svelte.test.ts'],
+    testName: 'asks again for the next account after a reset',
+    runner: 'web',
+  },
 ];
