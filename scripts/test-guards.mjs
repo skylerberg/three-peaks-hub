@@ -309,4 +309,27 @@ export const guards = [
     testName: 'defers revoking the object URL until after the click',
     runner: 'web',
   },
+  {
+    name: 'a reconnected socket replays what it was watching',
+    package: 'web',
+    file: 'src/lib/realtime.svelte.ts',
+    // The subscriptions live on the store rather than on the socket precisely
+    // so a reconnect can replay them. Dropping the replay leaves a healthy
+    // connection that delivers nothing.
+    find: '      for (const projectId of this.#projects) {',
+    replace: '      for (const projectId of []) {',
+    tests: ['src/lib/realtime.svelte.test.ts'],
+    testName: 're-subscribes to everything it was watching when it reconnects',
+    runner: 'web',
+  },
+  {
+    name: 'a socket closed for a dead credential is not reopened',
+    package: 'web',
+    file: 'src/lib/realtime.svelte.ts',
+    find: "      if (action === 'revalidate') return;",
+    replace: '      if (false) return;',
+    tests: ['src/lib/realtime.svelte.test.ts'],
+    testName: 'does not reconnect after the server says the credential is gone',
+    runner: 'web',
+  },
 ];
