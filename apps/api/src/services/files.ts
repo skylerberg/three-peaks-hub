@@ -1,11 +1,65 @@
 import { createHash } from 'node:crypto';
 import { Transform, type Readable } from 'node:stream';
+import { sql } from 'kysely';
 import { PROJECT_STORAGE_QUOTA_BYTES } from '@three-peaks/shared';
-import { AppError } from '../utils/errors.ts';
+import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
+import { blockedMessage, deletedAncestor } from './folderTree.ts';
 import { SNIFF_BYTES, sniffContentType } from './imageSniff.ts';
+import { publishAfterCommit } from './realtime/index.ts';
 import { deleteStoredObjectsAfterCommit, storage } from './storage/index.ts';
-import type { AppContext } from '../types/index.ts';
+import type { AppContext, Connection } from '../types/index.ts';
+
+export interface FileRow {
+  id: string;
+  project_id: string;
+  folder_id: string | null;
+  filename: string;
+  content_type: string;
+  byte_size: string | number;
+  image_width: number | null;
+  image_height: number | null;
+  name_locked: boolean;
+  uploaded_by: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+  deleted_at: Date | string | null;
+}
+
+export function serializeFile(row: FileRow) {
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    folder_id: row.folder_id,
+    filename: row.filename,
+    content_type: row.content_type,
+    // bigint arrives as a string from pg; the wire type is a number.
+    byte_size: Number(row.byte_size),
+    image_width: row.image_width,
+    image_height: row.image_height,
+    name_locked: row.name_locked,
+    uploaded_by: row.uploaded_by,
+    created_at: new Date(row.created_at).toISOString(),
+    updated_at: new Date(row.updated_at).toISOString(),
+    deleted_at: row.deleted_at === null ? null : new Date(row.deleted_at).toISOString(),
+  };
+}
+
+export const FILE_COLUMNS = [
+  'file.id as id',
+  'file.project_id as project_id',
+  'file.folder_id as folder_id',
+  'file.filename as filename',
+  'file.content_type as content_type',
+  'file.byte_size as byte_size',
+  'file.image_width as image_width',
+  'file.image_height as image_height',
+  'file.name_locked as name_locked',
+  'file.uploaded_by as uploaded_by',
+  'file.created_at as created_at',
+  'file.updated_at as updated_at',
+  'file.deleted_at as deleted_at',
+] as const;
 
 export async function projectStorageUsed(
   c: Pick<AppContext, 'get'>,
@@ -283,4 +337,128 @@ export async function appendFileVersion(
     .execute();
 
   return { created: true, version: inserted };
+}
+
+/**
+ * Brings a tombstoned file back, optionally under a different name because the
+ * old one may have been taken while it was gone. Renaming first would leave a
+ * window in which the tombstone still held it.
+ *
+ * `lockName` says the name came from a person, so `name_locked` is set. It is
+ * never cleared here: a false only means this caller chose the name itself, not
+ * that whoever typed the last one has changed their mind.
+ *
+ * `notify` is off for a caller that announces the whole operation itself -- an
+ * import page is one event whatever combination of restore, version and rename
+ * it turned out to be, and a second event per page is what a five-hundred page
+ * run would multiply.
+ *
+ * Runs on `c.get('db')` like the append above, so it must be called from a
+ * method transactionMiddleware wraps.
+ */
+export async function restoreFile(
+  c: Pick<AppContext, 'get'>,
+  fileId: string,
+  opts: { filename?: string; lockName: boolean; notify?: boolean }
+): Promise<ReturnType<typeof serializeFile>> {
+  const db = c.get('db');
+
+  const file = await db
+    .selectFrom('file')
+    .select(FILE_COLUMNS)
+    .where('file.id', '=', fileId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!file) throw new AppError(404, 'File not found');
+  if (file.deleted_at === null) return serializeFile(file);
+
+  // Nothing is auto-restored on the way up: un-deleting a folder somebody
+  // else deleted, without being asked to, is not this route's decision.
+  const blocked = await deletedAncestor(db, file.folder_id);
+  if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That file'));
+
+  const folderId = file.folder_id;
+  const filename = opts.filename ?? file.filename;
+  const taken = await db
+    .selectFrom('file')
+    .select(['file.id as id'])
+    .where('file.project_id', '=', file.project_id)
+    .where('file.deleted_at', 'is', null)
+    .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
+    .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
+    .where(sql<boolean>`lower(file.filename) = lower(${filename})`)
+    .executeTakeFirst();
+  if (taken) throw new AppError(409, `A file named "${filename}" is already there`);
+
+  try {
+    const row = await db
+      .updateTable('file')
+      .set({
+        filename,
+        deleted_at: null,
+        deleted_by: null,
+        ...(opts.lockName ? { name_locked: true } : {}),
+        updated_at: new Date(),
+      })
+      .where('file.id', '=', fileId)
+      .returning(FILE_COLUMNS)
+      .executeTakeFirstOrThrow();
+    if (opts.notify !== false) {
+      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
+        project_id: file.project_id,
+        file_id: fileId,
+      });
+    }
+    return serializeFile(row);
+  } catch (error) {
+    // Two restores of one file can pass the pre-check at once. The partial
+    // name index is what refuses the second.
+    if (isUniqueViolation(error)) {
+      throw new AppError(409, `A file named "${filename}" is already there`);
+    }
+    throw error;
+  }
+}
+
+// The suffix a taken name is retried under, and the point past which retrying
+// is not the answer to anything.
+const MAX_NAME_SUFFIX = 999;
+
+/**
+ * The nearest free name to `desired` in one directory: itself, or itself under
+ * a " (2)" suffix placed before the extension.
+ *
+ * A pre-check rather than an insert retried on 23505, because a caught unique
+ * violation leaves the transaction aborted and there is no savepoint to come
+ * back to. The partial name indexes are still what decide a race, in the catch
+ * that follows the write this feeds.
+ */
+export async function freeFilename(
+  db: Connection,
+  projectId: string,
+  folderId: string | null,
+  desired: string
+): Promise<string> {
+  const rows = await db
+    .selectFrom('file')
+    .select(['file.filename as filename'])
+    .where('file.project_id', '=', projectId)
+    .where('file.deleted_at', 'is', null)
+    .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
+    .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
+    .execute();
+
+  // Names are compared case-insensitively, the way the unique indexes do it.
+  const taken = new Set(rows.map((row) => row.filename.toLowerCase()));
+  if (!taken.has(desired.toLowerCase())) return desired;
+
+  // A leading dot is the whole name, not an extension.
+  const dot = desired.lastIndexOf('.');
+  const stem = dot > 0 ? desired.slice(0, dot) : desired;
+  const extension = dot > 0 ? desired.slice(dot) : '';
+  for (let suffix = 2; suffix <= MAX_NAME_SUFFIX; suffix += 1) {
+    const candidate = `${stem} (${suffix})${extension}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  throw new AppError(409, `A file named "${desired}" is already there`);
 }

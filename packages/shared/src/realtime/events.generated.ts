@@ -4,6 +4,8 @@
 export type RealtimeEventType =
   | 'deck_created'
   | 'deck_deleted'
+  | 'deck_import_finished'
+  | 'deck_import_started'
   | 'deck_updated'
   | 'file_deleted'
   | 'file_updated'
@@ -28,6 +30,20 @@ export type RealtimeEvent =
       type: 'deck_deleted';
       project_id: string;
       deck_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'deck_import_finished';
+      project_id: string;
+      deck_id: string;
+      run_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'deck_import_started';
+      project_id: string;
+      deck_id: string;
+      run_id: string;
       actor_user_id: string;
     }
   | {

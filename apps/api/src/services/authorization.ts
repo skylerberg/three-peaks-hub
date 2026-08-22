@@ -130,6 +130,80 @@ export async function assertDeckAccess(
     : await assertProjectAccess(c, row.project_id);
 }
 
+export interface ImportAccess extends ProjectAccess {
+  deckId: string;
+  importId: string;
+  folderId: string | null;
+}
+
+export interface ImportRunAccess extends ImportAccess {
+  runId: string;
+}
+
+// The whole chain in one query, so the deck's absence and the binding's are
+// told apart without either being read by somebody not allowed to.
+export async function assertImportAccess(
+  c: Pick<AppContext, 'get'>,
+  deckId: string,
+  mode: 'read' | 'write' = 'read'
+): Promise<ImportAccess> {
+  const row = await c
+    .get('db')
+    .selectFrom('deck')
+    .leftJoin('deck_import', 'deck_import.deck_id', 'deck.id')
+    .select([
+      'deck.project_id as project_id',
+      'deck_import.id as import_id',
+      'deck_import.folder_id as folder_id',
+    ])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirst();
+
+  if (!row) throw new AppError(404, 'Deck not found');
+  const access =
+    mode === 'write'
+      ? await assertProjectWrite(c, row.project_id)
+      : await assertProjectAccess(c, row.project_id);
+
+  // Asserted first: a stranger must not learn whether this deck is bound.
+  if (row.import_id === null) throw new AppError(404, 'This deck has no import');
+  return { ...access, deckId, importId: row.import_id, folderId: row.folder_id };
+}
+
+export async function assertImportRunAccess(
+  c: Pick<AppContext, 'get'>,
+  runId: string,
+  mode: 'read' | 'write' = 'read'
+): Promise<ImportRunAccess> {
+  const row = await c
+    .get('db')
+    .selectFrom('import_run')
+    .innerJoin('deck_import', 'deck_import.id', 'import_run.import_id')
+    .innerJoin('deck', 'deck.id', 'deck_import.deck_id')
+    .select([
+      'deck.project_id as project_id',
+      'deck.id as deck_id',
+      'deck_import.id as import_id',
+      'deck_import.folder_id as folder_id',
+    ])
+    .where('import_run.id', '=', runId)
+    .executeTakeFirst();
+
+  if (!row) throw new AppError(404, 'Import run not found');
+  const access =
+    mode === 'write'
+      ? await assertProjectWrite(c, row.project_id)
+      : await assertProjectAccess(c, row.project_id);
+
+  return {
+    ...access,
+    runId,
+    deckId: row.deck_id,
+    importId: row.import_id,
+    folderId: row.folder_id,
+  };
+}
+
 /**
  * Refuses a set of file ids that does not lie entirely inside one project.
  *

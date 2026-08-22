@@ -610,6 +610,138 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/decks/{deckId}/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read a deck's import binding
+     * @description A null folder is a binding with nowhere to put images — unbound by hand, or purged out from under it. The cards and the run history are still there either way.
+     */
+    get: operations['getApiDecksByDeckIdImport'];
+    /**
+     * Bind a deck to a folder of imported artwork
+     * @description Idempotent: re-binding to the same folder only updates the label. Re-binding to a different one while the import still has cards in the old folder is refused.
+     */
+    put: operations['putApiDecksByDeckIdImport'];
+    post?: never;
+    /**
+     * Stop syncing a deck with its export
+     * @description The images, the cards and the run history all stay. Re-binding the same folder resumes where this left off.
+     */
+    delete: operations['deleteApiDecksByDeckIdImport'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/{deckId}/import/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read a deck's import history
+     * @description Newest first. Counts are derived from each run’s own rows rather than cached.
+     */
+    get: operations['getApiDecksByDeckIdImportRuns'];
+    put?: never;
+    /**
+     * Start an import run
+     * @description Takes the whole export up front — every page number and title — and answers with the plan it computed: which pages land on cards that already exist, which are new, and how many cards the export has stopped having. Nothing is matched again while the pages upload. One run at a time per deck; a second answers 409 and names the open one, which is the only route back to abandoning it.
+     */
+    post: operations['postApiDecksByDeckIdImportRuns'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/import/runs/{runId}/pages': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import one page of an export
+     * @description The request body is the page image itself and its metadata travels in the query string, the way the upload route does it. The page has to be one the run planned; its title names the file and decides nothing else. Posting the same page twice answers 200 with what happened the first time.
+     */
+    post: operations['postApiDecksImportRunsByRunIdPages'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/import/runs/{runId}/finish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Finish an import run
+     * @description The only destructive step: it applies the identities the plan decided, tombstones every card no page was planned onto, and hands the deck what it created. Refuses until every page the run declared has landed, and refuses with 422 if a hand edit has pushed the deck past its card cap while the run was open.
+     */
+    post: operations['postApiDecksImportRunsByRunIdFinish'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/import/runs/{runId}/abandon': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Abandon an import run
+     * @description Leaves everything already imported in place. Nothing is tombstoned, nothing is undone, and the deck is not touched.
+     */
+    post: operations['postApiDecksImportRunsByRunIdAbandon'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/import/runs/{runId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one import run
+     * @description The run and a row per card it touched. A row whose image has since been purged keeps the name and the page number it had.
+     */
+    get: operations['getApiDecksImportRunsByRunId'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -678,6 +810,16 @@ export interface components {
       total_copies: number;
       updated_at: string;
     };
+    DeckImport: {
+      created_at: string;
+      deck_id: string;
+      folder_id: string | null;
+      id: string;
+      open_run_id: string | null;
+      source_kind: string;
+      source_label: string | null;
+      updated_at: string;
+    };
     DeckList: {
       decks: {
         back_file_id: string | null;
@@ -705,6 +847,7 @@ export interface components {
           id: string;
           image_height: number | null;
           image_width: number | null;
+          name_locked: boolean;
           project_id: string;
           updated_at: string;
           uploaded_by: string;
@@ -761,6 +904,7 @@ export interface components {
         id: string;
         image_height: number | null;
         image_width: number | null;
+        name_locked: boolean;
         project_id: string;
         updated_at: string;
         uploaded_by: string;
@@ -796,6 +940,7 @@ export interface components {
       id: string;
       image_height: number | null;
       image_width: number | null;
+      name_locked: boolean;
       project_id: string;
       updated_at: string;
       uploaded_by: string;
@@ -836,6 +981,83 @@ export interface components {
       parent_id: string | null;
       project_id: string;
       updated_at: string;
+    };
+    ImportPageResult: {
+      file_id: string | null;
+      file_version_number: number | null;
+      matched_by: string | null;
+      name: string;
+      outcome: string;
+      page_number: number;
+      replayed: boolean;
+      restored: boolean;
+    };
+    ImportRun: {
+      counts: {
+        added: number;
+        pages: number;
+        removed: number;
+        restored: number;
+        unchanged: number;
+        updated: number;
+      };
+      finished_at: string | null;
+      id: string;
+      import_id: string;
+      page_count: number;
+      source_label: string | null;
+      started_at: string;
+      started_by: string;
+      status: string;
+    };
+    ImportRunDetail: {
+      cards: {
+        file_id: string | null;
+        file_version_number: number | null;
+        matched_by: string | null;
+        name: string;
+        outcome: string;
+        page_number: number | null;
+        restored: boolean;
+      }[];
+      run: {
+        counts: {
+          added: number;
+          pages: number;
+          removed: number;
+          restored: number;
+          unchanged: number;
+          updated: number;
+        };
+        finished_at: string | null;
+        id: string;
+        import_id: string;
+        page_count: number;
+        source_label: string | null;
+        started_at: string;
+        started_by: string;
+        status: string;
+      };
+    };
+    ImportRunList: {
+      runs: {
+        counts: {
+          added: number;
+          pages: number;
+          removed: number;
+          restored: number;
+          unchanged: number;
+          updated: number;
+        };
+        finished_at: string | null;
+        id: string;
+        import_id: string;
+        page_count: number;
+        source_label: string | null;
+        started_at: string;
+        started_by: string;
+        status: string;
+      }[];
     };
     Password: string;
     Project: {
@@ -878,6 +1100,36 @@ export interface components {
         id: string;
         user_agent: string | null;
       }[];
+    };
+    StartedImportRun: {
+      counts: {
+        added: number;
+        pages: number;
+        removed: number;
+        restored: number;
+        unchanged: number;
+        updated: number;
+      };
+      finished_at: string | null;
+      id: string;
+      import_id: string;
+      page_count: number;
+      plan: {
+        added: number;
+        pages: {
+          /** @enum {unknown} */
+          action: 'add' | 'update';
+          matched_by: string | null;
+          page_number: number;
+          title: string | null;
+        }[];
+        removed: number;
+        updated: number;
+      };
+      source_label: string | null;
+      started_at: string;
+      started_by: string;
+      status: string;
     };
     User: {
       email: string;
@@ -2981,6 +3233,7 @@ export interface operations {
             | '00000000-0000-0000-0000-000000000000'
             | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
             | null;
+          name_locked?: boolean;
         };
       };
     };
@@ -3779,6 +4032,743 @@ export interface operations {
               message: string;
               path: string;
             }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksByDeckIdImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The binding */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckImport'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  putApiDecksByDeckIdImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          folder_id: components['schemas']['Uuid'];
+          /** @constant */
+          source_kind?: 'zip';
+          source_label?: string | unknown | null;
+        };
+      };
+    };
+    responses: {
+      /** @description The binding, as it now stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckImport'];
+        };
+      };
+      /** @description Bound */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckImport'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiDecksByDeckIdImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unbound */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksByDeckIdImportRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The runs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunList'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiDecksByDeckIdImportRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          pages: {
+            page_number: number;
+            title?: string;
+          }[];
+          id?: components['schemas']['Uuid'];
+          source_label?: string | unknown | null;
+        };
+      };
+    };
+    responses: {
+      /** @description Started, with the plan */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StartedImportRun'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiDecksImportRunsByRunIdPages: {
+    parameters: {
+      query: {
+        page_number: string;
+        title?: string;
+      };
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The page, already imported */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportPageResult'];
+        };
+      };
+      /** @description Imported */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportPageResult'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiDecksImportRunsByRunIdFinish: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Finished */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunDetail'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiDecksImportRunsByRunIdAbandon: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Abandoned */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRun'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksImportRunsByRunId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunDetail'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
             error: string;
           };
         };

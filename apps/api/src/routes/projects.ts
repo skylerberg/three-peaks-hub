@@ -248,12 +248,15 @@ projectsRouter.delete(
     const db = c.get('db');
     // Locked first: appendFileVersion takes the same row lock, so an append
     // cannot commit in the window between the keys being collected and the
-    // cascade, which would leave its object named by nothing.
+    // cascade, which would leave its object named by nothing. In id order, the
+    // one order every bulk file lock in the repo takes -- a purge's and an
+    // import's overlap with this one whenever a deck lives in the project.
     await db
       .selectFrom('file')
       .select(['file.id as id'])
       .where('file.project_id', '=', id)
       .forUpdate()
+      .orderBy('file.id')
       .execute();
 
     // Collect the storage keys before the cascade removes the rows naming them,

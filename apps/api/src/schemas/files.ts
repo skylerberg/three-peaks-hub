@@ -19,6 +19,9 @@ export const fileSchema = type({
   byte_size: 'number',
   image_width: 'number | null',
   image_height: 'number | null',
+  // Whether a person has named this file, which is what an import will not
+  // overwrite. On the wire because the screen that renames one has to say so.
+  name_locked: 'boolean',
   uploaded_by: 'string',
   created_at: 'string',
   updated_at: 'string',
@@ -42,6 +45,8 @@ export const updateFolderRequestSchema = type({
 export const updateFileRequestSchema = type({
   'filename?': stringWithLength(1, 255),
   'folder_id?': 'string.uuid | null',
+  // A rename locks the name on its own; sending this is how a lock is lifted.
+  'name_locked?': 'boolean',
 });
 
 // One request per screen: the folders and files directly inside one directory,

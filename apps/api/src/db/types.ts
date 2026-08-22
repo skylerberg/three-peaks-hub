@@ -1,10 +1,11 @@
 // Hand-written, and what the app imports. It re-exports the generated module
 // and is the place any branding or override goes — so a regeneration never
 // clobbers a deliberate type decision.
-import type { ModelSettings } from '@three-peaks/shared';
+import type { ImportRunSummary, ModelSettings } from '@three-peaks/shared';
 import type {
   ComponentModel as GeneratedComponentModel,
   DB as GeneratedDB,
+  ImportRun as GeneratedImportRun,
 } from './types.generated.ts';
 
 export type * from './types.generated.ts';
@@ -18,6 +19,12 @@ export interface ComponentModel extends Omit<GeneratedComponentModel, 'settings'
   settings: ModelSettings;
 }
 
-export interface DB extends Omit<GeneratedDB, 'component_model'> {
+/** @public -- exported to shadow the generated interface of the same name. */
+export interface ImportRun extends Omit<GeneratedImportRun, 'summary'> {
+  summary: ImportRunSummary | null;
+}
+
+export interface DB extends Omit<GeneratedDB, 'component_model' | 'import_run'> {
   component_model: ComponentModel;
+  import_run: ImportRun;
 }
