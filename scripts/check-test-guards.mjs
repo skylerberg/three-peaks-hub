@@ -7,6 +7,15 @@
 //   STILL-PASSED the bug was applied and nothing noticed; the guard is dead
 //   NEVER-APPLIED the pattern never matched a module the tests loaded
 //   RUN-FAILED   the child died before it measured anything
+//
+// Usage:
+//   pnpm run check:test-guards                 # every guard
+//   pnpm run check:test-guards projects        # guards whose name or file matches
+//   pnpm run check:test-guards --verify-only   # anchors only, no test run
+//
+// A substring is how you write one: authoring a guard means running it until it
+// reports CAUGHT, and the whole set takes minutes and a database. Note the
+// missing `--` -- pnpm forwards it into argv, where it would read as the filter.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,9 +24,15 @@ import { fileURLToPath } from 'node:url';
 import { guards } from './test-guards.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const verifyOnly = process.argv.includes('--verify-only');
-const selftest = process.argv.includes('--selftest');
+const args = process.argv.slice(2);
+const verifyOnly = args.includes('--verify-only');
+const selftest = args.includes('--selftest');
+const filter = args.find((arg) => !arg.startsWith('-')) ?? '';
 const TIMEOUT_MS = Number(process.env.GUARD_TIMEOUT_MS ?? 120_000);
+
+const selected = filter
+  ? guards.filter((guard) => guard.name.includes(filter) || guard.file.includes(filter))
+  : guards;
 
 const RUNNERS = {
   api: { cwd: 'apps/api', env: ['--env-file=.env.test'] },
@@ -39,7 +54,7 @@ function resolve(guard) {
 // works -- this is the failure the whole mechanism is most vulnerable to.
 function verifyAnchors() {
   const problems = [];
-  for (const guard of guards) {
+  for (const guard of selected) {
     const { filePath } = resolve(guard);
     if (!existsSync(filePath)) {
       problems.push(`${guard.name}: ${guard.file} does not exist`);
@@ -117,13 +132,23 @@ function runGuard(guard) {
 }
 
 async function main() {
+  // A filter that selects nothing is a typo, and running zero guards would
+  // report the same green as running all of them.
+  if (selected.length === 0) {
+    console.error(`No guard matches ${JSON.stringify(filter)}.`);
+    return 1;
+  }
+
   const anchorProblems = verifyAnchors();
   if (anchorProblems.length > 0) {
     console.error('Guard anchors have drifted:');
     for (const problem of anchorProblems) console.error(`  ${problem}`);
     return 1;
   }
-  console.log(`${guards.length} guard anchors resolve, each matching exactly once.`);
+  console.log(
+    `${selected.length} guard anchor(s) resolve, each matching exactly once` +
+      `${filter ? ` (filtered by ${JSON.stringify(filter)}, of ${guards.length})` : ''}.`
+  );
 
   if (verifyOnly) return 0;
 
@@ -161,7 +186,7 @@ async function main() {
   // refused outright, which is the correct behaviour and the reason for this
   // shape.
   const byRunner = new Map();
-  for (const guard of guards) {
+  for (const guard of selected) {
     const key = guard.runner ?? 'api';
     if (!byRunner.has(key)) byRunner.set(key, []);
     byRunner.get(key).push(guard);
