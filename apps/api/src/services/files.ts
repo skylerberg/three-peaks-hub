@@ -195,6 +195,7 @@ export async function appendFileVersion(
       'file.image_height as image_height',
       'file.uploaded_by as uploaded_by',
       'file.created_at as created_at',
+      'file.deleted_at as deleted_at',
     ])
     .where('file.id', '=', fileId)
     .forUpdate()
@@ -204,6 +205,13 @@ export async function appendFileVersion(
   // already waiting on it looks like from here. The row the caller resolved
   // access against no longer exists, so this is a 404 rather than a 500.
   if (!file) throw new AppError(404, 'File not found');
+
+  // Refused here rather than in the routes, because this is the only writer:
+  // one check covers the upload, the append, the version restore and every
+  // import path that will ever reach them.
+  if (file.deleted_at !== null) {
+    throw new AppError(409, 'That file is deleted. Restore it before adding a version.');
+  }
 
   let current = await db
     .selectFrom('file_version')

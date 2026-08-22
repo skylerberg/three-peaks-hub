@@ -1,6 +1,8 @@
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_AVATAR_BYTES = 11 * 1024 * 1024;
-export const PROJECT_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024;
+// A project pays for every version it has kept and for everything it has
+// deleted but not purged, so 1 GiB was roughly one deck.
+export const PROJECT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 
 // The web app pre-validates against this so a 200 MB file fails in a
 // millisecond instead of after 50 MB of transfer. The API is the actual gate —

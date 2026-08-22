@@ -41,6 +41,7 @@ const SCREENS = [
   { name: 'forgot-password', path: '/forgot-password' },
   { name: 'model-studio', authed: true, reach: reachModelStudio },
   { name: 'file-versions', authed: true, reach: reachFileVersions },
+  { name: 'deleted', authed: true, reach: reachDeleted },
 ];
 
 const SCHEMES = ['light', 'dark'];
@@ -100,6 +101,34 @@ async function reachFileVersions(browser, base, scheme) {
   // waiting for it is what keeps axe from reading a half-drawn screen.
   await browser.page.waitForSelector('button:has-text("Upload new version")', { timeout: 15_000 });
   await browser.page.waitForSelector(`button[aria-label="Download version 1 of ${filename}"]`, {
+    timeout: 15_000,
+  });
+}
+
+async function reachDeleted(browser, base, scheme) {
+  const filename = await freshProject(browser, base, `deleted-${scheme}`);
+  await browser.page.waitForSelector(`button[aria-label="Delete ${filename}"]`, {
+    timeout: 15_000,
+  });
+
+  // Playwright dismisses a dialog nobody has claimed, so without this the
+  // confirm is answered "no", the delete never happens, and axe reads an empty
+  // screen while reporting green. Registered before the click, and the wait
+  // afterwards is what turns a cancelled dialog into a failure.
+  browser.page.once('dialog', (dialog) => dialog.accept());
+  await browser.click(`button[aria-label="Delete ${filename}"]`);
+  await browser.page.waitForSelector(`button[aria-label="Delete ${filename}"]`, {
+    state: 'detached',
+    timeout: 15_000,
+  });
+
+  await browser.click('a:has-text("Deleted")');
+  // The restore controls appear only once the member roster has answered, so
+  // waiting on one keeps axe from reading a half-drawn screen.
+  await browser.page.waitForSelector(`button[aria-label="Restore ${filename}"]`, {
+    timeout: 15_000,
+  });
+  await browser.page.waitForSelector(`button[aria-label="Permanently delete ${filename}"]`, {
     timeout: 15_000,
   });
 }

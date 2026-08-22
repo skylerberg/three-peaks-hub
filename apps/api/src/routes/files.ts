@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { Hono } from 'hono';
 import { describeRoute, resolver } from 'hono-openapi';
+import { type NotNull, sql } from 'kysely';
 import { MAX_UPLOAD_BYTES, PROJECT_STORAGE_QUOTA_BYTES } from '@three-peaks/shared';
 import {
   assertFileAccess,
@@ -21,12 +22,17 @@ import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
 import {
   createFolderRequestSchema,
+  deletedListingSchema,
+  deletedQuerySchema,
   directoryListingSchema,
   directoryQuerySchema,
   fileSchema,
   fileVersionListSchema,
   fileVersionResultSchema,
   folderSchema,
+  purgeQuerySchema,
+  restoreFileQuerySchema,
+  restoreFolderQuerySchema,
   updateFileRequestSchema,
   uploadQuerySchema,
   updateFolderRequestSchema,
@@ -68,8 +74,21 @@ type FolderRow = {
   name: string;
   created_at: Date | string;
   updated_at: Date | string;
+  deleted_at: Date | string | null;
 };
 
+const FOLDER_COLUMNS = [
+  'folder.id as id',
+  'folder.project_id as project_id',
+  'folder.parent_id as parent_id',
+  'folder.name as name',
+  'folder.created_at as created_at',
+  'folder.updated_at as updated_at',
+  'folder.deleted_at as deleted_at',
+] as const;
+
+// deleted_at is deliberately not on the wire: nothing reads one folder by id,
+// and the deleted listing carries the fact where it is needed.
 function serializeFolder(row: FolderRow) {
   return {
     id: row.id,
@@ -93,6 +112,7 @@ function serializeFile(row: {
   uploaded_by: string;
   created_at: Date | string;
   updated_at: Date | string;
+  deleted_at: Date | string | null;
 }) {
   return {
     id: row.id,
@@ -107,8 +127,24 @@ function serializeFile(row: {
     uploaded_by: row.uploaded_by,
     created_at: new Date(row.created_at).toISOString(),
     updated_at: new Date(row.updated_at).toISOString(),
+    deleted_at: row.deleted_at === null ? null : new Date(row.deleted_at).toISOString(),
   };
 }
+
+const FILE_COLUMNS = [
+  'file.id as id',
+  'file.project_id as project_id',
+  'file.folder_id as folder_id',
+  'file.filename as filename',
+  'file.content_type as content_type',
+  'file.byte_size as byte_size',
+  'file.image_width as image_width',
+  'file.image_height as image_height',
+  'file.uploaded_by as uploaded_by',
+  'file.created_at as created_at',
+  'file.updated_at as updated_at',
+  'file.deleted_at as deleted_at',
+] as const;
 
 interface VersionRow {
   file_id: string;
@@ -227,20 +263,16 @@ async function lookupVersion(
 // read must not depend on that having worked.
 const MAX_BREADCRUMB_DEPTH = 64;
 
+// Never filtered by deleted_at: the trail is what the ancestor rule is read
+// off, and a truncated trail would let a move into a deleted subtree past the
+// cycle check.
 async function breadcrumb(db: Connection, folderId: string): Promise<FolderRow[]> {
   const trail: FolderRow[] = [];
   let cursor: string | null = folderId;
   for (let depth = 0; cursor && depth < MAX_BREADCRUMB_DEPTH; depth += 1) {
     const row: FolderRow | undefined = await db
       .selectFrom('folder')
-      .select([
-        'folder.id as id',
-        'folder.project_id as project_id',
-        'folder.parent_id as parent_id',
-        'folder.name as name',
-        'folder.created_at as created_at',
-        'folder.updated_at as updated_at',
-      ])
+      .select(FOLDER_COLUMNS)
       .where('folder.id', '=', cursor)
       .executeTakeFirst();
     if (!row) break;
@@ -248,6 +280,49 @@ async function breadcrumb(db: Connection, folderId: string): Promise<FolderRow[]
     cursor = row.parent_id;
   }
   return trail;
+}
+
+// The deleted folder that stands between something and being visible again.
+// `id` is null for the one case the walk cannot answer.
+interface DeletedAncestor {
+  id: string | null;
+  name: string;
+}
+
+// A walk that ran out of depth, or off a row that is no longer there, leaves
+// the rest of the chain unknown — and unknown denies. Admitting it instead
+// would put a row inside a tombstone nothing lists and nothing can reach.
+const UNKNOWN_ANCESTOR: DeletedAncestor = { id: null, name: 'a folder too deep to check' };
+
+// Outermost first, so what is named is the one to restore first.
+function firstDeletedInTrail(trail: FolderRow[]): DeletedAncestor | null {
+  const deleted = trail.find((folder) => folder.deleted_at !== null);
+  if (deleted) return { id: deleted.id, name: deleted.name };
+  if (trail.length === 0 || trail[0].parent_id !== null) return UNKNOWN_ANCESTOR;
+  return null;
+}
+
+// The check every write target goes through. A one-level `deleted_at is null`
+// would not do: a live folder inside a deleted one is ordinary, and a row
+// planted there is invisible to every listing and recoverable by no route.
+async function deletedAncestor(
+  db: Connection,
+  folderId: string | null
+): Promise<DeletedAncestor | null> {
+  if (folderId === null) return null;
+  return firstDeletedInTrail(await breadcrumb(db, folderId));
+}
+
+// Its own function rather than an inline test, so the single line deciding
+// between keeping the bytes and reclaiming them has one site.
+function purgeRequested(query: { purge?: string }): boolean {
+  return query.purge === 'true';
+}
+
+function blockedMessage(ancestor: DeletedAncestor, what: string): string {
+  return ancestor.id === null
+    ? `${what} sits too deep for its folders to be checked`
+    : `${what} is inside the deleted folder "${ancestor.name}". Restore that first`;
 }
 
 filesRouter.get(
@@ -279,16 +354,10 @@ filesRouter.get(
     if (folderId) {
       const row = await db
         .selectFrom('folder')
-        .select([
-          'folder.id as id',
-          'folder.project_id as project_id',
-          'folder.parent_id as parent_id',
-          'folder.name as name',
-          'folder.created_at as created_at',
-          'folder.updated_at as updated_at',
-        ])
+        .select(FOLDER_COLUMNS)
         .where('folder.id', '=', folderId)
         .where('folder.project_id', '=', projectId)
+        .where('folder.deleted_at', 'is', null)
         .executeTakeFirst();
       if (!row) throw new AppError(404, 'Folder not found');
       current = row;
@@ -297,35 +366,18 @@ filesRouter.get(
     const [folders, files, trail, used] = await Promise.all([
       db
         .selectFrom('folder')
-        .select([
-          'folder.id as id',
-          'folder.project_id as project_id',
-          'folder.parent_id as parent_id',
-          'folder.name as name',
-          'folder.created_at as created_at',
-          'folder.updated_at as updated_at',
-        ])
+        .select(FOLDER_COLUMNS)
         .where('folder.project_id', '=', projectId)
+        .where('folder.deleted_at', 'is', null)
         .$if(folderId === null, (qb) => qb.where('folder.parent_id', 'is', null))
         .$if(folderId !== null, (qb) => qb.where('folder.parent_id', '=', folderId))
         .orderBy('folder.name', 'asc')
         .execute(),
       db
         .selectFrom('file')
-        .select([
-          'file.id as id',
-          'file.project_id as project_id',
-          'file.folder_id as folder_id',
-          'file.filename as filename',
-          'file.content_type as content_type',
-          'file.byte_size as byte_size',
-          'file.image_width as image_width',
-          'file.image_height as image_height',
-          'file.uploaded_by as uploaded_by',
-          'file.created_at as created_at',
-          'file.updated_at as updated_at',
-        ])
+        .select(FILE_COLUMNS)
         .where('file.project_id', '=', projectId)
+        .where('file.deleted_at', 'is', null)
         .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
         .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
         .orderBy('file.filename', 'asc')
@@ -333,6 +385,12 @@ filesRouter.get(
       folderId ? breadcrumb(db, folderId) : Promise.resolve([] as FolderRow[]),
       projectStorageUsed(c, projectId),
     ]);
+
+    // A live folder inside a deleted one is ordinary, and browsing into it by
+    // URL must not work: the answer is the same 404 the folder itself gives.
+    if (folderId !== null && firstDeletedInTrail(trail) !== null) {
+      throw new AppError(404, 'Folder not found');
+    }
 
     return c.json({
       project_id: projectId,
@@ -343,6 +401,146 @@ filesRouter.get(
       storage_used_bytes: used,
       storage_quota_bytes: PROJECT_STORAGE_QUOTA_BYTES,
     });
+  }
+);
+
+interface FolderNode {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  deleted_at: Date | string | null;
+}
+
+// The path a deleted row came from, and whatever stands between it and coming
+// back. One walk answers both, off a map of every folder in the project rather
+// than a query each — a tombstone's ancestors are ordinary rows to this.
+function ancestry(
+  folders: Map<string, FolderNode>,
+  startId: string | null
+): { path: string; blockedBy: DeletedAncestor | null } {
+  const names: string[] = [];
+  let blockedBy: DeletedAncestor | null = null;
+  let cursor = startId;
+  for (let depth = 0; cursor !== null && depth < MAX_BREADCRUMB_DEPTH; depth += 1) {
+    const row = folders.get(cursor);
+    if (!row) return { path: names.join('/'), blockedBy: UNKNOWN_ANCESTOR };
+    names.unshift(row.name);
+    if (row.deleted_at !== null) blockedBy = { id: row.id, name: row.name };
+    cursor = row.parent_id;
+  }
+  return {
+    path: names.join('/'),
+    blockedBy: blockedBy ?? (cursor === null ? null : UNKNOWN_ANCESTOR),
+  };
+}
+
+filesRouter.get(
+  '/deleted',
+  describeRoute({
+    tags: ['Files'],
+    summary: 'List what has been deleted',
+    description:
+      'Flat, and each entry carries the path it came from — a deleted subtree has no live parent to browse into. A folder that was deleted does not list its contents: those rows were never deleted themselves, and restoring the folder brings them back with it.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'The deleted files and folders',
+        content: { 'application/json': { schema: resolver(deletedListingSchema) } },
+      },
+      ...standardErrors,
+    },
+  }),
+  queryValidator(deletedQuerySchema),
+  async (c) => {
+    const query = c.req.valid('query') as { project_id: string };
+    const projectId = query.project_id;
+
+    await assertProjectAccess(c, projectId);
+    const db = c.get('db');
+
+    const [files, folders, everyFolder] = await Promise.all([
+      db
+        .selectFrom('file')
+        .select([
+          'file.id as id',
+          'file.folder_id as folder_id',
+          'file.filename as filename',
+          'file.content_type as content_type',
+          'file.byte_size as byte_size',
+          'file.deleted_at as deleted_at',
+          'file.deleted_by as deleted_by',
+        ])
+        .where('file.project_id', '=', projectId)
+        .where('file.deleted_at', 'is not', null)
+        .$narrowType<{ deleted_at: NotNull }>()
+        .execute(),
+      db
+        .selectFrom('folder')
+        .select([
+          'folder.id as id',
+          'folder.parent_id as parent_id',
+          'folder.name as name',
+          'folder.deleted_at as deleted_at',
+          'folder.deleted_by as deleted_by',
+        ])
+        .where('folder.project_id', '=', projectId)
+        .where('folder.deleted_at', 'is not', null)
+        .$narrowType<{ deleted_at: NotNull }>()
+        .execute(),
+      // Unfiltered on purpose: the chain above a tombstone is made of rows that
+      // may themselves be tombstones, and every one of them has to be walkable.
+      db
+        .selectFrom('folder')
+        .select([
+          'folder.id as id',
+          'folder.parent_id as parent_id',
+          'folder.name as name',
+          'folder.deleted_at as deleted_at',
+        ])
+        .where('folder.project_id', '=', projectId)
+        .execute(),
+    ]);
+
+    const byId = new Map<string, FolderNode>(everyFolder.map((row) => [row.id, row]));
+
+    const entries = [
+      ...files.map((row) => {
+        const { path, blockedBy } = ancestry(byId, row.folder_id);
+        return {
+          kind: 'file' as const,
+          id: row.id,
+          project_id: projectId,
+          name: row.filename,
+          path,
+          content_type: row.content_type,
+          byte_size: Number(row.byte_size),
+          deleted_at: new Date(row.deleted_at).toISOString(),
+          deleted_by: row.deleted_by,
+          blocked_by: blockedBy === null ? null : blockedBy.name,
+        };
+      }),
+      // From the parent, not from itself: a folder is never what blocks its own
+      // restore.
+      ...folders.map((row) => {
+        const { path, blockedBy } = ancestry(byId, row.parent_id);
+        return {
+          kind: 'folder' as const,
+          id: row.id,
+          project_id: projectId,
+          name: row.name,
+          path,
+          content_type: null,
+          byte_size: null,
+          deleted_at: new Date(row.deleted_at).toISOString(),
+          deleted_by: row.deleted_by,
+          blocked_by: blockedBy === null ? null : blockedBy.name,
+        };
+      }),
+    ];
+
+    entries.sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
+
+    return c.json({ entries });
   }
 );
 
@@ -383,6 +581,9 @@ filesRouter.post(
         .where('folder.project_id', '=', body.project_id)
         .executeTakeFirst();
       if (!parent) throw new AppError(404, 'Parent folder not found');
+      if ((await deletedAncestor(db, body.parent_id)) !== null) {
+        throw new AppError(404, 'Parent folder not found');
+      }
     }
 
     try {
@@ -395,7 +596,7 @@ filesRouter.post(
           name: body.name,
           created_by: c.get('user').id,
         })
-        .returning(['id', 'project_id', 'parent_id', 'name', 'created_at', 'updated_at'])
+        .returning(FOLDER_COLUMNS)
         .executeTakeFirstOrThrow();
       publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_created', {
         project_id: body.project_id,
@@ -452,6 +653,8 @@ filesRouter.patch(
       if (trail.some((folder) => folder.id === id)) {
         throw new AppError(409, 'A folder cannot be moved inside itself');
       }
+      // The trail is already in hand, so the ancestor rule costs nothing here.
+      if (firstDeletedInTrail(trail) !== null) throw new AppError(404, 'Parent folder not found');
     }
 
     try {
@@ -463,8 +666,13 @@ filesRouter.patch(
           updated_at: new Date(),
         })
         .where('folder.id', '=', id)
-        .returning(['id', 'project_id', 'parent_id', 'name', 'created_at', 'updated_at'])
-        .executeTakeFirstOrThrow();
+        // A tombstone is read-only. Renaming one would take it out from under
+        // the name the deleted listing shows, and moving one would make the
+        // path that listing reports a lie.
+        .where('folder.deleted_at', 'is', null)
+        .returning(FOLDER_COLUMNS)
+        .executeTakeFirst();
+      if (!row) throw new AppError(409, 'That folder is deleted. Restore it first');
       publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_updated', {
         project_id: access.projectId,
         folder_id: id,
@@ -484,7 +692,8 @@ filesRouter.delete(
   describeRoute({
     tags: ['Files'],
     summary: 'Delete a folder',
-    description: 'Cascades to everything inside it. Stored objects go after commit.',
+    description:
+      'Soft by default: the folder is tombstoned and nothing inside it is touched, which is what makes restoring it exact. `purge=true` is the irreversible one — it cascades to the whole subtree, live files included, and reclaims every stored object. Only the literal word is accepted, and repeating the parameter is a 400.',
     security: [{ bearerAuth: [] }],
     responses: {
       204: { description: 'Deleted' },
@@ -492,10 +701,33 @@ filesRouter.delete(
       ...standardErrors,
     },
   }),
+  queryValidator(purgeQuerySchema),
   async (c) => {
     const id = c.req.param('id');
     const access = await assertFolderAccess(c, id, 'write');
     const db = c.get('db');
+
+    if (!purgeRequested(c.req.valid('query') as { purge?: string })) {
+      // Only this row. Marking the subtree would make a restore resurrect
+      // whatever had been deleted inside it individually beforehand; visibility
+      // is read off the ancestor chain instead.
+      const row = await db
+        .updateTable('folder')
+        .set({ deleted_at: new Date(), deleted_by: c.get('user').id })
+        // A repeat delete leaves the first one's record intact.
+        .where('folder.id', '=', id)
+        .where('folder.deleted_at', 'is', null)
+        .returning(['folder.id as id'])
+        .executeTakeFirst();
+
+      if (row) {
+        publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_deleted', {
+          project_id: access.projectId,
+          folder_id: id,
+        });
+      }
+      return c.body(null, 204);
+    }
 
     // Recursive, because the database cascade removes the rows but nothing
     // removes the objects those rows named. Locked in the same breath:
@@ -558,6 +790,79 @@ filesRouter.delete(
 );
 
 filesRouter.post(
+  '/folders/:id/restore',
+  describeRoute({
+    tags: ['Files'],
+    summary: 'Restore a deleted folder',
+    description:
+      'Takes an optional `name`, because the old one may have been taken while the folder was gone. Renaming first would leave a window in which the tombstone still held it. Whatever was deleted inside the folder separately stays deleted. Restoring a folder that is not deleted answers 200 and changes nothing.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Restored',
+        content: { 'application/json': { schema: resolver(folderSchema) } },
+      },
+      ...conflictErrorResponse,
+      ...forbiddenErrorResponse,
+      ...standardErrors,
+    },
+  }),
+  queryValidator(restoreFolderQuerySchema),
+  async (c) => {
+    const id = c.req.param('id');
+    const access = await assertFolderAccess(c, id, 'write');
+    const query = c.req.valid('query') as { name?: string };
+    const db = c.get('db');
+
+    const folder = await db
+      .selectFrom('folder')
+      .select(FOLDER_COLUMNS)
+      .where('folder.id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!folder) throw new AppError(404, 'Folder not found');
+    if (folder.deleted_at === null) return c.json(serializeFolder(folder));
+
+    const blocked = await deletedAncestor(db, folder.parent_id);
+    if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That folder'));
+
+    const parentId = folder.parent_id;
+    const name = query.name ?? folder.name;
+    const taken = await db
+      .selectFrom('folder')
+      .select(['folder.id as id'])
+      .where('folder.project_id', '=', access.projectId)
+      .where('folder.deleted_at', 'is', null)
+      .$if(parentId === null, (qb) => qb.where('folder.parent_id', 'is', null))
+      .$if(parentId !== null, (qb) => qb.where('folder.parent_id', '=', parentId))
+      .where(sql<boolean>`lower(folder.name) = lower(${name})`)
+      .executeTakeFirst();
+    if (taken) throw new AppError(409, `A folder named "${name}" is already here`);
+
+    try {
+      const row = await db
+        .updateTable('folder')
+        .set({ name, deleted_at: null, deleted_by: null, updated_at: new Date() })
+        .where('folder.id', '=', id)
+        .returning(FOLDER_COLUMNS)
+        .executeTakeFirstOrThrow();
+      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_updated', {
+        project_id: access.projectId,
+        folder_id: id,
+      });
+      return c.json(serializeFolder(row));
+    } catch (error) {
+      // The check above races two restores against each other; the index is
+      // what actually decides.
+      if (isUniqueViolation(error)) {
+        throw new AppError(409, `A folder named "${name}" is already here`);
+      }
+      throw error;
+    }
+  }
+);
+
+filesRouter.post(
   '/upload',
   describeRoute({
     tags: ['Files'],
@@ -601,6 +906,9 @@ filesRouter.post(
         .where('folder.project_id', '=', projectId)
         .executeTakeFirst();
       if (!folder) throw new AppError(404, 'Folder not found');
+      if ((await deletedAncestor(db, folderId)) !== null) {
+        throw new AppError(404, 'Folder not found');
+      }
     }
 
     // Checked before the transfer on what the client claims, and again below on
@@ -639,19 +947,7 @@ filesRouter.post(
           checksum: stored.checksum,
           uploaded_by: c.get('user').id,
         })
-        .returning([
-          'id',
-          'project_id',
-          'folder_id',
-          'filename',
-          'content_type',
-          'byte_size',
-          'image_width',
-          'image_height',
-          'uploaded_by',
-          'created_at',
-          'updated_at',
-        ])
+        .returning(FILE_COLUMNS)
         .executeTakeFirstOrThrow();
     } catch (error) {
       await reclaim(stored.storageKey);
@@ -797,6 +1093,7 @@ filesRouter.post(
         description: 'Created',
         content: { 'application/json': { schema: resolver(fileVersionResultSchema) } },
       },
+      ...conflictErrorResponse,
       ...forbiddenErrorResponse,
       ...payloadTooLargeErrorResponse,
       ...standardErrors,
@@ -864,6 +1161,7 @@ filesRouter.post(
         description: 'Restored',
         content: { 'application/json': { schema: resolver(fileVersionResultSchema) } },
       },
+      ...conflictErrorResponse,
       ...forbiddenErrorResponse,
       ...payloadTooLargeErrorResponse,
       ...standardErrors,
@@ -873,6 +1171,17 @@ filesRouter.post(
     const id = c.req.param('id');
     const access = await assertFileAccess(c, id, 'write');
     const db = c.get('db');
+
+    // Refused up here rather than left to the append below, so no object is
+    // copied for a row that is going to refuse it anyway.
+    const target = await db
+      .selectFrom('file')
+      .select(['file.deleted_at as deleted_at'])
+      .where('file.id', '=', id)
+      .executeTakeFirst();
+    if (target?.deleted_at != null) {
+      throw new AppError(409, 'That file is deleted. Restore it before adding a version');
+    }
 
     // A number this path could never address is a 404 rather than a 400: the
     // URL names a resource that does not exist.
@@ -953,19 +1262,7 @@ filesRouter.get(
     const row = await c
       .get('db')
       .selectFrom('file')
-      .select([
-        'file.id as id',
-        'file.project_id as project_id',
-        'file.folder_id as folder_id',
-        'file.filename as filename',
-        'file.content_type as content_type',
-        'file.byte_size as byte_size',
-        'file.image_width as image_width',
-        'file.image_height as image_height',
-        'file.uploaded_by as uploaded_by',
-        'file.created_at as created_at',
-        'file.updated_at as updated_at',
-      ])
+      .select(FILE_COLUMNS)
       .where('file.id', '=', id)
       .executeTakeFirstOrThrow();
 
@@ -1005,6 +1302,9 @@ filesRouter.patch(
         .where('folder.project_id', '=', access.projectId)
         .executeTakeFirst();
       if (!folder) throw new AppError(404, 'Folder not found');
+      if ((await deletedAncestor(db, body.folder_id)) !== null) {
+        throw new AppError(404, 'Folder not found');
+      }
     }
 
     try {
@@ -1016,20 +1316,13 @@ filesRouter.patch(
           updated_at: new Date(),
         })
         .where('file.id', '=', id)
-        .returning([
-          'id',
-          'project_id',
-          'folder_id',
-          'filename',
-          'content_type',
-          'byte_size',
-          'image_width',
-          'image_height',
-          'uploaded_by',
-          'created_at',
-          'updated_at',
-        ])
-        .executeTakeFirstOrThrow();
+        // A tombstone no longer holds its name in the index, so renaming one
+        // could take any name at all; moving one would make the path the
+        // deleted listing reports a lie.
+        .where('file.deleted_at', 'is', null)
+        .returning(FILE_COLUMNS)
+        .executeTakeFirst();
+      if (!row) throw new AppError(409, 'That file is deleted. Restore it first');
       publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
         project_id: access.projectId,
         file_id: id,
@@ -1049,6 +1342,8 @@ filesRouter.delete(
   describeRoute({
     tags: ['Files'],
     summary: 'Delete a file',
+    description:
+      'Soft by default: the row is tombstoned and every version keeps its bytes, so a restore is exact. `purge=true` is the irreversible one and the only path that reclaims storage. Only the literal word is accepted, and repeating the parameter is a 400. A repeat delete answers 204 either way.',
     security: [{ bearerAuth: [] }],
     responses: {
       204: { description: 'Deleted' },
@@ -1056,6 +1351,7 @@ filesRouter.delete(
       ...standardErrors,
     },
   }),
+  queryValidator(purgeQuerySchema),
   async (c) => {
     const id = c.req.param('id');
     const access = await assertFileAccess(c, id, 'write');
@@ -1070,6 +1366,25 @@ filesRouter.delete(
       .where('file.id', '=', id)
       .forUpdate()
       .execute();
+
+    if (!purgeRequested(c.req.valid('query') as { purge?: string })) {
+      const marked = await db
+        .updateTable('file')
+        .set({ deleted_at: new Date(), deleted_by: c.get('user').id })
+        // A repeat delete leaves the first one's record intact.
+        .where('file.id', '=', id)
+        .where('file.deleted_at', 'is', null)
+        .returning(['file.id as id'])
+        .executeTakeFirst();
+
+      if (marked) {
+        publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_deleted', {
+          project_id: access.projectId,
+          file_id: id,
+        });
+      }
+      return c.body(null, 204);
+    }
 
     // Read before the delete: the foreign key cascade takes these rows with the
     // file, and nothing else names the objects they point at.
@@ -1094,5 +1409,80 @@ filesRouter.delete(
       });
     }
     return c.body(null, 204);
+  }
+);
+
+filesRouter.post(
+  '/:id/restore',
+  describeRoute({
+    tags: ['Files'],
+    summary: 'Restore a deleted file',
+    description:
+      'Takes an optional `filename`, because the old one may have been taken while the file was gone. Renaming first would leave a window in which the tombstone still held it. Restoring a file that is not deleted answers 200 and changes nothing.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Restored',
+        content: { 'application/json': { schema: resolver(fileSchema) } },
+      },
+      ...conflictErrorResponse,
+      ...forbiddenErrorResponse,
+      ...standardErrors,
+    },
+  }),
+  queryValidator(restoreFileQuerySchema),
+  async (c) => {
+    const id = c.req.param('id');
+    const access = await assertFileAccess(c, id, 'write');
+    const query = c.req.valid('query') as { filename?: string };
+    const db = c.get('db');
+
+    const file = await db
+      .selectFrom('file')
+      .select(FILE_COLUMNS)
+      .where('file.id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!file) throw new AppError(404, 'File not found');
+    if (file.deleted_at === null) return c.json(serializeFile(file));
+
+    // Nothing is auto-restored on the way up: un-deleting a folder somebody
+    // else deleted, without being asked to, is not this route's decision.
+    const blocked = await deletedAncestor(db, file.folder_id);
+    if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That file'));
+
+    const folderId = file.folder_id;
+    const filename = query.filename ?? file.filename;
+    const taken = await db
+      .selectFrom('file')
+      .select(['file.id as id'])
+      .where('file.project_id', '=', access.projectId)
+      .where('file.deleted_at', 'is', null)
+      .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
+      .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
+      .where(sql<boolean>`lower(file.filename) = lower(${filename})`)
+      .executeTakeFirst();
+    if (taken) throw new AppError(409, `A file named "${filename}" is already there`);
+
+    try {
+      const row = await db
+        .updateTable('file')
+        .set({ filename, deleted_at: null, deleted_by: null, updated_at: new Date() })
+        .where('file.id', '=', id)
+        .returning(FILE_COLUMNS)
+        .executeTakeFirstOrThrow();
+      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
+        project_id: access.projectId,
+        file_id: id,
+      });
+      return c.json(serializeFile(row));
+    } catch (error) {
+      // The check above races two restores against each other; the index is
+      // what actually decides.
+      if (isUniqueViolation(error)) {
+        throw new AppError(409, `A file named "${filename}" is already there`);
+      }
+      throw error;
+    }
   }
 );

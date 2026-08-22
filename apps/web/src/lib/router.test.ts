@@ -42,6 +42,13 @@ describe('matchRoute', () => {
     });
   });
 
+  it('matches the deleted view', () => {
+    expect(matchRoute(`/projects/${UUID}/deleted`)).toEqual({
+      name: 'deleted',
+      params: { projectId: UUID },
+    });
+  });
+
   describe('the 3D studio', () => {
     const FILE = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 

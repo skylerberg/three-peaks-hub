@@ -301,6 +301,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/files/deleted': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List what has been deleted
+     * @description Flat, and each entry carries the path it came from — a deleted subtree has no live parent to browse into. A folder that was deleted does not list its contents: those rows were never deleted themselves, and restoring the folder brings them back with it.
+     */
+    get: operations['getApiFilesDeleted'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/files/folders': {
     parameters: {
       query?: never;
@@ -333,7 +353,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a folder
-     * @description Cascades to everything inside it. Stored objects go after commit.
+     * @description Soft by default: the folder is tombstoned and nothing inside it is touched, which is what makes restoring it exact. `purge=true` is the irreversible one — it cascades to the whole subtree, live files included, and reclaims every stored object. Only the literal word is accepted, and repeating the parameter is a 400.
      */
     delete: operations['deleteApiFilesFoldersById'];
     options?: never;
@@ -343,6 +363,26 @@ export interface paths {
      * @description A move that would put a folder inside itself is refused.
      */
     patch: operations['patchApiFilesFoldersById'];
+    trace?: never;
+  };
+  '/api/files/folders/{id}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted folder
+     * @description Takes an optional `name`, because the old one may have been taken while the folder was gone. Renaming first would leave a window in which the tombstone still held it. Whatever was deleted inside the folder separately stays deleted. Restoring a folder that is not deleted answers 200 and changes nothing.
+     */
+    post: operations['postApiFilesFoldersByIdRestore'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/files/upload': {
@@ -443,12 +483,35 @@ export interface paths {
     get: operations['getApiFilesById'];
     put?: never;
     post?: never;
-    /** Delete a file */
+    /**
+     * Delete a file
+     * @description Soft by default: the row is tombstoned and every version keeps its bytes, so a restore is exact. `purge=true` is the irreversible one and the only path that reclaims storage. Only the literal word is accepted, and repeating the parameter is a 400. A repeat delete answers 204 either way.
+     */
     delete: operations['deleteApiFilesById'];
     options?: never;
     head?: never;
     /** Rename or move a file */
     patch: operations['patchApiFilesById'];
+    trace?: never;
+  };
+  '/api/files/{id}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted file
+     * @description Takes an optional `filename`, because the old one may have been taken while the file was gone. Renaming first would leave a window in which the tombstone still held it. Restoring a file that is not deleted answers 200 and changes nothing.
+     */
+    post: operations['postApiFilesByIdRestore'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/models/{fileId}': {
@@ -530,6 +593,21 @@ export interface components {
       updated_at: string;
       updated_by: string;
     };
+    DeletedListing: {
+      entries: {
+        blocked_by: string | null;
+        byte_size: number | null;
+        content_type: string | null;
+        deleted_at: string;
+        deleted_by: string | null;
+        id: string;
+        /** @enum {unknown} */
+        kind: 'file' | 'folder';
+        name: string;
+        path: string;
+        project_id: string;
+      }[];
+    };
     DirectoryListing: {
       breadcrumb: {
         created_at: string;
@@ -543,6 +621,7 @@ export interface components {
         byte_size: number;
         content_type: string;
         created_at: string;
+        deleted_at: string | null;
         filename: string;
         folder_id: string | null;
         id: string;
@@ -577,6 +656,7 @@ export interface components {
       byte_size: number;
       content_type: string;
       created_at: string;
+      deleted_at: string | null;
       filename: string;
       folder_id: string | null;
       id: string;
@@ -1803,6 +1883,63 @@ export interface operations {
       };
     };
   };
+  getApiFilesDeleted: {
+    parameters: {
+      query: {
+        /** @description a UUID */
+        project_id:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The deleted files and folders */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeletedListing'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   postApiFilesFolders: {
     parameters: {
       query?: never;
@@ -1908,7 +2045,9 @@ export interface operations {
   };
   deleteApiFilesFoldersById: {
     parameters: {
-      query?: never;
+      query?: {
+        purge?: 'true';
+      };
       header?: never;
       path: {
         id: string;
@@ -2056,6 +2195,85 @@ export interface operations {
               message: string;
               path: string;
             }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiFilesFoldersByIdRestore: {
+    parameters: {
+      query?: {
+        name?: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Restored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Folder'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
             error: string;
           };
         };
@@ -2357,6 +2575,17 @@ export interface operations {
           };
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
       /** @description Payload too large */
       413: {
         headers: {
@@ -2435,6 +2664,17 @@ export interface operations {
       };
       /** @description Not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -2525,7 +2765,9 @@ export interface operations {
   };
   deleteApiFilesById: {
     parameters: {
-      query?: never;
+      query?: {
+        purge?: 'true';
+      };
       header?: never;
       path: {
         id: string;
@@ -2673,6 +2915,85 @@ export interface operations {
               message: string;
               path: string;
             }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiFilesByIdRestore: {
+    parameters: {
+      query?: {
+        filename?: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Restored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['File'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
             error: string;
           };
         };

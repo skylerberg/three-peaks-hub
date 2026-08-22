@@ -55,6 +55,8 @@ export interface File {
   checksum: string | null;
   content_type: string;
   created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  deleted_by: string | null;
   filename: string;
   folder_id: string | null;
   id: string;
@@ -83,6 +85,8 @@ export interface FileVersion {
 export interface Folder {
   created_at: Generated<Timestamp>;
   created_by: string;
+  deleted_at: Timestamp | null;
+  deleted_by: string | null;
   id: string;
   name: string;
   parent_id: string | null;

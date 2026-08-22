@@ -104,8 +104,10 @@ tree.
 6. **Re-export every schema from `apps/api/src/schemas/index.ts`.** The OpenAPI
    component-name registry reads that barrel; a schema left out appears inline
    and the generated client gets an anonymous duplicate instead of a named type.
-7. Length limits in ArkType, not CHECK constraints. All FKs cascade except
-   `project.created_by` and `file_version.created_by`, which are RESTRICT.
+7. Length limits in ArkType, not CHECK constraints. FKs cascade, except
+   `project.created_by` and `file_version.created_by`, which are RESTRICT, and
+   `file.deleted_by` / `folder.deleted_by`, which are SET NULL — an account
+   going away must neither block itself on a tombstone nor take one with it.
 8. **Query and path parameters are declared, not just read.** `c.req.query()`
    alone leaves them out of the spec, so the generated client cannot type them.
 9. **Take `validator` and `resolver` from `hono-openapi`, never from
@@ -181,6 +183,33 @@ one residual a pod on the previous release can still leave after the migration.
 The 3D studio deliberately follows the current version. `component_model` is one
 row per file, so a card that gains new artwork keeps the dial-in someone already
 gave it.
+
+## Soft delete
+
+`DELETE` is soft: it stamps `deleted_at` and keeps every stored object.
+`?purge=true` is a separate, explicit act and the only path that reclaims bytes —
+which is why it is the only branch reaching `deleteStoredObjectsAfterCommit`.
+
+The four partial unique name indexes carry `deleted_at is null`, so a deleted
+card's name is free again the moment it is deleted. Without that, re-importing a
+card that came back in Canva would hit a 409 nothing could resolve.
+
+Access checks deliberately ignore `deleted_at` — a tombstone's bytes and its
+history are exactly what someone deciding whether to restore it reads first.
+Listings filter it, and the one thing refused on a tombstone is a write.
+
+**A folder's tombstone is never copied onto its contents.** Visibility is derived
+instead: a row is reachable only while its own `deleted_at` is null _and_ no
+folder above it is deleted. That is what makes restoring a folder exactly
+symmetric with deleting it, rather than resurrecting rows somebody deleted one by
+one beforehand. Two things follow, and both are load-bearing: a write target is
+validated by walking that chain rather than by testing one column, because a live
+folder inside a deleted one is ordinary and a row planted there would be visible
+in no listing and recoverable by no route; and a walk that hits the depth bound
+denies, because an unverified chain is not a clean one.
+
+Tombstoned bytes still count against the quota. They are still stored, and only a
+purge gets them back.
 
 # Web conventions
 

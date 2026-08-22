@@ -2,6 +2,7 @@
   import Toasts from './components/ui/Toasts.svelte';
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
+  import Deleted from './routes/Deleted.svelte';
   import FileVersions from './routes/FileVersions.svelte';
   import ForgotPassword from './routes/ForgotPassword.svelte';
   import Login from './routes/Login.svelte';
@@ -12,6 +13,7 @@
   import Projects from './routes/Projects.svelte';
   import ResetPassword from './routes/ResetPassword.svelte';
   import Signup from './routes/Signup.svelte';
+  import { deleted } from './lib/deleted.svelte.ts';
   import { files } from './lib/files.svelte.ts';
   import { models } from './lib/model3d.svelte.ts';
   import { projects } from './lib/projects.svelte.ts';
@@ -46,6 +48,7 @@
     if (session.status === 'anon') {
       projects.reset();
       files.reset();
+      deleted.reset();
       models.reset();
       versions.reset();
       realtime.stop();
@@ -88,6 +91,8 @@
       <Project projectId={route.params.projectId} folderId={route.params.folderId} />
     {:else if route.name === 'members'}
       <Members projectId={route.params.projectId} />
+    {:else if route.name === 'deleted'}
+      <Deleted projectId={route.params.projectId} />
     {:else if route.name === 'model'}
       <Model3d projectId={route.params.projectId} fileId={route.params.fileId} />
     {:else if route.name === 'versions'}
