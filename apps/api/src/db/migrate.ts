@@ -27,15 +27,47 @@ function migrationFolder(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 }
 
-function createMigrator(): Migrator {
+function createMigrator(folder: string = migrationFolder()): Migrator {
   return new Migrator({
     db,
     provider: new FileMigrationProvider({
       fs,
       path,
-      migrationFolder: migrationFolder(),
+      migrationFolder: folder,
     }),
   });
+}
+
+// The folder is a parameter only so a test can hand it one holding a migration
+// the database has never seen; nothing in the app passes it.
+export async function pendingMigrations(folder?: string): Promise<string[]> {
+  const migrations = await createMigrator(folder).getMigrations();
+  return migrations
+    .filter((migration) => migration.executedAt === undefined)
+    .map((migration) => migration.name);
+}
+
+// Said at boot and never fatal. Deploys are rolling and the migrate Job runs
+// before the rollout, so a pod that starts mid-deploy has nothing pending and a
+// pod that refused to start would take the release down for a condition its own
+// database is about to satisfy. What this catches is the development case: a
+// database a branch has moved past, which otherwise surfaces as a 500 from the
+// first query to touch a table that is not there yet.
+export async function reportPendingMigrations(): Promise<void> {
+  let pending: string[];
+  try {
+    pending = await pendingMigrations();
+  } catch (error) {
+    logger.warn('could not read the migration history', { error });
+    return;
+  }
+
+  if (pending.length === 0) return;
+  logger.error(
+    `this database is behind the code: ${pending.length} migration(s) have never been applied. ` +
+      'Every request touching what they add will fail until `pnpm migrate` has run.',
+    { pending }
+  );
 }
 
 async function run(direction: 'up' | 'down'): Promise<void> {

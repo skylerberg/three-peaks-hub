@@ -358,4 +358,15 @@ export const guards = [
     tests: ['tests/e2e/health.test.ts'],
     testName: 'reaches the database rather than answering from memory alone',
   },
+  {
+    name: 'a database missing a migration is reported as behind',
+    package: 'api',
+    file: 'src/db/migrate.ts',
+    // The failure that matters is the quiet one: a check that always says the
+    // database is current is indistinguishable from not having the check.
+    find: '    .filter((migration) => migration.executedAt === undefined)',
+    replace: '    .filter(() => false)',
+    tests: ['tests/unit/pendingMigrations.test.ts'],
+    testName: 'names a migration the database has never run',
+  },
 ];
