@@ -11,14 +11,30 @@ export type ProjectMember = components['schemas']['ProjectMemberList']['members'
 class ProjectStore {
   projects = $state<Project[]>([]);
   loading = $state(false);
-  loaded = $state(false);
+  // One attempt per screen, successful or not, and deliberately not $state: the
+  // screen asks for the list on mount and must not ask again off the back of
+  // what the answer writes. An effect that read `loading` re-ran when a failed
+  // load flipped it back, and the retry failed the same way -- a request and a
+  // toast per frame, for as long as the screen stayed open.
+  #attempt: Promise<void> | null = null;
 
-  async load(): Promise<void> {
+  async ensureLoaded(): Promise<void> {
+    this.#attempt ??= this.#load();
+    await this.#attempt;
+  }
+
+  // A visitor asking again rather than a screen asking twice: the attempt that
+  // failed is dropped, so this one is really made.
+  async reload(): Promise<void> {
+    this.#attempt = null;
+    await this.ensureLoaded();
+  }
+
+  async #load(): Promise<void> {
     this.loading = true;
     try {
       const data = assertOk(await api.GET('/api/projects'));
       this.projects = data.projects;
-      this.loaded = true;
     } finally {
       this.loading = false;
     }
@@ -58,10 +74,12 @@ class ProjectStore {
     return this.projects.find((project) => project.id === id);
   }
 
+  // The next account starts from nothing, the attempt this one made included:
+  // inherit that and its list is never fetched at all.
   reset(): void {
     this.projects = [];
-    this.loaded = false;
     this.loading = false;
+    this.#attempt = null;
   }
 }
 

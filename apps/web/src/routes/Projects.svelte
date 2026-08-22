@@ -10,12 +10,22 @@
   let creating = $state(false);
   let newName = $state('');
   let busy = $state(false);
+  let loadError = $state<string | null>(null);
 
+  // Reads nothing reactive on purpose: this asks once, when the screen appears.
   $effect(() => {
-    if (!projects.loaded && !projects.loading) {
-      projects.load().catch((error) => toasts.error(apiMessage(error)));
-    }
+    void attemptLoad();
   });
+
+  async function attemptLoad(again = false): Promise<void> {
+    loadError = null;
+    try {
+      await (again ? projects.reload() : projects.ensureLoaded());
+    } catch (error) {
+      loadError = apiMessage(error);
+      toasts.error(loadError);
+    }
+  }
 
   async function create(event: SubmitEvent) {
     event.preventDefault();
@@ -58,6 +68,11 @@
 
   {#if projects.loading && projects.projects.length === 0}
     <Spinner label="Loading projects" />
+  {:else if projects.projects.length === 0 && loadError}
+    <div class="flex flex-col items-start gap-3 rounded-md border border-danger p-4">
+      <p role="alert" class="text-sm text-danger">{loadError}</p>
+      <Button variant="secondary" onclick={() => attemptLoad(true)}>Try again</Button>
+    </div>
   {:else if projects.projects.length === 0}
     <p class="rounded-md border border-dashed border-edge p-8 text-center text-muted">
       No projects yet. Create one to start uploading files.
