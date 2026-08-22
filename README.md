@@ -63,5 +63,5 @@ against an endpoint that does not exist yet.
 
 Live at **https://tools.threepeaksgames.com**. Opening a pull request publishes
 a preview to `pr-<n>.tools.threepeaksgames.com` and comments the URL; closing it
-removes both. Those URLs need one more Route 53 record before they resolve —
-`infra/terraform/README.md` has it, and records exactly what is done.
+removes both. A preview is a full same-origin virtual host — `/api` and `/ws`
+reach the real API — so it needs no CORS and behaves exactly like production.
