@@ -11,18 +11,13 @@ is applied with `attach_wildcard_cert_map = true`, both certificates are ACTIVE,
 both API replicas are HEALTHY in the load balancer's NEG, and uploads reach GCS
 through Workload Identity with no key file anywhere.
 
-Per-PR previews work end to end: opening a pull request publishes to
-`pr/<n>/` and comments the URL, and closing it removes both. Verified on #1 and
-#2.
+Per-PR previews work end to end and the URLs in the PR comments are live:
+opening a pull request publishes to `pr/<n>/` and comments the URL, and closing
+it removes both.
 
-**One DNS record is still missing.** There is no wildcard `A` record, so
-`pr-<n>.tools.threepeaksgames.com` does not resolve — the previews above were
-verified with `curl --resolve`. Add this in Route 53 and the URLs in the PR
-comments become clickable:
-
-```
-*.tools.threepeaksgames.com.  A  136.68.172.27
-```
+DNS is complete — the apex `A`, the wildcard `A` for `pr-<n>`, and the DNS-01
+`CNAME` the wildcard certificate renews against are all in Route 53. Nothing
+here is waiting on anything.
 
 Secrets are readable back out of the cluster if they are needed again:
 
