@@ -392,7 +392,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * Read one file row
+     * @description A screen addressed by file id -- the 3D studio -- has to resolve the row on a cold load, before it knows which folder the file is in.
+     */
+    get: operations['getApiFilesById'];
     put?: never;
     post?: never;
     /** Delete a file */
@@ -401,6 +405,30 @@ export interface paths {
     head?: never;
     /** Rename or move a file */
     patch: operations['patchApiFilesById'];
+    trace?: never;
+  };
+  '/api/models/{fileId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the 3D settings for an image
+     * @description Answers 404 when the image has never been dialled in, which is how the studio knows to start from the defaults.
+     */
+    get: operations['getApiModelsByFileId'];
+    /**
+     * Save the 3D settings for an image
+     * @description Editors only. There is one settings row per image, so this upserts rather than conflicting.
+     */
+    put: operations['putApiModelsByFileId'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
 }
@@ -416,6 +444,47 @@ export interface components {
         id: string;
         name: string;
       };
+    };
+    ComponentModel: {
+      created_at: string;
+      project_id: string;
+      settings:
+        | {
+            back_color: string;
+            back_file_id:
+              | string
+              | '00000000-0000-0000-0000-000000000000'
+              | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+              | null;
+            bevel_mm: number;
+            corner_radius_mm: number;
+            height_mm: number;
+            /** @constant */
+            kind: 'card';
+            seed: number;
+            stock_color: string;
+            thickness_mm: number;
+            width_mm: number;
+          }
+        | {
+            bevel_mm: number;
+            grain_color: string;
+            grain_scale: number;
+            /** @constant */
+            kind: 'wood';
+            longest_side_mm: number;
+            printed: boolean;
+            seed: number;
+            simplify_tolerance: number;
+            thickness_mm: number;
+            /** @enum {unknown} */
+            trace_source: 'alpha' | 'luminance';
+            trace_threshold: number;
+            wood_color: string;
+          };
+      source_file_id: string;
+      updated_at: string;
+      updated_by: string;
     };
     DirectoryListing: {
       breadcrumb: {
@@ -2096,6 +2165,61 @@ export interface operations {
       };
     };
   };
+  getApiFilesById: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The file */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['File'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   deleteApiFilesById: {
     parameters: {
       query?: never;
@@ -2226,6 +2350,181 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiModelsByFileId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        fileId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The saved settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComponentModel'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  putApiModelsByFileId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        fileId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          settings:
+            | {
+                back_color: string;
+                back_file_id:
+                  | string
+                  | '00000000-0000-0000-0000-000000000000'
+                  | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+                  | null;
+                bevel_mm: number;
+                corner_radius_mm: number;
+                height_mm: number;
+                /** @constant */
+                kind: 'card';
+                seed: number;
+                stock_color: string;
+                thickness_mm: number;
+                width_mm: number;
+              }
+            | {
+                bevel_mm: number;
+                grain_color: string;
+                grain_scale: number;
+                /** @constant */
+                kind: 'wood';
+                longest_side_mm: number;
+                printed: boolean;
+                seed: number;
+                simplify_tolerance: number;
+                thickness_mm: number;
+                /** @enum {unknown} */
+                trace_source: 'alpha' | 'luminance';
+                trace_threshold: number;
+                wood_color: string;
+              };
+        };
+      };
+    };
+    responses: {
+      /** @description Saved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComponentModel'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

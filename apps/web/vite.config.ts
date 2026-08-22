@@ -27,6 +27,12 @@ export default defineConfig({
   // trying to prebundle a package with no build output.
   optimizeDeps: { exclude: ['@three-peaks/shared'] },
 
+  // three is ~650 kB on its own and is the only thing above the 500 kB default.
+  // It is already in a chunk of its own -- the studio screen imports the model3d
+  // library dynamically -- so raising the bar to just over it keeps the warning
+  // meaningful for anything else that grows.
+  build: { chunkSizeWarningLimit: 700 },
+
   server: { proxy: apiProxy },
   preview: { port: 4173, strictPort: true, proxy: apiProxy },
 

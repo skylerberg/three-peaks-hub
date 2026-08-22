@@ -4,4 +4,5 @@
 export * from './auth.ts';
 export * from './common.ts';
 export * from './files.ts';
+export * from './models.ts';
 export * from './projects.ts';

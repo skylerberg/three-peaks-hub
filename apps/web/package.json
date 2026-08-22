@@ -12,13 +12,15 @@
     "test:watch": "vitest",
     "check:a11y": "node scripts/check-a11y.mjs",
     "check:upload": "node scripts/check-upload.mjs",
+    "check:model3d": "node scripts/check-model3d.mjs",
     "playwright:install": "playwright install chromium webkit",
     "check:all": "pnpm run type-check && pnpm test && pnpm run check:a11y && pnpm run build"
   },
   "dependencies": {
     "@three-peaks/shared": "workspace:*",
     "openapi-fetch": "~0.17.0",
-    "svelte": "~5.56.9"
+    "svelte": "~5.56.9",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "~7.3.0",
@@ -26,6 +28,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/svelte": "~5.4.2",
     "@types/node": "catalog:",
+    "@types/three": "^0.185.4",
     "axe-core": "4.13.0",
     "jsdom": "^30.0.1",
     "playwright": "^1.62.1",

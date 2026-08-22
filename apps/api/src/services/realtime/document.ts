@@ -1,7 +1,12 @@
 import { CLOSE_CODES, CLOSE_CODE_REASONS } from './closeCodes.ts';
-import { EVENT_CATALOG } from './eventCatalog.ts';
+import { EVENT_CATALOG, type RealtimeEventType } from './eventCatalog.ts';
 
-const PAYLOAD_FIELDS: Record<string, string[]> = {
+// The field names payloads.ts gives each type, as a value: this document is
+// dumped at runtime, where an interface no longer exists. Keyed by
+// RealtimeEventType so a catalog entry missing here is a compile error --
+// widened to `string` it published an empty payload instead, and an event whose
+// generated client type has lost its fields still type-checks on both sides.
+const PAYLOAD_FIELDS: Record<RealtimeEventType, readonly string[]> = {
   project_updated: ['project_id'],
   project_deleted: ['project_id'],
   folder_created: ['project_id', 'folder_id'],
@@ -10,6 +15,7 @@ const PAYLOAD_FIELDS: Record<string, string[]> = {
   file_uploaded: ['project_id', 'file_id'],
   file_updated: ['project_id', 'file_id'],
   file_deleted: ['project_id', 'file_id'],
+  model_updated: ['project_id', 'file_id'],
   members_changed: ['project_id'],
 };
 
@@ -21,7 +27,7 @@ export function realtimeEventsDocument() {
         // actor_user_id is merged in from the catalog rather than restated on
         // every row, and it is required.
         payload: [
-          ...(PAYLOAD_FIELDS[type] ?? []),
+          ...PAYLOAD_FIELDS[type as RealtimeEventType],
           ...(entry.carriesActor ? ['actor_user_id'] : []),
         ],
       },

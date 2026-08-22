@@ -5,6 +5,7 @@
 // that, and drops it. It never reads the database you develop against, so a
 // column left behind by an abandoned branch cannot land in a commit looking
 // exactly like a real one.
+
 import type { ColumnType } from 'kysely';
 
 export type Generated<T> =
@@ -12,86 +13,110 @@ export type Generated<T> =
     ? ColumnType<S, I | undefined, U>
     : ColumnType<T, T | undefined, T>;
 
-export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
+export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
 export interface AppUser {
-  id: string;
   alternative_id: Generated<string>;
-  email: string;
-  password_hash: string;
-  name: string;
-  email_verified: Generated<boolean>;
   created_at: Generated<Timestamp>;
+  email: string;
+  email_verified: Generated<boolean>;
+  id: string;
+  name: string;
+  password_hash: string;
   updated_at: Generated<Timestamp>;
 }
 
-export interface Session {
-  id: string;
-  user_id: string;
-  token_hash: string;
-  user_agent: string | null;
+export interface ComponentModel {
   created_at: Generated<Timestamp>;
-  expires_at: Timestamp;
+  id: string;
+  project_id: string;
+  settings: Json;
+  source_file_id: string;
+  updated_at: Generated<Timestamp>;
+  updated_by: string;
+}
+
+export interface File {
+  byte_size: Int8;
+  checksum: string | null;
+  content_type: string;
+  created_at: Generated<Timestamp>;
+  filename: string;
+  folder_id: string | null;
+  id: string;
+  image_height: number | null;
+  image_width: number | null;
+  project_id: string;
+  storage_key: string;
+  updated_at: Generated<Timestamp>;
+  uploaded_by: string;
+}
+
+export interface Folder {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  id: string;
+  name: string;
+  parent_id: string | null;
+  project_id: string;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface PersonalAccessToken {
+  created_at: Generated<Timestamp>;
   id: string;
-  user_id: string;
+  last_used_at: Timestamp | null;
   name: string;
   token_hash: string;
-  created_at: Generated<Timestamp>;
-  last_used_at: Timestamp | null;
+  user_id: string;
 }
 
 export interface Project {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  description: string | null;
   id: string;
   name: string;
-  description: string | null;
-  created_by: string;
-  created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface ProjectMember {
+  created_at: Generated<Timestamp>;
   project_id: string;
-  user_id: string;
   role: string;
-  created_at: Generated<Timestamp>;
+  user_id: string;
 }
 
-export interface Folder {
-  id: string;
-  project_id: string;
-  parent_id: string | null;
-  name: string;
-  created_by: string;
+export interface Session {
   created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
-}
-
-export interface File {
+  expires_at: Timestamp;
   id: string;
-  project_id: string;
-  folder_id: string | null;
-  filename: string;
-  storage_key: string;
-  content_type: string;
-  byte_size: Int8;
-  checksum: string | null;
-  image_width: number | null;
-  image_height: number | null;
-  uploaded_by: string;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  token_hash: string;
+  user_agent: string | null;
+  user_id: string;
 }
 
 export interface DB {
   app_user: AppUser;
-  session: Session;
+  component_model: ComponentModel;
+  file: File;
+  folder: Folder;
   personal_access_token: PersonalAccessToken;
   project: Project;
   project_member: ProjectMember;
-  folder: Folder;
-  file: File;
+  session: Session;
 }

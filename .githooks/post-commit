@@ -6,7 +6,11 @@
 # yet, not that something is wrong.
 [ -n "$SKIP_POST_COMMIT" ] && exit 0
 
-files=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\.(ts|mjs|svelte|json|css)$')
+# yaml is in the list because `prettier --check .` covers the whole tree, and
+# pnpm rewrites pnpm-lock.yaml on every dependency change in a shape prettier
+# disagrees with. Left out, adding one dependency fails format:check with
+# nothing in the repo able to fix it.
+files=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\.(ts|mjs|svelte|json|css|ya?ml)$')
 [ -z "$files" ] && exit 0
 
 # Skip files carrying unstaged work, so the amend cannot swallow it.

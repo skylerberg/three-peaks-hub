@@ -2,18 +2,68 @@
 // how a browser will later render the bytes, and a .png that is actually HTML
 // is a stored XSS if anything ever serves it inline.
 //
-// Twelve bytes is enough for every format here: the longest check is WebP's,
-// which needs "RIFF" at 0 and "WEBP" at 8.
-export const SNIFF_BYTES = 12;
+// A kilobyte, because SVG is the one format here with no fixed byte prefix: it
+// is XML, and its root tag sits behind however much declaration, comment and
+// doctype the exporter felt like emitting. Everything else is decided in the
+// first twelve bytes. The head is still buffered a chunk at a time, so this is
+// a bound on what is held, not on what is read.
+export const SNIFF_BYTES = 1024;
 
-export type SniffedImageType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+export type SniffedContentType =
+  'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'image/svg+xml' | 'model/gltf-binary';
 
 function startsWith(buffer: Buffer, bytes: number[], offset = 0): boolean {
   if (buffer.length < offset + bytes.length) return false;
   return bytes.every((byte, index) => buffer[offset + index] === byte);
 }
 
-export function sniffImageType(head: Buffer): SniffedImageType | null {
+// Consumes whatever may legally precede an XML root element and returns what is
+// left. Anything unterminated returns empty: a declaration still open at the end
+// of the head is a document whose root tag we have not actually seen.
+function skipXmlPreamble(text: string): string {
+  let rest = text;
+
+  for (;;) {
+    const trimmed = rest.replace(/^\s+/, '');
+
+    if (trimmed.startsWith('<?')) {
+      const end = trimmed.indexOf('?>');
+      if (end === -1) return '';
+      rest = trimmed.slice(end + 2);
+      continue;
+    }
+
+    if (trimmed.startsWith('<!--')) {
+      const end = trimmed.indexOf('-->');
+      if (end === -1) return '';
+      rest = trimmed.slice(end + 3);
+      continue;
+    }
+
+    if (/^<!DOCTYPE/i.test(trimmed)) {
+      const bracket = trimmed.indexOf('[');
+      const close = trimmed.indexOf('>');
+      if (close === -1) return '';
+      // An internal subset puts unescaped '>' inside the doctype, so the first
+      // one is not the end of it.
+      const end = bracket !== -1 && bracket < close ? trimmed.indexOf(']>') : close - 1;
+      if (end === -1) return '';
+      rest = trimmed.slice(end + 2);
+      continue;
+    }
+
+    return trimmed;
+  }
+}
+
+function isSvg(head: Buffer): boolean {
+  // The head is a byte prefix, so its last character can be half a UTF-8
+  // sequence; the non-fatal decoder makes that U+FFFD instead of throwing.
+  const text = new TextDecoder('utf-8').decode(head).replace(/^\uFEFF/, '');
+  return /^<svg[\s/>]/i.test(skipXmlPreamble(text));
+}
+
+export function sniffContentType(head: Buffer): SniffedContentType | null {
   // 89 50 4E 47 0D 0A 1A 0A
   if (startsWith(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
   // FF D8 FF
@@ -24,5 +74,11 @@ export function sniffImageType(head: Buffer): SniffedImageType | null {
   if (startsWith(head, [0x52, 0x49, 0x46, 0x46]) && startsWith(head, [0x57, 0x45, 0x42, 0x50], 8)) {
     return 'image/webp';
   }
+  // "glTF" then a little-endian version. Only 2 exists in the wild, and this
+  // repo writes it -- a bare magic check would also pass the dead v1 layout.
+  if (startsWith(head, [0x67, 0x6c, 0x54, 0x46]) && startsWith(head, [0x02, 0x00, 0x00, 0x00], 4)) {
+    return 'model/gltf-binary';
+  }
+  if (isSvg(head)) return 'image/svg+xml';
   return null;
 }

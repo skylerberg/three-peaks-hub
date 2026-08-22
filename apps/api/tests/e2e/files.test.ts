@@ -69,6 +69,45 @@ describe('project files', () => {
       expect((await real.json()).content_type).toBe('image/png');
     });
 
+    // SVG is the one source format with no fixed byte prefix, so it is the one
+    // the sniffer can get wrong in both directions.
+    it('recognises an svg behind its xml declaration', async () => {
+      const svg =
+        '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" /></svg>';
+      const res = await owner.api.postBytes(
+        `/api/files/upload?project_id=${projectId}&filename=meeple.svg`,
+        svg as unknown as BodyInit,
+        'text/plain'
+      );
+      expect(res.status).toBe(201);
+      expect((await res.json()).content_type).toBe('image/svg+xml');
+    });
+
+    it('does not recognise an html page that happens to contain an svg', async () => {
+      const html = '<!DOCTYPE html>\n<html><body><svg><circle r="1" /></svg></body></html>';
+      const res = await owner.api.postBytes(
+        `/api/files/upload?project_id=${projectId}&filename=trap.svg`,
+        html as unknown as BodyInit,
+        'image/svg+xml'
+      );
+      expect((await res.json()).content_type).toBe('application/octet-stream');
+    });
+
+    it('reads one file row by id', async () => {
+      const uploaded = await (await upload('single.txt', 'one')).json();
+      const res = await owner.api.get(`/api/files/${uploaded.id}`);
+      expect(res.status).toBe(200);
+      expect((await res.json()).filename).toBe('single.txt');
+    });
+
+    // /directory and /:id are both GETs one segment deep, and the listing is
+    // the one that stops working if the parameter route wins.
+    it('still routes the directory listing rather than reading a file called directory', async () => {
+      const res = await owner.api.get(`/api/files/directory?project_id=${projectId}`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toHaveProperty('files');
+    });
+
     it('refuses a second file with the same name in the same folder', async () => {
       await upload('dup.txt', 'first');
       const second = await upload('dup.txt', 'second');

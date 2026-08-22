@@ -54,6 +54,15 @@ const bearerAuth: Middleware = {
 
 api.use(bearerAuth);
 
+// A raw fetch does not go through the middleware above, and two requests have
+// to be raw: an upload whose body is the file itself, and a download read as
+// bytes for a canvas. Both ask the session for the credential here rather than
+// reaching into storage, so there is still one place the token comes from.
+export function authHeader(): Record<string, string> {
+  const token = authHooks?.getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 interface ApiResult<T> {
   data?: T;
   error?: unknown;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatBytes } from '@three-peaks/shared';
+  import { formatBytes, isModelSource } from '@three-peaks/shared';
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
   import { files } from '../lib/files.svelte.ts';
@@ -245,6 +245,14 @@
               >
                 Download
               </a>
+              {#if isModelSource(file.content_type)}
+                <a
+                  class="focus-ring rounded px-2 py-1 underline"
+                  href="/projects/{projectId}/files/{file.id}/3d"
+                >
+                  Make 3D
+                </a>
+              {/if}
               {#if canEdit}
                 <button
                   type="button"

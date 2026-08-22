@@ -16,6 +16,7 @@ interface EventPayloads extends Record<RealtimeEventType, object> {
   file_uploaded: { project_id: string; file_id: string };
   file_updated: { project_id: string; file_id: string };
   file_deleted: { project_id: string; file_id: string };
+  model_updated: { project_id: string; file_id: string };
   members_changed: { project_id: string };
 }
 

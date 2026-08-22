@@ -22,11 +22,14 @@ function formatIssues(issues: readonly ValidationIssue[]) {
 // client sending a field the server stopped reading keeps working — and a field
 // the server never declared can never reach a query.
 //
+// Deep, not shallow: a body with a nested object is the case where the shallow
+// form quietly stops holding, and jsonb columns store whatever survives this.
+//
 // The validator comes from hono-openapi rather than @hono/standard-validator:
 // this one also registers the request schema in the generated spec, which is
 // what the client is generated from.
 export function jsonValidator<T extends Type>(schema: T) {
-  const stripped = schema.onUndeclaredKey('delete');
+  const stripped = schema.onDeepUndeclaredKey('delete');
   return validator('json', stripped as never, (result, c) => {
     if (result.success) return;
     return c.json(
