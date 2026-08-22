@@ -7,6 +7,7 @@ export type Route =
   | { name: 'project'; params: { projectId: string; folderId: string | null } }
   | { name: 'members'; params: { projectId: string } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
+  | { name: 'versions'; params: { projectId: string; fileId: string } }
   | { name: 'account' }
   | { name: 'login' }
   | { name: 'signup' }
@@ -35,6 +36,10 @@ export function matchRoute(path: string, search = ''): Route {
 
   const model = new RegExp(`^/projects/(${UUID})/files/(${UUID})/3d$`).exec(clean);
   if (model) return { name: 'model', params: { projectId: model[1], fileId: model[2] } };
+
+  const versions = new RegExp(`^/projects/(${UUID})/files/(${UUID})/versions$`).exec(clean);
+  if (versions)
+    return { name: 'versions', params: { projectId: versions[1], fileId: versions[2] } };
 
   const project = new RegExp(`^/projects/(${UUID})$`).exec(clean);
   if (project) {

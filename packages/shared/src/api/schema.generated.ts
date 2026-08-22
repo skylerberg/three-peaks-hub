@@ -374,11 +374,55 @@ export interface paths {
     };
     /**
      * Download a file
-     * @description Served through the API rather than from a public bucket, because who may read the bytes depends on project membership.
+     * @description Served through the API rather than from a public bucket, because who may read the bytes depends on project membership. `version` selects one entry of the history; absent means the current one. Repeating the parameter is a 400 rather than a silent choice between the two values.
      */
     get: operations['getApiFilesByIdDownload'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/files/{id}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List a file's versions
+     * @description Newest first. The current version is the highest number, flagged as is_current.
+     */
+    get: operations['getApiFilesByIdVersions'];
+    put?: never;
+    /**
+     * Append a version
+     * @description The request body is the bytes, as the upload route does it. Bytes identical to the current version answer 200 and create nothing.
+     */
+    post: operations['postApiFilesByIdVersions'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/files/{id}/versions/{number}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a version
+     * @description Copies that version forward as a new one. History only ever grows, so the number goes up rather than back. Restoring the version that is already current creates nothing.
+     */
+    post: operations['postApiFilesByIdVersionsByNumberRestore'];
     delete?: never;
     options?: never;
     head?: never;
@@ -541,6 +585,35 @@ export interface components {
       project_id: string;
       updated_at: string;
       uploaded_by: string;
+    };
+    FileVersionList: {
+      versions: {
+        byte_size: number;
+        checksum: string | null;
+        content_type: string;
+        created_at: string;
+        created_by: string;
+        file_id: string;
+        image_height: number | null;
+        image_width: number | null;
+        is_current: boolean;
+        version_number: number;
+      }[];
+    };
+    FileVersionResult: {
+      created: boolean;
+      version: {
+        byte_size: number;
+        checksum: string | null;
+        content_type: string;
+        created_at: string;
+        created_by: string;
+        file_id: string;
+        image_height: number | null;
+        image_width: number | null;
+        is_current: boolean;
+        version_number: number;
+      };
     };
     Folder: {
       created_at: string;
@@ -2114,7 +2187,9 @@ export interface operations {
   };
   getApiFilesByIdDownload: {
     parameters: {
-      query?: never;
+      query?: {
+        version?: string;
+      };
       header?: never;
       path: {
         id: string;
@@ -2143,6 +2218,234 @@ export interface operations {
       };
       /** @description Not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiFilesByIdVersions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The versions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FileVersionList'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiFilesByIdVersions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The bytes were already the current version */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FileVersionResult'];
+        };
+      };
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FileVersionResult'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiFilesByIdVersionsByNumberRestore: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        number: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description That version was already current */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FileVersionResult'];
+        };
+      };
+      /** @description Restored */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FileVersionResult'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Payload too large */
+      413: {
         headers: {
           [name: string]: unknown;
         };

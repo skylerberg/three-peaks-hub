@@ -5,6 +5,7 @@ export type RealtimeEventType =
   | 'file_deleted'
   | 'file_updated'
   | 'file_uploaded'
+  | 'file_version_created'
   | 'folder_created'
   | 'folder_deleted'
   | 'folder_updated'
@@ -28,6 +29,12 @@ export type RealtimeEvent =
     }
   | {
       type: 'file_uploaded';
+      project_id: string;
+      file_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'file_version_created';
       project_id: string;
       file_id: string;
       actor_user_id: string;

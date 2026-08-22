@@ -15,6 +15,7 @@ const PAYLOAD_FIELDS: Record<RealtimeEventType, readonly string[]> = {
   file_uploaded: ['project_id', 'file_id'],
   file_updated: ['project_id', 'file_id'],
   file_deleted: ['project_id', 'file_id'],
+  file_version_created: ['project_id', 'file_id'],
   model_updated: ['project_id', 'file_id'],
   members_changed: ['project_id'],
 };

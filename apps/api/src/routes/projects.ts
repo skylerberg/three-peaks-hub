@@ -250,16 +250,25 @@ projectsRouter.delete(
     // then delete the objects after commit.
     const files = await db
       .selectFrom('file')
-      .select(['file.storage_key as storage_key'])
+      // Left, so a file with no version rows of its own still contributes the
+      // key its mirror names.
+      .leftJoin('file_version', 'file_version.file_id', 'file.id')
+      .select([
+        'file.storage_key as storage_key',
+        'file_version.storage_key as version_storage_key',
+      ])
       .where('file.project_id', '=', id)
       .execute();
 
     await db.deleteFrom('project').where('project.id', '=', id).execute();
 
-    deleteStoredObjectsAfterCommit(
-      c.get('postCommitHooks'),
-      files.map((file) => file.storage_key)
-    );
+    const keys = new Set<string>();
+    for (const file of files) {
+      keys.add(file.storage_key);
+      if (file.version_storage_key !== null) keys.add(file.version_storage_key);
+    }
+
+    deleteStoredObjectsAfterCommit(c.get('postCommitHooks'), [...keys]);
     publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'project_deleted', {
       project_id: id,
     });

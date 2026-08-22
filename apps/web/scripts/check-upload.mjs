@@ -74,11 +74,13 @@ async function run() {
     // setInputFiles is the real picker's effect; there is no way to reach this
     // path from jsdom at all.
     await browser.setInputFiles('input[type="file"]', filePath);
-    // The download link, not the filename: the explorer draws the name on an
+    // The download control, not the filename: the explorer draws the name on an
     // optimistic row the moment the upload starts, so waiting for the text
     // waits for nothing and every assertion below it then races the transfer.
-    // Only a row from a real listing carries a link to the stored bytes.
-    await browser.page.waitForSelector('a[download="probe-card.txt"]', { timeout: 15_000 });
+    // Only a row from a real listing offers to fetch the stored bytes.
+    await browser.page.waitForSelector('button[aria-label="Download probe-card.txt"]', {
+      timeout: 15_000,
+    });
     check('the uploaded file is drawn in the explorer', true);
 
     // The row is not proof the bytes arrived. Read them back through the API,

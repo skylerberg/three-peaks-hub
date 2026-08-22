@@ -2,6 +2,7 @@
   import { formatBytes, isModelSource } from '@three-peaks/shared';
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
+  import { downloadFile } from '../lib/download.ts';
   import { files } from '../lib/files.svelte.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
@@ -104,6 +105,14 @@
       await files.refresh();
     } catch (error) {
       toasts.error(apiMessage(error));
+    }
+  }
+
+  async function download(id: string, filename: string) {
+    try {
+      await downloadFile(id, filename);
+    } catch (error) {
+      toasts.error(apiMessage(error, 'Those bytes could not be downloaded.'));
     }
   }
 
@@ -237,17 +246,24 @@
                 <p class="text-xs text-muted">{formatBytes(file.byte_size)}</p>
               </div>
             </div>
-            <div class="flex flex-wrap gap-2 text-sm">
-              <a
-                class="focus-ring rounded px-2 py-1 underline"
-                href="/api/files/{file.id}/download"
-                download={file.filename}
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <button
+                type="button"
+                class="focus-ring inline-flex min-h-11 items-center rounded px-2 underline"
+                aria-label="Download {file.filename}"
+                onclick={() => download(file.id, file.filename)}
               >
                 Download
+              </button>
+              <a
+                class="focus-ring inline-flex min-h-11 items-center rounded px-2 underline"
+                href="/projects/{projectId}/files/{file.id}/versions"
+              >
+                Versions
               </a>
               {#if isModelSource(file.content_type)}
                 <a
-                  class="focus-ring rounded px-2 py-1 underline"
+                  class="focus-ring inline-flex min-h-11 items-center rounded px-2 underline"
                   href="/projects/{projectId}/files/{file.id}/3d"
                 >
                   Make 3D
@@ -256,14 +272,16 @@
               {#if canEdit}
                 <button
                   type="button"
-                  class="focus-ring rounded px-2 py-1 text-muted hover:text-ink"
+                  class="focus-ring inline-flex min-h-11 items-center rounded px-2 text-muted hover:text-ink"
+                  aria-label="Rename {file.filename}"
                   onclick={() => renameFile(file.id, file.filename)}
                 >
                   Rename
                 </button>
                 <button
                   type="button"
-                  class="focus-ring rounded px-2 py-1 text-muted hover:text-danger"
+                  class="focus-ring inline-flex min-h-11 items-center rounded px-2 text-muted hover:text-danger"
+                  aria-label="Delete {file.filename}"
                   onclick={() => removeFile(file.id, file.filename)}
                 >
                   Delete

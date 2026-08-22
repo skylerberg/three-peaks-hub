@@ -66,6 +66,20 @@ export interface File {
   uploaded_by: string;
 }
 
+export interface FileVersion {
+  byte_size: Int8;
+  checksum: string | null;
+  content_type: string;
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  file_id: string;
+  id: string;
+  image_height: number | null;
+  image_width: number | null;
+  storage_key: string;
+  version_number: number;
+}
+
 export interface Folder {
   created_at: Generated<Timestamp>;
   created_by: string;
@@ -114,6 +128,7 @@ export interface DB {
   app_user: AppUser;
   component_model: ComponentModel;
   file: File;
+  file_version: FileVersion;
   folder: Folder;
   personal_access_token: PersonalAccessToken;
   project: Project;

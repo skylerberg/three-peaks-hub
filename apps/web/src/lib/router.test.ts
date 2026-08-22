@@ -63,6 +63,22 @@ describe('matchRoute', () => {
     });
   });
 
+  describe('the version history screen', () => {
+    const FILE = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+
+    it('reads the project and the file id', () => {
+      expect(matchRoute(`/projects/${UUID}/files/${FILE}/versions`)).toEqual({
+        name: 'versions',
+        params: { projectId: UUID, fileId: FILE },
+      });
+    });
+
+    it('does not match when either id is not a uuid', () => {
+      expect(matchRoute(`/projects/${UUID}/files/nope/versions`).name).toBe('not-found');
+      expect(matchRoute(`/projects/nope/files/${FILE}/versions`).name).toBe('not-found');
+    });
+  });
+
   // The server builds every mailed link from these paths (see the API's
   // services/webLinks.ts). Pinning them here is what keeps a route rename from
   // quietly turning already-sent mail into a not-found page.

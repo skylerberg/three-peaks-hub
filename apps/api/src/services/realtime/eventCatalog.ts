@@ -13,6 +13,7 @@ export const EVENT_CATALOG = {
   file_uploaded: { carriesActor: true },
   file_updated: { carriesActor: true },
   file_deleted: { carriesActor: true },
+  file_version_created: { carriesActor: true },
   model_updated: { carriesActor: true },
   members_changed: { carriesActor: true },
 } as const;
