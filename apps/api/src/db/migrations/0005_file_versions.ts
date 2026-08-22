@@ -18,10 +18,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('checksum', 'text')
     .addColumn('image_width', 'integer')
     .addColumn('image_height', 'integer')
-    // Deleting a user therefore frees a (file_id, version_number) slot on
-    // someone else's file. No route deletes users.
+    // Restrict, unlike the file_id above: an author is not an owner. Cascading
+    // here would let deleting one account cut versions out of the middle of
+    // other people's files and orphan the objects those rows named, which is
+    // the same reason project.created_by restricts.
     .addColumn('created_by', 'uuid', (col) =>
-      col.notNull().references('app_user.id').onDelete('cascade')
+      col.notNull().references('app_user.id').onDelete('restrict')
     )
     .addColumn('created_at', 'timestamptz', (col) => col.notNull().defaultTo(sql`now()`))
     // Also the index the newest-version lookup scans backward, so there is no

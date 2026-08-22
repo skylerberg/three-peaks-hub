@@ -254,6 +254,43 @@ describe('file versions', () => {
     }
   });
 
+  // The widest of the three delete paths: the cascade takes every folder and
+  // file in the project at once, so nothing is left to say which objects the
+  // rows had named.
+  it('leaves nothing in storage when a project holding a versioned file is deleted', async () => {
+    const doomed = (await (await owner.api.post('/api/projects', { name: 'Doomed' })).json()).id;
+    const created = await owner.api.postBytes(
+      `/api/files/upload?project_id=${doomed}&filename=whole-project.txt`,
+      'the project, first' as unknown as BodyInit
+    );
+    expect(created.status).toBe(201);
+    const fileId = (await created.json()).id;
+    expect((await append(fileId, 'the project, second')).status).toBe(201);
+    expect((await append(fileId, 'the project, third and last')).status).toBe(201);
+
+    const keys = await versionKeys(fileId);
+    expect(keys).toHaveLength(3);
+
+    expect((await owner.api.delete(`/api/projects/${doomed}`)).status).toBe(204);
+    for (const key of keys) {
+      expect(await storage().get(key.storage_key)).toBeNull();
+    }
+  });
+
+  // Reading history is a read. A viewer who may see the current bytes may see
+  // what they used to be.
+  it('lets a viewer download a version that is no longer current', async () => {
+    const file = await upload('shared-history.txt', 'what it said at first');
+    expect((await append(file.id, 'what it says now')).status).toBe(201);
+
+    const older = await viewer.api.get(`/api/files/${file.id}/download?version=1`);
+    expect(older.status).toBe(200);
+    expect(await older.text()).toBe('what it said at first');
+
+    const current = await viewer.api.get(`/api/files/${file.id}/download`);
+    expect(await current.text()).toBe('what it says now');
+  });
+
   it('records a checksum on a plain upload', async () => {
     const file = await upload('checked.txt', 'bytes worth hashing');
     const versions = await history(file.id);

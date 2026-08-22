@@ -153,7 +153,9 @@
       <div class="min-w-0">
         <h1 class="truncate text-2xl font-semibold">{file.filename}</h1>
         <p class="text-sm text-muted">
-          Every version ever stored, newest first. Restoring one copies it forward.
+          Every version ever stored, newest first. Restoring one copies it forward. All of them
+          count against project storage, and the only way to reclaim that space is to delete the
+          file.
         </p>
       </div>
       <a

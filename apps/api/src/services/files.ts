@@ -148,19 +148,23 @@ const VERSION_COLUMNS = [
   'file_version.created_at as created_at',
 ] as const;
 
-// A null checksum is unknown, not empty, so two unknowns are never equal. That
-// is also what keeps the adoption below safe: only a row written by the release
-// that had no file_version table can reach it, and that release recorded no
-// checksum at all -- so the version it adopts compares false here instead of
-// reclaiming the object the file row still points at. Anything that backfills
-// file.checksum for those rows has to revisit this.
+// A null checksum is unknown, not empty, so two unknowns are never equal.
+//
+// The branch this answers reclaims candidate.storageKey and never the current
+// version's, so what keeps it safe is the precondition documented below: the
+// candidate names a freshly written object nothing else references. The one way
+// a live object could reach it is a caller handing over the key the file row
+// already points at, and the storage_key comparison on the adoption further
+// down is what stops that key from becoming the version this then deduplicates
+// away.
 function sameBytes(current: { checksum: string | null }, candidate: VersionCandidate): boolean {
   return current.checksum !== null && current.checksum === candidate.checksum;
 }
 
 /**
  * Appends `candidate` to a file's history and re-points the mirror columns on
- * `file` at it. The only writer of either.
+ * `file` at it. Every `file_version` row is written here, and so is every change
+ * to the mirror bar the initial values `/upload` gives the row it creates.
  *
  * Runs on `c.get('db')` and opens no transaction of its own, so it must be
  * called from a method `transactionMiddleware` wraps — on a GET it would run
@@ -194,7 +198,12 @@ export async function appendFileVersion(
     ])
     .where('file.id', '=', fileId)
     .forUpdate()
-    .executeTakeFirstOrThrow();
+    .executeTakeFirst();
+
+  // Gone by the time the lock was granted, which is what a delete that was
+  // already waiting on it looks like from here. The row the caller resolved
+  // access against no longer exists, so this is a 404 rather than a 500.
+  if (!file) throw new AppError(404, 'File not found');
 
   let current = await db
     .selectFrom('file_version')

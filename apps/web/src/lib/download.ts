@@ -24,12 +24,13 @@ export async function downloadFile(
   }
 
   const url = URL.createObjectURL(await response.blob());
-  try {
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  // Only Chromium takes its reference to the blob during the click's
+  // synchronous dispatch. Firefox and WebKit resolve the object URL on a later
+  // task, so revoking straight after the click races the read and the download
+  // silently produces nothing.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -498,8 +498,11 @@ filesRouter.delete(
     const db = c.get('db');
 
     // Recursive, because the database cascade removes the rows but nothing
-    // removes the objects those rows named.
-    const descendants = await db
+    // removes the objects those rows named. Locked in the same breath:
+    // appendFileVersion takes the same row lock, so an append cannot commit in
+    // the window between the keys being collected and the delete, which would
+    // leave its object named by nothing.
+    const locked = await db
       .withRecursive('subtree', (qb) =>
         qb
           .selectFrom('folder')
@@ -514,15 +517,27 @@ filesRouter.delete(
       )
       .selectFrom('file')
       .innerJoin('subtree', 'subtree.id', 'file.folder_id')
-      // Every version's object, not just the current one. The mirror key stays
-      // in the set as well, for a file that predates file_version and has no
-      // row of its own.
-      .leftJoin('file_version', 'file_version.file_id', 'file.id')
-      .select([
-        'file.storage_key as storage_key',
-        'file_version.storage_key as version_storage_key',
-      ])
+      .select(['file.id as id'])
+      // Named, because the only lockable relation in the join is file.
+      .forUpdate('file')
       .execute();
+
+    const fileIds = locked.map((row) => row.id);
+    // Every version's object, not just the current one. The mirror key stays in
+    // the set as well, for a file that predates file_version and has no row of
+    // its own.
+    const descendants =
+      fileIds.length === 0
+        ? []
+        : await db
+            .selectFrom('file')
+            .leftJoin('file_version', 'file_version.file_id', 'file.id')
+            .select([
+              'file.storage_key as storage_key',
+              'file_version.storage_key as version_storage_key',
+            ])
+            .where('file.id', 'in', fileIds)
+            .execute();
 
     await db.deleteFrom('folder').where('folder.id', '=', id).execute();
 
@@ -880,6 +895,10 @@ filesRouter.post(
     try {
       await storage().copy(source.storage_key, destinationKey);
     } catch {
+      // A copy can fail after writing part of the destination -- fs.copyFile
+      // and a resumable GCS copy both can -- and nothing will ever name those
+      // bytes.
+      await reclaim(destinationKey);
       throw new AppError(404, 'File contents are unavailable');
     }
 
@@ -1041,6 +1060,16 @@ filesRouter.delete(
     const id = c.req.param('id');
     const access = await assertFileAccess(c, id, 'write');
     const db = c.get('db');
+
+    // Locked before anything is read: appendFileVersion takes the same row
+    // lock, so an append cannot commit in the window between the keys being
+    // collected and the delete, which would leave its object named by nothing.
+    await db
+      .selectFrom('file')
+      .select(['file.id as id'])
+      .where('file.id', '=', id)
+      .forUpdate()
+      .execute();
 
     // Read before the delete: the foreign key cascade takes these rows with the
     // file, and nothing else names the objects they point at.

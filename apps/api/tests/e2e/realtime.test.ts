@@ -134,6 +134,43 @@ describe('realtime over a websocket', () => {
     });
   });
 
+  // The screen showing a file's history has to follow someone else appending to
+  // it. Identical bytes create no version, so there is nothing to announce and
+  // announcing anyway would send every open history screen back to the API for
+  // a list that has not moved.
+  it('announces a new version, and stays quiet when identical bytes create none', async () => {
+    const { socket, events } = await connect(owner.token);
+
+    const created = await owner.api.postBytes(
+      `/api/files/upload?project_id=${projectId}&filename=versioned.txt`,
+      'the bytes it was uploaded with' as unknown as BodyInit
+    );
+    expect(created.status).toBe(201);
+    const fileId = (await created.json()).id;
+    await settle();
+    events.length = 0;
+
+    expect(
+      (await owner.api.postBytes(`/api/files/${fileId}/versions`, 'bytes that are new')).status
+    ).toBe(201);
+    await settle();
+
+    const announced = events.find((event) => event.type === 'file_version_created');
+    expect(announced).toBeDefined();
+    expect(announced!.project_id).toBe(projectId);
+    expect(announced!.file_id).toBe(fileId);
+    expect(announced!.actor_user_id).toBe(owner.id);
+    events.length = 0;
+
+    expect(
+      (await owner.api.postBytes(`/api/files/${fileId}/versions`, 'bytes that are new')).status
+    ).toBe(200);
+    await settle();
+    expect(events.map((event) => event.type)).not.toContain('file_version_created');
+
+    socket.close();
+  });
+
   it('closes a socket that never presents a credential', async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     const code = await new Promise<number>((resolve) => {

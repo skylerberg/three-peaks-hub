@@ -296,4 +296,17 @@ export const guards = [
     testName: 'reports that identical bytes created nothing',
     runner: 'web',
   },
+  {
+    name: 'the object URL outlives the click that reads it',
+    package: 'web',
+    file: 'src/lib/download.ts',
+    // Only Chromium takes its blob reference during the click's synchronous
+    // dispatch, so a same-task revoke passes every check run against it and
+    // downloads nothing in Firefox and WebKit.
+    find: '  setTimeout(() => URL.revokeObjectURL(url), 0);',
+    replace: '  URL.revokeObjectURL(url);',
+    tests: ['src/lib/download.test.ts'],
+    testName: 'defers revoking the object URL until after the click',
+    runner: 'web',
+  },
 ];

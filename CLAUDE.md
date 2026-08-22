@@ -105,7 +105,7 @@ tree.
    component-name registry reads that barrel; a schema left out appears inline
    and the generated client gets an anonymous duplicate instead of a named type.
 7. Length limits in ArkType, not CHECK constraints. All FKs cascade except
-   `project.created_by`, which is RESTRICT.
+   `project.created_by` and `file_version.created_by`, which are RESTRICT.
 8. **Query and path parameters are declared, not just read.** `c.req.query()`
    alone leaves them out of the spec, so the generated client cannot type them.
 9. **Take `validator` and `resolver` from `hono-openapi`, never from
@@ -157,8 +157,10 @@ list itself.
 `file` keeps `storage_key`, `content_type`, `byte_size`, `checksum` and the
 image dimensions as a mirror of that newest version, for two reasons: a rolling
 deploy leaves pods on the previous release reading those columns, and the
-directory listing stays a single query. `appendFileVersion` is the only writer of
-either table, and it writes both inside the caller's transaction.
+directory listing stays a single query. `appendFileVersion` writes every
+`file_version` row and every later change to the mirror, inside the caller's
+transaction; the only other writer is `/upload`, which inserts the `file` row
+with its first set of values before handing over.
 
 **History only grows.** A restore copies the old object to a new key and appends
 that as a further version; nothing rewinds a number and no version row is ever
@@ -172,7 +174,9 @@ version's key — the mirror names one object out of N and the rest would be
 orphaned in the bucket with nothing pointing at them. And a row written before
 this table existed has bytes and no version: the read paths present the mirror as
 version 1, and the first append adopts it before adding anything, or that append
-would overwrite the only reference to those bytes.
+would overwrite the only reference to those bytes. Its bytes count nothing
+towards the quota until that append, because the sum has no row to reach — the
+one residual a pod on the previous release can still leave after the migration.
 
 The 3D studio deliberately follows the current version. `component_model` is one
 row per file, so a card that gains new artwork keeps the dial-in someone already

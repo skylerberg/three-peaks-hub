@@ -113,6 +113,34 @@ async function run() {
       `${stored.byteSize} vs ${contents.length}`
     );
 
+    // --- the Download control actually downloads ---------------------------
+    // Clicked, not merely present. Everything downstream of the click -- the
+    // authorized fetch, the object URL, and how long it has to stay alive for
+    // the browser to read it -- exists only in a real engine, and a revoke that
+    // races that read produces a control that does nothing at all.
+    const saved = await Promise.all([
+      browser.page.waitForEvent('download', { timeout: 15_000 }),
+      browser.click('button[aria-label="Download probe-card.txt"]'),
+    ])
+      .then(async ([download]) => {
+        const stream = await download.createReadStream();
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        return { name: download.suggestedFilename(), body: Buffer.concat(chunks).toString() };
+      })
+      .catch((error) => ({ name: null, body: null, detail: error.message }));
+
+    check(
+      'clicking Download saves the file under its own name',
+      saved.name === 'probe-card.txt',
+      saved.detail ?? String(saved.name)
+    );
+    check(
+      'the downloaded bytes are the ones that were uploaded',
+      saved.body === contents,
+      saved.detail ?? String(saved.body)
+    );
+
     // --- the quota meter reflects the upload -------------------------------
     // Waited for, not sampled. The meter is drawn from the listing that the
     // refresh after the upload fetches, which is a second round trip -- reading

@@ -246,6 +246,16 @@ projectsRouter.delete(
     await assertProjectOwner(c, id);
 
     const db = c.get('db');
+    // Locked first: appendFileVersion takes the same row lock, so an append
+    // cannot commit in the window between the keys being collected and the
+    // cascade, which would leave its object named by nothing.
+    await db
+      .selectFrom('file')
+      .select(['file.id as id'])
+      .where('file.project_id', '=', id)
+      .forUpdate()
+      .execute();
+
     // Collect the storage keys before the cascade removes the rows naming them,
     // then delete the objects after commit.
     const files = await db
