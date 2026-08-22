@@ -358,6 +358,20 @@ async function runCounts(db: Connection, runId: string): Promise<ImportRunSummar
   return (await countsByRun(db, [runId])).get(runId) ?? emptySummary();
 }
 
+// A run read through the deck it belongs to. The scope is the import rather
+// than the project: two decks of one project have separate histories, and a run
+// of the wrong one is not this deck's to answer with.
+async function runInImport(db: Connection, importId: string, runId: string): Promise<RunRow> {
+  const row = await db
+    .selectFrom('import_run')
+    .select(RUN_COLUMNS)
+    .where('import_run.id', '=', runId)
+    .where('import_run.import_id', '=', importId)
+    .executeTakeFirst();
+  if (!row) throw new AppError(404, 'Import run not found');
+  return row;
+}
+
 async function readRun(c: Ctx, runId: string): Promise<SerializedRun> {
   const db = c.get('db');
   const row = await db
@@ -385,10 +399,10 @@ export async function readTimeline(c: Ctx, importId: string): Promise<Serialized
   return rows.map((row) => serializeRun(row, counts.get(row.id) ?? emptySummary()));
 }
 
-export async function readRunDetail(c: Ctx, runId: string): Promise<RunDetail> {
-  const run = await readRun(c, runId);
-  const cards = await c
-    .get('db')
+export async function readRunDetail(c: Ctx, importId: string, runId: string): Promise<RunDetail> {
+  const db = c.get('db');
+  const run = serializeRun(await runInImport(db, importId, runId), await runCounts(db, runId));
+  const cards = await db
     .selectFrom('import_run_card')
     .leftJoin('deck_import_card', 'deck_import_card.id', 'import_run_card.import_card_id')
     .select([
@@ -407,6 +421,106 @@ export async function readRunDetail(c: Ctx, runId: string): Promise<RunDetail> {
     .execute();
 
   return { run, cards };
+}
+
+interface DeckAsOfCard {
+  card_id: string;
+  file_id: string;
+  name: string;
+  file_version_number: number | null;
+  page_number: number | null;
+  last_run_id: string;
+  outcome: string;
+  image_deleted_at: string | null;
+}
+
+// deleted_at arrives as a Date, and it is the one column here that is not
+// already a string.
+interface DeckAsOfRow extends Omit<DeckAsOfCard, 'image_deleted_at'> {
+  image_deleted_at: Date | string | null;
+}
+
+export interface DeckAsOf {
+  run: SerializedRun;
+  cards: DeckAsOfCard[];
+  has_purged_history: boolean;
+}
+
+// The window: every finished run of this import up to and including the anchor.
+// Finishing is the only moment the deck changed, so it is the only kind of run
+// "as it stood" can be asked about. (started_at, id) is the total order
+// readTimeline sorts by, and import_run_timeline_idx covers it.
+function scopeOfRun(runId: string) {
+  return sql`
+    anchor as (select import_id, started_at, id from import_run where id = ${runId}),
+    in_scope as (
+      select r.id, r.started_at
+      from import_run r
+      join anchor a on a.import_id = r.import_id
+      where r.status = 'finished' and (r.started_at, r.id) <= (a.started_at, a.id)
+    )`;
+}
+
+// What the imports had put in this deck once one run had finished: per card, the
+// newest ledger row at or before it, minus the cards that run took away. It is
+// not the deck -- a card somebody added or removed by hand has no ledger row at
+// all -- and the screen has to say so rather than implying otherwise.
+export async function readDeckAsOfRun(c: Ctx, importId: string, runId: string): Promise<DeckAsOf> {
+  const db = c.get('db');
+  const row = await runInImport(db, importId, runId);
+  if (row.status === 'open') {
+    throw new AppError(409, 'That import is still running. Finish it before asking what it left');
+  }
+  if (row.status !== 'finished') {
+    throw new AppError(409, 'That import was abandoned. It handed the deck nothing');
+  }
+
+  const scope = scopeOfRun(runId);
+
+  // Partitioned on import_card_id and nothing else. A purged card's rows have
+  // lost it, and no column left on them correlates one run's row with the next,
+  // so falling back on the ledger row's own id would turn one purged card into
+  // a fresh card per run.
+  const cards = await sql<DeckAsOfRow>`
+    with ${scope},
+    ranked as (
+      select c.import_card_id, c.outcome, c.name, c.page_number, c.file_version_number,
+             s.id as run_id,
+             row_number() over (
+               partition by c.import_card_id
+               order by s.started_at desc, s.id desc, c.id desc
+             ) as rn
+      from import_run_card c
+      join in_scope s on s.id = c.run_id
+      where c.import_card_id is not null
+    )
+    select r.import_card_id as card_id, d.file_id, r.name, r.file_version_number,
+           r.page_number, r.run_id as last_run_id, r.outcome,
+           f.deleted_at as image_deleted_at
+    from ranked r
+    join deck_import_card d on d.id = r.import_card_id
+    join file f on f.id = d.file_id
+    where r.rn = 1 and r.outcome <> 'removed'
+    order by r.page_number asc nulls last, r.name asc, r.import_card_id asc
+  `.execute(db);
+
+  const purged = await sql<{ any_purged: boolean }>`
+    with ${scope}
+    select exists (
+      select 1 from import_run_card c join in_scope s on s.id = c.run_id
+      where c.import_card_id is null
+    ) as any_purged
+  `.execute(db);
+
+  return {
+    run: serializeRun(row, await runCounts(db, runId)),
+    cards: cards.rows.map((card) => ({
+      ...card,
+      image_deleted_at:
+        card.image_deleted_at === null ? null : new Date(card.image_deleted_at).toISOString(),
+    })),
+    has_purged_history: purged.rows[0]?.any_purged ?? false,
+  };
 }
 
 interface StartRunPage {
@@ -1280,7 +1394,7 @@ export async function finishRun(c: Ctx, access: ImportRunAccess): Promise<RunDet
     deck_id: access.deckId,
   });
 
-  return await readRunDetail(c, access.runId);
+  return await readRunDetail(c, access.importId, access.runId);
 }
 
 // Every page the run planned has to have landed. The plan is numbered 1..n and

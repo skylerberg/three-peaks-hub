@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { TINY_PNG } from './lib/fixtures.mjs';
+import { TINY_PNG, canvaZip, solidPng } from './lib/fixtures.mjs';
 import { createProject, inspectApi, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
@@ -44,6 +44,9 @@ const SCREENS = [
   { name: 'deleted', authed: true, reach: reachDeleted },
   { name: 'deck-editor', authed: true, reach: reachDeckEditor },
   { name: 'deck-import', authed: true, reach: reachDeckImport },
+  { name: 'deck-history', authed: true, reach: reachDeckHistory },
+  { name: 'deck-run', authed: true, reach: reachDeckRun },
+  { name: 'deck-as-of', authed: true, reach: reachDeckAsOf },
   { name: 'print', authed: true, reach: reachPrint },
 ];
 
@@ -141,6 +144,87 @@ async function reachDeckImport(browser, base, scheme) {
   await browser.page.waitForSelector('button:has-text("Use this folder")', { timeout: 15_000 });
   await browser.click('button:has-text("New folder")');
   await browser.page.waitForSelector('button:has-text("Create")', { timeout: 15_000 });
+}
+
+// Two exports written to disk: the first makes a two-card deck, the second
+// drops one of its pages and repeats the other byte for byte. What comes out is
+// a run with something in every group the history screens can draw -- removed,
+// unchanged, and a card still standing to photograph.
+function writeExports(label) {
+  const dir = mkdtempSync(join(tmpdir(), `tph-a11y-${label}-`));
+  const first = join(dir, 'Deck export.zip');
+  const second = join(dir, 'Deck export 2.zip');
+  const kept = { name: '1.png', bytes: solidPng({ width: 24, rgb: [220, 40, 40] }) };
+  writeFileSync(
+    first,
+    canvaZip([
+      kept,
+      { name: '2 - Two of cups.png', bytes: solidPng({ width: 24, rgb: [40, 180, 90] }) },
+    ])
+  );
+  writeFileSync(second, canvaZip([kept]));
+  return { first, second };
+}
+
+async function importOne(browser, zipPath, pages) {
+  await browser.page.getByLabel('Canva export (.zip)').setInputFiles(zipPath);
+  const label = `Import ${pages} ${pages === 1 ? 'page' : 'pages'}`;
+  await browser.page.waitForSelector(`button:has-text("${label}")`, { timeout: 60_000 });
+  await browser.click(`button:has-text("${label}")`);
+  await browser.page.waitForSelector('h2:has-text("Imported")', { timeout: 120_000 });
+}
+
+// The history screens have nothing to say about a deck nothing has imported
+// into, and no other reach in this file produces a finished run.
+async function reachImportedDeck(browser, base, scheme) {
+  const deckName = `Proof history-${scheme}`;
+  await reachDeckEditor(browser, base, `history-${scheme}`);
+  await browser.click('a:has-text("Import from Canva")');
+
+  await browser.page.waitForSelector('button:has-text("Choose a folder")', { timeout: 15_000 });
+  await browser.click('button:has-text("Choose a folder")');
+  await browser.page.waitForSelector('button:has-text("New folder")', { timeout: 15_000 });
+  await browser.click('button:has-text("New folder")');
+  await browser.page.fill('input[maxlength="120"]', `Artwork ${scheme}`);
+  await browser.click('button:has-text("Create")');
+  await browser.page.waitForSelector(
+    `nav[aria-label="Folders"] button:has-text("Artwork ${scheme}")`,
+    { timeout: 15_000 }
+  );
+  await browser.click('button:has-text("Use this folder")');
+  await browser.page.waitForSelector('text=Artwork lands in', { timeout: 15_000 });
+
+  const exports = writeExports(scheme);
+  await importOne(browser, exports.first, 2);
+  await importOne(browser, exports.second, 1);
+
+  await browser.click(`a:has-text("${deckName}")`);
+  await browser.page.waitForSelector('h2:has-text("Cards")', { timeout: 15_000 });
+}
+
+async function reachDeckHistory(browser, base, scheme) {
+  await reachImportedDeck(browser, base, scheme);
+  await browser.click('a:has-text("Import history")');
+  // A run row, not the heading: axe reading the spinner would report an empty
+  // screen as clean.
+  await browser.page.waitForSelector('a:has-text("What changed")', { timeout: 15_000 });
+  await browser.page.waitForSelector('a:has-text("The deck as it stood")', { timeout: 15_000 });
+}
+
+async function reachDeckRun(browser, base, scheme) {
+  await reachDeckHistory(browser, base, `run-${scheme}`);
+  // Newest first, so the first row is the import that dropped a page.
+  await browser.page.locator('a:has-text("What changed")').first().click();
+  await browser.page.waitForSelector('h2:has-text("Removed")', { timeout: 15_000 });
+  await browser.page.waitForSelector('summary:has-text("unchanged")', { timeout: 15_000 });
+}
+
+async function reachDeckAsOf(browser, base, scheme) {
+  await reachDeckHistory(browser, base, `asof-${scheme}`);
+  await browser.page.locator('a:has-text("The deck as it stood")').first().click();
+  await browser.page.waitForSelector('h1:has-text("The deck as it stood")', { timeout: 15_000 });
+  // And a card: the heading renders from the run alone.
+  await browser.page.waitForSelector('text=1.png', { timeout: 15_000 });
 }
 
 async function reachPrint(browser, base, scheme) {

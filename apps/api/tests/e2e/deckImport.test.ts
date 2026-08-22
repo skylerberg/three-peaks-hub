@@ -79,6 +79,23 @@ interface RunCard {
   file_version_number: number | null;
 }
 
+interface AsOfCard {
+  card_id: string;
+  file_id: string;
+  name: string;
+  file_version_number: number | null;
+  page_number: number | null;
+  last_run_id: string;
+  outcome: string;
+  image_deleted_at: string | null;
+}
+
+interface DeckAsOf {
+  run: Run;
+  cards: AsOfCard[];
+  has_purged_history: boolean;
+}
+
 describe('deck imports', () => {
   let owner: TestUser;
   let viewer: TestUser;
@@ -252,10 +269,24 @@ describe('deck imports', () => {
     return (await res.json()).runs as Run[];
   }
 
-  async function runDetail(runId: string): Promise<{ run: Run; cards: RunCard[] }> {
-    const res = await owner.api.get(`/api/decks/import/runs/${runId}`);
+  function runDetailRes(deckId: string, runId: string, user: TestUser = owner) {
+    return user.api.get(`/api/decks/${deckId}/import/runs/${runId}`);
+  }
+
+  async function runDetail(deckId: string, runId: string): Promise<{ run: Run; cards: RunCard[] }> {
+    const res = await runDetailRes(deckId, runId);
     expect(res.status).toBe(200);
     return (await res.json()) as { run: Run; cards: RunCard[] };
+  }
+
+  function asOfRes(deckId: string, runId: string, user: TestUser = owner) {
+    return user.api.get(`/api/decks/${deckId}/import/runs/${runId}/deck`);
+  }
+
+  async function asOf(deckId: string, runId: string): Promise<DeckAsOf> {
+    const res = await asOfRes(deckId, runId);
+    expect(res.status).toBe(200);
+    return (await res.json()) as DeckAsOf;
   }
 
   async function readFile(fileId: string) {
@@ -288,6 +319,10 @@ describe('deck imports', () => {
     expect(res.status).toBe(201);
     return (await res.json()).id as string;
   }
+
+  // Every timestamp here is stamped in milliseconds, so two writes inside one
+  // of them would make an ordering assertion vacuous rather than false.
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
 
   const outcomes = (pages: Map<number, PageResult>) =>
     [...pages.entries()].sort(([a], [b]) => a - b).map(([, result]) => result.outcome);
@@ -603,7 +638,7 @@ describe('deck imports', () => {
       expect((await finish(run.id)).status).toBe(200);
 
       expect(await versionCount(first.file_id!)).toBe(1);
-      const detail = await runDetail(run.id);
+      const detail = await runDetail(deckId, run.id);
       expect(detail.cards.filter((card) => card.page_number === 1)).toHaveLength(1);
     });
   });
@@ -918,7 +953,7 @@ describe('deck imports', () => {
       expect((await readFile(moved)).body.deleted_at).toBeNull();
       expect((await readFile(moved)).body.folder_id).toBe(elsewhere);
 
-      const past = await runDetail(first.run.id);
+      const past = await runDetail(deckId, first.run.id);
       expect(past.cards.find((card) => card.page_number === 2)!.file_id).toBe(moved);
     });
 
@@ -930,7 +965,7 @@ describe('deck imports', () => {
       expect((await owner.api.delete(`/api/files/${fileId}`)).status).toBe(204);
       expect((await owner.api.delete(`/api/files/${fileId}?purge=true`)).status).toBe(204);
 
-      const past = await runDetail(first.run.id);
+      const past = await runDetail(deckId, first.run.id);
       expect(past.cards).toHaveLength(1);
       expect(past.cards[0].file_id).toBeNull();
       expect(past.cards[0].name).toBe('1 - One.png');
@@ -1029,7 +1064,7 @@ describe('deck imports', () => {
       expect(shifted.name).toBe('3 - Beta.png');
 
       expect((await finish(run.id)).status).toBe(200);
-      expect((await runDetail(run.id)).run.counts.removed).toBe(0);
+      expect((await runDetail(deckId, run.id)).run.counts.removed).toBe(0);
       expect((await readFile(first.pages.get(1)!.file_id!)).body.deleted_at).toBeNull();
       expect((await readFile(first.pages.get(2)!.file_id!)).body.deleted_at).toBeNull();
       expect((await readDeck(deckId)).cards).toHaveLength(3);
@@ -1228,6 +1263,318 @@ describe('deck imports', () => {
     });
   });
 
+  describe('what one run did', () => {
+    // The deck in the path is the scope, not decoration: without it a run of
+    // another deck reads perfectly well under this deck's name.
+    it('refuses a run that belongs to another deck', async () => {
+      const mine = await scenario('run-detail-this-deck');
+      const theirs = await scenario('run-detail-another-deck');
+      await importPages(mine.deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+      const other = await importPages(theirs.deckId, [{ title: 'Beta', bytes: png('beta') }]);
+
+      expect((await runDetailRes(theirs.deckId, other.run.id)).status).toBe(200);
+      const res = await runDetailRes(mine.deckId, other.run.id);
+      expect({ status: res.status, body: await res.json() }).toEqual({
+        status: 404,
+        body: { error: 'Import run not found' },
+      });
+    });
+
+    it('is readable by a viewer and 404 for a stranger', async () => {
+      const { deckId } = await scenario('run-detail-guarded');
+      const first = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+
+      expect((await runDetailRes(deckId, first.run.id, viewer)).status).toBe(200);
+      expect((await runDetailRes(deckId, first.run.id, stranger)).status).toBe(404);
+    });
+  });
+
+  describe('the deck as it stood', () => {
+    it('names the cards a finished run left, each at the version that run left it', async () => {
+      const { deckId } = await scenario('as-of-versions');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const alpha = first.pages.get(1)!.file_id!;
+      const beta = first.pages.get(2)!.file_id!;
+
+      const atFirst = await asOf(deckId, first.run.id);
+      expect(atFirst.run.id).toBe(first.run.id);
+      expect(atFirst.has_purged_history).toBe(false);
+      expect(atFirst.cards).toMatchObject([
+        { file_id: alpha, name: '1 - Alpha.png', file_version_number: 1, page_number: 1 },
+        { file_id: beta, name: '2 - Beta.png', file_version_number: 1, page_number: 2 },
+      ]);
+      expect(atFirst.cards.every((card) => card.last_run_id === first.run.id)).toBe(true);
+
+      const second = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha redrawn') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      expect(await asOf(deckId, second.run.id)).toMatchObject({
+        cards: [
+          { file_id: alpha, file_version_number: 2, outcome: 'updated' },
+          { file_id: beta, file_version_number: 1, outcome: 'unchanged' },
+        ],
+      });
+
+      // The earlier run keeps answering with the artwork it left, which is the
+      // whole point of asking it.
+      expect((await asOf(deckId, first.run.id)).cards.map((card) => card.file_version_number)) //
+        .toEqual([1, 1]);
+    });
+
+    it('leaves out a card that had not been imported yet', async () => {
+      const { deckId } = await scenario('as-of-before-it-arrived');
+      const first = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+      const second = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+
+      expect((await asOf(deckId, first.run.id)).cards.map((card) => card.name)).toEqual([
+        '1 - Alpha.png',
+      ]);
+      expect((await asOf(deckId, second.run.id)).cards.map((card) => card.name)).toEqual([
+        '1 - Alpha.png',
+        '2 - Beta.png',
+      ]);
+    });
+
+    it('leaves out a card that import removed', async () => {
+      const { deckId } = await scenario('as-of-after-a-removal');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const second = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+      expect(second.run.counts.removed).toBe(1);
+
+      expect((await asOf(deckId, second.run.id)).cards.map((card) => card.name)).toEqual([
+        '1 - Alpha.png',
+      ]);
+      expect((await asOf(deckId, first.run.id)).cards).toHaveLength(2);
+    });
+
+    // An abandoned run writes real ledger rows: its pages landed, its versions
+    // are on disk, and the deck was handed none of it. status = 'finished' is
+    // the whole of what keeps those rows out of this answer.
+    it('leaves out an abandoned run inside a later window', async () => {
+      const { deckId } = await scenario('as-of-abandoned-in-window');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const alpha = first.pages.get(1)!.file_id!;
+      const beta = first.pages.get(2)!.file_id!;
+
+      const pages: Page[] = [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta redrawn') },
+      ];
+      const abandoned = await openRun(deckId, 2, pages);
+      expect((await landPage(abandoned.id, 2, pages[1])).file_version_number).toBe(2);
+      expect((await abandon(abandoned.id)).status).toBe(200);
+
+      // Tombstoned by hand so the run after it neither matches nor removes it:
+      // its newest finished row stays the one the first run wrote.
+      expect((await owner.api.delete(`/api/files/${beta}`)).status).toBe(204);
+      const third = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+
+      const at = await asOf(deckId, third.run.id);
+      expect(at.has_purged_history).toBe(false);
+      expect(at.cards).toMatchObject([
+        { file_id: alpha, file_version_number: 1, last_run_id: third.run.id },
+        { file_id: beta, file_version_number: 1, last_run_id: first.run.id },
+      ]);
+    });
+
+    it('still lists a card whose file was moved out of the folder', async () => {
+      const { deckId } = await scenario('as-of-detached');
+      const elsewhere = await makeFolder('as-of-detached-destination');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const moved = first.pages.get(2)!.file_id!;
+      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
+        200
+      );
+
+      const second = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha redrawn') }]);
+      expect(second.run.counts.removed).toBe(0);
+
+      // Detaching takes a card out of the import, never out of the deck, so the
+      // carry-forward is the honest answer rather than a hole.
+      expect((await asOf(deckId, second.run.id)).cards).toMatchObject([
+        {
+          file_id: first.pages.get(1)!.file_id,
+          file_version_number: 2,
+          last_run_id: second.run.id,
+        },
+        { file_id: moved, file_version_number: 1, last_run_id: first.run.id },
+      ]);
+    });
+
+    it('still lists a card somebody deleted by hand, and dates the tombstone', async () => {
+      const { deckId } = await scenario('as-of-hand-deleted');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const beta = first.pages.get(2)!.file_id!;
+      expect((await owner.api.delete(`/api/files/${beta}`)).status).toBe(204);
+
+      const cards = (await asOf(deckId, first.run.id)).cards;
+      expect(cards[0]).toMatchObject({ file_id: first.pages.get(1)!.file_id });
+      expect(cards[0].image_deleted_at).toBeNull();
+      expect(cards[1].file_id).toBe(beta);
+      // The tombstone's own timestamp, not a boolean evaluated now: only a date
+      // can say whether it was stamped before or after the run being read.
+      expect(cards[1].image_deleted_at).not.toBeNull();
+      expect(cards[1].image_deleted_at).toBe((await readFile(beta)).body.deleted_at);
+      expect((await readDeck(deckId)).cards).toHaveLength(2);
+    });
+
+    // The badge the screen draws is anchored to the run in front of somebody,
+    // and one tombstone is after one run and before the next.
+    it('dates the tombstone the same way whichever run is asked', async () => {
+      const { deckId } = await scenario('as-of-tombstone-dated');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const beta = first.pages.get(2)!.file_id!;
+      await tick();
+      expect((await owner.api.delete(`/api/files/${beta}`)).status).toBe(204);
+      await tick();
+
+      // A card already tombstoned is not one this run removed, so it carries
+      // forward and the later run has an answer about it too.
+      const second = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha redrawn') }]);
+      expect(second.run.counts.removed).toBe(0);
+
+      const atFirst = (await asOf(deckId, first.run.id)).cards.find(
+        (card) => card.file_id === beta
+      )!;
+      const atSecond = (await asOf(deckId, second.run.id)).cards.find(
+        (card) => card.file_id === beta
+      )!;
+
+      expect(atSecond.image_deleted_at).toBe(atFirst.image_deleted_at);
+      expect(Date.parse(atFirst.image_deleted_at!)).toBeGreaterThan(
+        Date.parse(first.run.finished_at!)
+      );
+      expect(Date.parse(atSecond.image_deleted_at!)).toBeLessThan(
+        Date.parse(second.run.finished_at!)
+      );
+    });
+
+    it('leaves out a card somebody added to the deck by hand', async () => {
+      const { deckId, folderId } = await scenario('as-of-hand-added');
+      const first = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+      const byHand = await uploadByHand(folderId, 'chosen.png', png('chosen'));
+
+      const cards = [
+        { file_id: first.pages.get(1)!.file_id!, quantity: 1 },
+        { file_id: byHand, quantity: 1 },
+      ];
+      expect((await owner.api.put(`/api/decks/${deckId}/cards`, { cards })).status).toBe(200);
+
+      expect((await readDeck(deckId)).cards).toHaveLength(2);
+      expect((await asOf(deckId, first.run.id)).cards.map((card) => card.file_id)).toEqual([
+        first.pages.get(1)!.file_id,
+      ]);
+    });
+
+    it('leaves out a purged card and says some history is gone', async () => {
+      const { deckId } = await scenario('as-of-purged');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const beta = first.pages.get(2)!.file_id!;
+      expect((await owner.api.delete(`/api/files/${beta}`)).status).toBe(204);
+      expect((await owner.api.delete(`/api/files/${beta}?purge=true`)).status).toBe(204);
+
+      const at = await asOf(deckId, first.run.id);
+      expect(at.cards.map((card) => card.file_id)).toEqual([first.pages.get(1)!.file_id]);
+      expect(at.has_purged_history).toBe(true);
+    });
+
+    it('refuses a run that is still open', async () => {
+      const { deckId } = await scenario('as-of-open-run');
+      const run = await openRun(deckId, 1, [{ title: 'Alpha', bytes: png('alpha') }]);
+
+      const res = await asOfRes(deckId, run.id);
+      expect({ status: res.status, body: await res.json() }).toEqual({
+        status: 409,
+        body: { error: 'That import is still running. Finish it before asking what it left' },
+      });
+      expect((await abandon(run.id)).status).toBe(200);
+    });
+
+    it('refuses an abandoned run, whose pages the deck was never handed', async () => {
+      const { deckId } = await scenario('as-of-abandoned');
+      const pages: Page[] = [{ title: 'Alpha', bytes: png('alpha') }];
+      const run = await openRun(deckId, 1, pages);
+      await landPage(run.id, 1, pages[0]);
+      expect((await abandon(run.id)).status).toBe(200);
+
+      const res = await asOfRes(deckId, run.id);
+      expect({ status: res.status, body: await res.json() }).toEqual({
+        status: 409,
+        body: { error: 'That import was abandoned. It handed the deck nothing' },
+      });
+    });
+
+    it('answers 404 for a run belonging to another deck', async () => {
+      const mine = await scenario('as-of-this-deck');
+      const theirs = await scenario('as-of-another-deck');
+      await importPages(mine.deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+      const other = await importPages(theirs.deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+
+      expect((await asOfRes(theirs.deckId, other.run.id)).status).toBe(200);
+      const res = await asOfRes(mine.deckId, other.run.id);
+      expect({ status: res.status, body: await res.json() }).toEqual({
+        status: 404,
+        body: { error: 'Import run not found' },
+      });
+    });
+
+    it('is readable by a viewer and 404 for a stranger', async () => {
+      const { deckId } = await scenario('as-of-guarded');
+      const first = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
+
+      expect((await asOfRes(deckId, first.run.id, viewer)).status).toBe(200);
+      expect((await asOfRes(deckId, first.run.id, stranger)).status).toBe(404);
+    });
+
+    it('orders two cards that share a page number the same way twice', async () => {
+      const { deckId } = await scenario('as-of-page-collision');
+      const elsewhere = await makeFolder('as-of-page-collision-destination');
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      const moved = first.pages.get(2)!.file_id!;
+      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
+        200
+      );
+
+      // Gamma takes the page number Beta's card is still carrying from the run
+      // before, so the page number alone cannot decide the order.
+      const second = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Gamma', bytes: png('gamma') },
+      ]);
+      const expected = ['1 - Alpha.png', '2 - Beta.png', '2 - Gamma.png'];
+      expect((await asOf(deckId, second.run.id)).cards.map((card) => card.name)).toEqual(expected);
+      expect((await asOf(deckId, second.run.id)).cards.map((card) => card.name)).toEqual(expected);
+    });
+  });
+
   describe('authorization', () => {
     let deckId: string;
     let folderId: string;
@@ -1245,7 +1592,7 @@ describe('deck imports', () => {
     it('lets a viewer read the binding and the timeline', async () => {
       expect((await readImport(deckId, viewer)).status).toBe(200);
       expect((await viewer.api.get(`/api/decks/${deckId}/import/runs`)).status).toBe(200);
-      expect((await viewer.api.get(`/api/decks/import/runs/${runId}`)).status).toBe(200);
+      expect((await viewer.api.get(`/api/decks/${deckId}/import/runs/${runId}`)).status).toBe(200);
     });
 
     it.each([
@@ -1264,7 +1611,10 @@ describe('deck imports', () => {
       ['reading the binding', (user: TestUser) => user.api.get(`/api/decks/${deckId}/import`)],
       ['binding', (user: TestUser) => bind(deckId, folderId, undefined, user)],
       ['starting a run', (user: TestUser) => startRun(deckId, 1, user)],
-      ['reading a run', (user: TestUser) => user.api.get(`/api/decks/import/runs/${runId}`)],
+      [
+        'reading a run',
+        (user: TestUser) => user.api.get(`/api/decks/${deckId}/import/runs/${runId}`),
+      ],
       ['importing a page', (user: TestUser) => postPage(runId, 1, png('stranger'), 'Alpha', user)],
       ['finishing a run', (user: TestUser) => finish(runId, user)],
     ])('answers a stranger %s with 404', async (_name, act) => {

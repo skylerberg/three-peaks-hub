@@ -415,6 +415,41 @@ freshly published package anyway.
   Re-importing tombstones the cards the export has stopped having, which is too
   destructive to happen on a drop.
 
+### Reading the history back
+
+`/projects/:projectId/decks/:deckId/history` lists the runs, opening one lists
+what it did, and `GET /api/decks/:deckId/import/runs/:runId/deck` answers what
+the imports had put in a deck as of one run: the newest ledger row per card at
+or before it, minus what it removed. Only a **finished** run has an answer — an
+open one has not removed anything yet, an abandoned one handed the deck nothing,
+and both are 409, which is why the timeline offers that link on neither. Two
+things it deliberately cannot say: a purged card is gone from the ledger
+entirely, so the response carries a flag and never a count; and deck arrangement
+— order, copies, the back — is rewritten wholesale on every edit and was never
+versioned, so the screen is a gallery rather than an arrangement.
+
+**Both reads of a run are scoped to the deck**, not to the project: the detail
+sits at `GET /api/decks/:deckId/import/runs/:runId`, beside the as-of read, and
+a run this deck does not own is 404 on either. One project holds several decks
+with separate histories, and the screen puts this deck's name over whatever
+comes back — cross-checking that in the browser would only be a second answer
+free to disagree with the server's. The project-scoped path it replaced is still
+registered, doing exactly what it always did, because the SPA ships as a cached
+bundle and a tab on the previous release keeps calling it until it reloads. Drop
+it a release later, the way a renamed column is dropped in a follow-up.
+
+**Neither claim about the past is made from the present tense.** An abandoned
+run is not a no-op — the pages that landed kept the versions they wrote — so the
+timeline calls one a no-op only where `counts.pages` is zero. For the same
+reason a card's tombstone travels as `image_deleted_at` and not a boolean: the
+badge is a comparison against the run being read, and a file tombstoned before
+that run was not deleted since it.
+
+**Every thumbnail on a history screen is drawn at a version.** `Thumbnail` takes
+one and appends `?version=` to the download it already fetches with the
+credential. Without it a row from last month renders with today's artwork, which
+is the single thing this whole feature exists not to do.
+
 `check:canva-import` is the only thing that reads a whole round trip. Its
 fixture is built to reach two traps a unit test can build but not carry all the
 way to a deck: the local and central extra fields are deliberately different

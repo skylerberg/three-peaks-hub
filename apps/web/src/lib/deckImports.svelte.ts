@@ -190,7 +190,9 @@ class DeckImportStore {
 
     try {
       const detail = assertOk(
-        await api.GET('/api/decks/import/runs/{runId}', { params: { path: { runId } } })
+        await api.GET('/api/decks/{deckId}/import/runs/{runId}', {
+          params: { path: { deckId, runId } },
+        })
       );
       // Before a single page goes up: the run numbers its pages, so a different
       // export resumed into it writes its own artwork onto these cards.

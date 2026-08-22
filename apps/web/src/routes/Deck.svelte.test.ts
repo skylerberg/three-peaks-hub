@@ -1,6 +1,6 @@
 import '../api/testUtils.ts';
 import { FakeWebSocket, fetchMock, jsonResponse } from '../api/testUtils.ts';
-import { render } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Deck from './Deck.svelte';
 import { deckImports } from '../lib/deckImports.svelte.ts';
@@ -89,5 +89,41 @@ describe('Deck editor', () => {
 
     expect(refresh).toHaveBeenCalledTimes(1);
     refresh.mockRestore();
+  });
+
+  // The history screen is read-only, so it is offered outside the editor-only
+  // section the Canva import sits in -- and it costs this screen no request.
+  it('links to the import history whether or not this account may edit', async () => {
+    for (const role of ['editor', 'viewer']) {
+      fetchMock.mockReset();
+      decks.reset();
+      fetchMock.mockImplementation(async (input) => {
+        const url = typeof input === 'string' ? input : (input as Request).url;
+        if (url.includes(`/api/decks/${DECK}/import`)) {
+          return jsonResponse(404, { error: 'This deck has no import' });
+        }
+        if (url.includes(`/api/decks/${DECK}`)) {
+          return jsonResponse(200, { deck: DECK_ROW, cards: [] });
+        }
+        return jsonResponse(200, {
+          id: PROJECT,
+          name: 'Colori',
+          description: null,
+          role,
+          created_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        });
+      });
+
+      const view = render(Deck, { projectId: PROJECT, deckId: DECK });
+      const link = await screen.findByRole('link', { name: 'Import history' });
+      expect(link).toHaveAttribute('href', `/projects/${PROJECT}/decks/${DECK}/history`);
+
+      const asked = fetchMock.mock.calls.map((call) =>
+        typeof call[0] === 'string' ? call[0] : (call[0] as Request).url
+      );
+      expect(asked.some((url) => url.includes('/import/runs'))).toBe(false);
+      view.unmount();
+    }
   });
 });

@@ -3,7 +3,10 @@
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
   import Deck from './routes/Deck.svelte';
+  import DeckAsOf from './routes/DeckAsOf.svelte';
+  import DeckHistory from './routes/DeckHistory.svelte';
   import DeckImport from './routes/DeckImport.svelte';
+  import DeckRun from './routes/DeckRun.svelte';
   import Decks from './routes/Decks.svelte';
   import Deleted from './routes/Deleted.svelte';
   import FileVersions from './routes/FileVersions.svelte';
@@ -17,6 +20,7 @@
   import Projects from './routes/Projects.svelte';
   import ResetPassword from './routes/ResetPassword.svelte';
   import Signup from './routes/Signup.svelte';
+  import { deckHistory } from './lib/deckHistory.svelte.ts';
   import { deckImports } from './lib/deckImports.svelte.ts';
   import { decks } from './lib/decks.svelte.ts';
   import { deleted } from './lib/deleted.svelte.ts';
@@ -56,6 +60,7 @@
       files.reset();
       decks.reset();
       deckImports.reset();
+      deckHistory.reset();
       deleted.reset();
       models.reset();
       versions.reset();
@@ -107,6 +112,20 @@
       <Deck projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'deck-import'}
       <DeckImport projectId={route.params.projectId} deckId={route.params.deckId} />
+    {:else if route.name === 'deck-history'}
+      <DeckHistory projectId={route.params.projectId} deckId={route.params.deckId} />
+    {:else if route.name === 'deck-run'}
+      <DeckRun
+        projectId={route.params.projectId}
+        deckId={route.params.deckId}
+        runId={route.params.runId}
+      />
+    {:else if route.name === 'deck-as-of'}
+      <DeckAsOf
+        projectId={route.params.projectId}
+        deckId={route.params.deckId}
+        runId={route.params.runId}
+      />
     {:else if route.name === 'print'}
       <Print projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'model'}

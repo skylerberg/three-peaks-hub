@@ -340,11 +340,70 @@ export const guards = [
     // browser makes on its own carries no Authorization header, and every
     // thumbnail in the explorer answered 401.
     find:
-      '        const response = await fetch(`/api/files/${id}/download`, ' +
-      '{ headers: authHeader() });',
-    replace: '        const response = await fetch(`/api/files/${id}/download`);',
+      '        const response = await fetch(`/api/files/${id}/download${query}`, {\n' +
+      '          headers: authHeader(),\n' +
+      '        });',
+    replace: '        const response = await fetch(`/api/files/${id}/download${query}`);',
     tests: ['src/components/Thumbnail.svelte.test.ts'],
     testName: 'reads the bytes with the credential and shows them',
+    runner: 'web',
+  },
+  {
+    // Yesterday's row drawn with today's artwork is precisely the lie the whole
+    // history feature exists to prevent.
+    name: 'a history thumbnail is drawn at the version the run left',
+    package: 'web',
+    file: 'src/routes/DeckRun.svelte',
+    find: 'version={card.file_version_number ?? undefined}',
+    replace: 'version={undefined}',
+    tests: ['src/routes/DeckRun.svelte.test.ts'],
+    testName: 'asks for each thumbnail at the version this run left',
+    runner: 'web',
+  },
+  {
+    // Both panes falling back to the current file makes every comparison look
+    // like two copies of the same image.
+    name: 'a comparison reads each side at its own version',
+    package: 'web',
+    file: 'src/routes/FileVersions.svelte',
+    find: 'version={side.version_number}',
+    replace: 'version={undefined}',
+    tests: ['src/routes/FileVersions.svelte.test.ts'],
+    testName: 'draws each side at its own version, not the current file',
+    runner: 'web',
+  },
+  {
+    // Purging is the one destructive act in the system, and a card it took is
+    // named rather than requested as bytes nothing can serve.
+    name: 'a purged card is named rather than drawn',
+    package: 'web',
+    file: 'src/routes/DeckRun.svelte',
+    find: '{#if card.file_id === null}',
+    replace: '{#if false}',
+    tests: ['src/routes/DeckRun.svelte.test.ts'],
+    testName: 'names a purged card instead of drawing a broken thumbnail',
+    runner: 'web',
+  },
+  {
+    // The route block is not keyed, so a slower listing landing late would
+    // otherwise put one deck's runs under another deck's heading.
+    name: 'a superseded run listing cannot overwrite a newer one',
+    package: 'web',
+    file: 'src/lib/deckHistory.svelte.ts',
+    find: '      if (generation !== this.#runsGeneration) return;',
+    replace: '      if (false) return;',
+    tests: ['src/lib/deckHistory.svelte.test.ts'],
+    testName: 'discards a run listing a newer request has already superseded',
+    runner: 'web',
+  },
+  {
+    name: "a deck's history belongs to the deck it was read for",
+    package: 'web',
+    file: 'src/lib/deckHistory.svelte.ts',
+    find: '    this.runsDeckId = null;\n    this.runs = [];\n',
+    replace: '',
+    tests: ['src/lib/deckHistory.svelte.test.ts'],
+    testName: "drops the previous deck's runs before the next deck's answer lands",
     runner: 'web',
   },
   {
@@ -473,6 +532,57 @@ export const guards = [
       "    const { cards } = c.req.valid('json')",
     tests: ['tests/e2e/decks.test.ts'],
     testName: 'refuses a viewer editing the cards with 403',
+  },
+  {
+    // Carrying the removal row forward reads as the card still standing, which
+    // is the one thing an as-of view exists to get right.
+    name: 'the deck as it stood stops carrying a card the import removed',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find: "where r.rn = 1 and r.outcome <> 'removed'",
+    replace: 'where r.rn = 1',
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'leaves out a card that import removed',
+  },
+  {
+    // An open run has not removed anything yet, so answering it at all hands
+    // back a deck that never existed.
+    name: 'an import still running is refused rather than half-answered',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find: "  if (row.status === 'open') {",
+    replace: '  if (false) {',
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'refuses a run that is still open',
+  },
+  {
+    // Without the deck in the path a hand-edited URL renders another deck's
+    // history under this deck's name. One helper scopes both reads of a run,
+    // so either of them catches this.
+    name: 'a run from another deck is not readable through this deck',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find:
+      "    .where('import_run.import_id', '=', importId)\n" +
+      '    .executeTakeFirst();\n' +
+      "  if (!row) throw new AppError(404, 'Import run not found');",
+    replace:
+      '    .executeTakeFirst();\n' + "  if (!row) throw new AppError(404, 'Import run not found');",
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'answers 404 for a run belonging to another deck',
+  },
+  {
+    // An abandoned run writes real ledger rows: its pages landed and its
+    // versions are on disk. The deck was handed none of it, and this predicate
+    // is the whole of what keeps those rows out of the answer -- the honesty of
+    // the view rests on it and nothing else asserts it.
+    name: 'an abandoned run is left out of the deck as it stood',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find: "where r.status = 'finished' and (r.started_at, r.id) <= (a.started_at, a.id)",
+    replace: 'where (r.started_at, r.id) <= (a.started_at, a.id)',
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'leaves out an abandoned run inside a later window',
   },
   {
     // The route answers 404 for a deck that is not bound at all, which is not

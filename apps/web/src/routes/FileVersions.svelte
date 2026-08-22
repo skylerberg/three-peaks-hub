@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatBytes } from '@three-peaks/shared';
+  import Thumbnail from '../components/Thumbnail.svelte';
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
@@ -23,6 +24,11 @@
   // write one: the member list carries every name and the caller's own role.
   let names = $state<Record<string, string>>({});
   let canEdit = $state(false);
+
+  // Which two versions are on the light table. Two, and no more: a third pick
+  // replaces the older of them rather than being refused, so walking backwards
+  // through a stack does not mean clearing the pair at every step.
+  let compare = $state<number[]>([]);
 
   const file = $derived(versions.file);
   const history = $derived(versions.versions);
@@ -83,6 +89,21 @@
       realtime.unsubscribe(id);
     };
   });
+
+  const pair = $derived(
+    compare.length === 2
+      ? compare
+          .map((number) => history.find((version) => version.version_number === number))
+          .filter((version) => version !== undefined)
+          .sort((a, b) => a.version_number - b.version_number)
+      : null
+  );
+
+  function toggleCompare(number: number): void {
+    compare = compare.includes(number)
+      ? compare.filter((value) => value !== number)
+      : [...compare, number].slice(-2);
+  }
 
   function who(userId: string): string {
     return names[userId] ?? 'Someone no longer on this project';
@@ -199,6 +220,52 @@
       </div>
     {/if}
 
+    {#if pair && pair.length === 2}
+      <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-lg font-semibold">
+            Version {pair[0].version_number} and version {pair[1].version_number}
+          </h2>
+          <Button variant="ghost" onclick={() => (compare = [])}>Clear comparison</Button>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          {#each pair as side (side.version_number)}
+            <div class="flex flex-col gap-2">
+              <Thumbnail
+                fileId={file.id}
+                version={side.version_number}
+                class="h-64 w-full"
+                fit="contain"
+                alt="Version {side.version_number} of {file.filename}"
+              />
+              <p class="flex items-center gap-2 font-medium">
+                Version {side.version_number}
+                {#if side.is_current}
+                  <span class="rounded-full bg-accent px-2 py-0.5 text-xs text-on-accent">
+                    Current
+                  </span>
+                {/if}
+              </p>
+              <p class="text-sm text-muted">
+                {formatBytes(side.byte_size)} · {side.content_type} ·
+                <time datetime={side.created_at}>{when(side.created_at)}</time>
+                · {who(side.created_by)}
+              </p>
+              <div>
+                <Button
+                  variant="secondary"
+                  aria-label="Download version {side.version_number} of {file.filename} for comparison"
+                  onclick={() => download(side.version_number, side.is_current)}
+                >
+                  Download
+                </Button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <ul class="flex flex-col divide-y divide-edge rounded-md border border-edge bg-surface">
       {#each history as version (version.version_number)}
         <li class="flex flex-wrap items-center justify-between gap-3 p-3">
@@ -218,6 +285,14 @@
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              aria-pressed={compare.includes(version.version_number)}
+              aria-label="Compare version {version.version_number} of {file.filename}"
+              onclick={() => toggleCompare(version.version_number)}
+            >
+              {compare.includes(version.version_number) ? 'Comparing' : 'Compare'}
+            </Button>
             <Button
               variant="secondary"
               aria-label="Download version {version.version_number} of {file.filename}"

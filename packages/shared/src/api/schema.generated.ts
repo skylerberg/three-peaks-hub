@@ -662,6 +662,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/decks/{deckId}/import/runs/{runId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one import run
+     * @description The run and a row per card it touched. A row whose image has since been purged keeps the name and the page number it had. Scoped to the deck, like the as-of read beside it: a run of another deck is 404 here rather than another deck's history under this one's name.
+     */
+    get: operations['getApiDecksByDeckIdImportRunsByRunId'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/import/runs/{runId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one import run, without naming its deck
+     * @description Superseded. Answers whatever run the caller can reach in their project, which is what it always did; the deck-scoped route is the one that can refuse a run belonging to another deck.
+     */
+    get: operations['getApiDecksImportRunsByRunId'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/decks/{deckId}/import/runs/{runId}/deck': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The cards this deck held after one import
+     * @description Per card, the newest ledger row at or before that run, minus the cards it removed. Only a finished run has an answer: an open one has not removed anything yet and an abandoned one handed the deck nothing, and both are 409. A card whose image was purged cannot be recovered from the ledger at all and is reported as a flag rather than a row.
+     */
+    get: operations['getApiDecksByDeckIdImportRunsByRunIdDeck'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/decks/import/runs/{runId}/pages': {
     parameters: {
       query?: never;
@@ -716,26 +776,6 @@ export interface paths {
      * @description Leaves everything already imported in place. Nothing is tombstoned, nothing is undone, and the deck is not touched.
      */
     post: operations['postApiDecksImportRunsByRunIdAbandon'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/decks/import/runs/{runId}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Read one import run
-     * @description The run and a row per card it touched. A row whose image has since been purged keeps the name and the page number it had.
-     */
-    get: operations['getApiDecksImportRunsByRunId'];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1009,6 +1049,37 @@ export interface components {
       started_at: string;
       started_by: string;
       status: string;
+    };
+    ImportRunDeck: {
+      cards: {
+        card_id: string;
+        file_id: string;
+        file_version_number: number | null;
+        image_deleted_at: string | null;
+        last_run_id: string;
+        name: string;
+        outcome: string;
+        page_number: number | null;
+      }[];
+      has_purged_history: boolean;
+      run: {
+        counts: {
+          added: number;
+          pages: number;
+          removed: number;
+          restored: number;
+          unchanged: number;
+          updated: number;
+        };
+        finished_at: string | null;
+        id: string;
+        import_id: string;
+        page_count: number;
+        source_label: string | null;
+        started_at: string;
+        started_by: string;
+        status: string;
+      };
     };
     ImportRunDetail: {
       cards: {
@@ -4451,6 +4522,184 @@ export interface operations {
       };
     };
   };
+  getApiDecksByDeckIdImportRunsByRunId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunDetail'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksImportRunsByRunId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunDetail'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiDecksByDeckIdImportRunsByRunIdDeck: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The cards this deck held after that import */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportRunDeck'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   postApiDecksImportRunsByRunIdPages: {
     parameters: {
       query: {
@@ -4713,61 +4962,6 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Internal server error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-    };
-  };
-  getApiDecksImportRunsByRunId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        runId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description The run */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ImportRunDetail'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Not found */
-      404: {
         headers: {
           [name: string]: unknown;
         };

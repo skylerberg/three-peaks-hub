@@ -12,6 +12,7 @@ import {
   finishRun,
   importPage,
   readBinding,
+  readDeckAsOfRun,
   readRunDetail,
   readTimeline,
   startRun,
@@ -33,6 +34,7 @@ import {
   deckImportSchema,
   importPageQuerySchema,
   importPageResultSchema,
+  importRunDeckSchema,
   importRunDetailSchema,
   importRunListSchema,
   importRunSchema,
@@ -213,6 +215,78 @@ deckImportsRouter.get(
   }
 );
 
+deckImportsRouter.get(
+  '/:deckId/import/runs/:runId',
+  describeRoute({
+    tags: ['Deck imports'],
+    summary: 'Read one import run',
+    description:
+      "The run and a row per card it touched. A row whose image has since been purged keeps the name and the page number it had. Scoped to the deck, like the as-of read beside it: a run of another deck is 404 here rather than another deck's history under this one's name.",
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'The run',
+        content: { 'application/json': { schema: resolver(importRunDetailSchema) } },
+      },
+      ...standardErrors,
+    },
+  }),
+  async (c) => {
+    const access = await assertImportAccess(c, c.req.param('deckId'), 'read');
+    return c.json(await readRunDetail(c, access.importId, c.req.param('runId')));
+  }
+);
+
+// Superseded by the deck-scoped route above, and kept for one release only.
+// The SPA is a cached bundle, so a tab still running the previous release calls
+// this path until it reloads. Nothing in this release calls it; drop it in the
+// release after, the way a renamed column is dropped in a follow-up.
+deckImportsRouter.get(
+  '/import/runs/:runId',
+  describeRoute({
+    tags: ['Deck imports'],
+    summary: 'Read one import run, without naming its deck',
+    description:
+      'Superseded. Answers whatever run the caller can reach in their project, which is what it always did; the deck-scoped route is the one that can refuse a run belonging to another deck.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'The run',
+        content: { 'application/json': { schema: resolver(importRunDetailSchema) } },
+      },
+      ...standardErrors,
+    },
+  }),
+  async (c) => {
+    const runId = c.req.param('runId');
+    const access = await assertImportRunAccess(c, runId, 'read');
+    return c.json(await readRunDetail(c, access.importId, runId));
+  }
+);
+
+deckImportsRouter.get(
+  '/:deckId/import/runs/:runId/deck',
+  describeRoute({
+    tags: ['Deck imports'],
+    summary: 'The cards this deck held after one import',
+    description:
+      'Per card, the newest ledger row at or before that run, minus the cards it removed. Only a finished run has an answer: an open one has not removed anything yet and an abandoned one handed the deck nothing, and both are 409. A card whose image was purged cannot be recovered from the ledger at all and is reported as a flag rather than a row.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'The cards this deck held after that import',
+        content: { 'application/json': { schema: resolver(importRunDeckSchema) } },
+      },
+      ...conflictErrorResponse,
+      ...standardErrors,
+    },
+  }),
+  async (c) => {
+    const access = await assertImportAccess(c, c.req.param('deckId'), 'read');
+    return c.json(await readDeckAsOfRun(c, access.importId, c.req.param('runId')));
+  }
+);
+
 deckImportsRouter.post(
   '/import/runs/:runId/pages',
   describeRoute({
@@ -301,28 +375,5 @@ deckImportsRouter.post(
     const runId = c.req.param('runId');
     const access = await assertImportRunAccess(c, runId, 'write');
     return c.json(await abandonRun(c, access));
-  }
-);
-
-deckImportsRouter.get(
-  '/import/runs/:runId',
-  describeRoute({
-    tags: ['Deck imports'],
-    summary: 'Read one import run',
-    description:
-      'The run and a row per card it touched. A row whose image has since been purged keeps the name and the page number it had.',
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'The run',
-        content: { 'application/json': { schema: resolver(importRunDetailSchema) } },
-      },
-      ...standardErrors,
-    },
-  }),
-  async (c) => {
-    const runId = c.req.param('runId');
-    await assertImportRunAccess(c, runId, 'read');
-    return c.json(await readRunDetail(c, runId));
   }
 );
