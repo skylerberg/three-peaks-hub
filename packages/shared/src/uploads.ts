@@ -16,6 +16,21 @@ export const ALLOWED_IMAGE_TYPES = [
   'image/svg+xml',
 ] as const;
 
+// The extension a stored image is named with. Keyed by the sniffed type rather
+// than by whatever the upload was called, so a page named ".jpeg" by one
+// exporter and ".jpg" by the next lands under one name either way.
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+};
+
+export function extensionForImageType(contentType: string): string {
+  return IMAGE_EXTENSIONS[contentType] ?? 'bin';
+}
+
 // What the 3D studio can turn into a mesh. GIF is absent deliberately: an
 // animated source has no single frame to trace or to print onto a face.
 export const MODEL_SOURCE_TYPES = [

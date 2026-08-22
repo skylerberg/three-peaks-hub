@@ -10,12 +10,26 @@ import {
   assertProjectWrite,
 } from '../services/authorization.ts';
 import {
+  FILE_COLUMNS,
   appendFileVersion,
   assertQuota,
   projectStorageUsed,
+  restoreFile,
+  serializeFile,
   storeUpload,
 } from '../services/files.ts';
-import { deleteStoredObjectsAfterCommit, storage } from '../services/storage/index.ts';
+import {
+  FOLDER_COLUMNS,
+  MAX_BREADCRUMB_DEPTH,
+  UNKNOWN_ANCESTOR,
+  blockedMessage,
+  breadcrumb,
+  deletedAncestor,
+  firstDeletedInTrail,
+  type DeletedAncestor,
+  type FolderRow,
+} from '../services/folderTree.ts';
+import { deleteStoredObjectsAfterCommit, reclaim, storage } from '../services/storage/index.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
@@ -57,36 +71,6 @@ const standardErrors = {
   ...internalServerErrorResponse,
 };
 
-// transactionMiddleware rethrows from inside the transaction, so a request that
-// fails never reaches its post-commit hooks. Bytes already written therefore
-// have to be reclaimed here and now, and a cleanup failure is swallowed rather
-// than replacing the real response.
-async function reclaim(storageKey: string): Promise<void> {
-  await storage()
-    .delete(storageKey)
-    .catch(() => {});
-}
-
-type FolderRow = {
-  id: string;
-  project_id: string;
-  parent_id: string | null;
-  name: string;
-  created_at: Date | string;
-  updated_at: Date | string;
-  deleted_at: Date | string | null;
-};
-
-const FOLDER_COLUMNS = [
-  'folder.id as id',
-  'folder.project_id as project_id',
-  'folder.parent_id as parent_id',
-  'folder.name as name',
-  'folder.created_at as created_at',
-  'folder.updated_at as updated_at',
-  'folder.deleted_at as deleted_at',
-] as const;
-
 // deleted_at is deliberately not on the wire: nothing reads one folder by id,
 // and the deleted listing carries the fact where it is needed.
 function serializeFolder(row: FolderRow) {
@@ -99,52 +83,6 @@ function serializeFolder(row: FolderRow) {
     updated_at: new Date(row.updated_at).toISOString(),
   };
 }
-
-function serializeFile(row: {
-  id: string;
-  project_id: string;
-  folder_id: string | null;
-  filename: string;
-  content_type: string;
-  byte_size: string | number;
-  image_width: number | null;
-  image_height: number | null;
-  uploaded_by: string;
-  created_at: Date | string;
-  updated_at: Date | string;
-  deleted_at: Date | string | null;
-}) {
-  return {
-    id: row.id,
-    project_id: row.project_id,
-    folder_id: row.folder_id,
-    filename: row.filename,
-    content_type: row.content_type,
-    // bigint arrives as a string from pg; the wire type is a number.
-    byte_size: Number(row.byte_size),
-    image_width: row.image_width,
-    image_height: row.image_height,
-    uploaded_by: row.uploaded_by,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString(),
-    deleted_at: row.deleted_at === null ? null : new Date(row.deleted_at).toISOString(),
-  };
-}
-
-const FILE_COLUMNS = [
-  'file.id as id',
-  'file.project_id as project_id',
-  'file.folder_id as folder_id',
-  'file.filename as filename',
-  'file.content_type as content_type',
-  'file.byte_size as byte_size',
-  'file.image_width as image_width',
-  'file.image_height as image_height',
-  'file.uploaded_by as uploaded_by',
-  'file.created_at as created_at',
-  'file.updated_at as updated_at',
-  'file.deleted_at as deleted_at',
-] as const;
 
 interface VersionRow {
   file_id: string;
@@ -258,71 +196,10 @@ async function lookupVersion(
   return mirrorAsVersionOne(db, fileId);
 }
 
-// Walks parent_id up to the root. Bounded, because a cycle would otherwise be
-// an infinite loop in a request handler — moves are checked for cycles, but a
-// read must not depend on that having worked.
-const MAX_BREADCRUMB_DEPTH = 64;
-
-// Never filtered by deleted_at: the trail is what the ancestor rule is read
-// off, and a truncated trail would let a move into a deleted subtree past the
-// cycle check.
-async function breadcrumb(db: Connection, folderId: string): Promise<FolderRow[]> {
-  const trail: FolderRow[] = [];
-  let cursor: string | null = folderId;
-  for (let depth = 0; cursor && depth < MAX_BREADCRUMB_DEPTH; depth += 1) {
-    const row: FolderRow | undefined = await db
-      .selectFrom('folder')
-      .select(FOLDER_COLUMNS)
-      .where('folder.id', '=', cursor)
-      .executeTakeFirst();
-    if (!row) break;
-    trail.unshift(row);
-    cursor = row.parent_id;
-  }
-  return trail;
-}
-
-// The deleted folder that stands between something and being visible again.
-// `id` is null for the one case the walk cannot answer.
-interface DeletedAncestor {
-  id: string | null;
-  name: string;
-}
-
-// A walk that ran out of depth, or off a row that is no longer there, leaves
-// the rest of the chain unknown — and unknown denies. Admitting it instead
-// would put a row inside a tombstone nothing lists and nothing can reach.
-const UNKNOWN_ANCESTOR: DeletedAncestor = { id: null, name: 'a folder too deep to check' };
-
-// Outermost first, so what is named is the one to restore first.
-function firstDeletedInTrail(trail: FolderRow[]): DeletedAncestor | null {
-  const deleted = trail.find((folder) => folder.deleted_at !== null);
-  if (deleted) return { id: deleted.id, name: deleted.name };
-  if (trail.length === 0 || trail[0].parent_id !== null) return UNKNOWN_ANCESTOR;
-  return null;
-}
-
-// The check every write target goes through. A one-level `deleted_at is null`
-// would not do: a live folder inside a deleted one is ordinary, and a row
-// planted there is invisible to every listing and recoverable by no route.
-async function deletedAncestor(
-  db: Connection,
-  folderId: string | null
-): Promise<DeletedAncestor | null> {
-  if (folderId === null) return null;
-  return firstDeletedInTrail(await breadcrumb(db, folderId));
-}
-
 // Its own function rather than an inline test, so the single line deciding
 // between keeping the bytes and reclaiming them has one site.
 function purgeRequested(query: { purge?: string }): boolean {
   return query.purge === 'true';
-}
-
-function blockedMessage(ancestor: DeletedAncestor, what: string): string {
-  return ancestor.id === null
-    ? `${what} sits too deep for its folders to be checked`
-    : `${what} is inside the deleted folder "${ancestor.name}". Restore that first`;
 }
 
 filesRouter.get(
@@ -766,6 +643,11 @@ filesRouter.delete(
       .select(['file.id as id'])
       // Named, because the only lockable relation in the join is file.
       .forUpdate('file')
+      // LockRows sits above the sort, so the rows are locked in id order. An
+      // import takes the same locks the same way and before it writes a single
+      // mapping row -- which the delete below reaches through the cascade, so
+      // the other order would be a cycle rather than a wait.
+      .orderBy('file.id')
       .execute();
 
     const fileIds = locked.map((row) => row.id);
@@ -1305,7 +1187,11 @@ filesRouter.patch(
   async (c) => {
     const id = c.req.param('id');
     const access = await assertFileAccess(c, id, 'write');
-    const body = c.req.valid('json') as { filename?: string; folder_id?: string | null };
+    const body = c.req.valid('json') as {
+      filename?: string;
+      folder_id?: string | null;
+      name_locked?: boolean;
+    };
     const db = c.get('db');
 
     if (body.folder_id !== undefined && body.folder_id !== null) {
@@ -1327,6 +1213,13 @@ filesRouter.patch(
         .set({
           ...(body.filename !== undefined ? { filename: body.filename } : {}),
           ...(body.folder_id !== undefined ? { folder_id: body.folder_id } : {}),
+          // A rename here is a person naming the file, which is what an import
+          // must not overwrite. Sent explicitly, it is the way back out.
+          ...(body.name_locked !== undefined
+            ? { name_locked: body.name_locked }
+            : body.filename !== undefined
+              ? { name_locked: true }
+              : {}),
           updated_at: new Date(),
         })
         .where('file.id', '=', id)
@@ -1447,56 +1340,14 @@ filesRouter.post(
   queryValidator(restoreFileQuerySchema),
   async (c) => {
     const id = c.req.param('id');
-    const access = await assertFileAccess(c, id, 'write');
+    await assertFileAccess(c, id, 'write');
     const query = c.req.valid('query') as { filename?: string };
-    const db = c.get('db');
 
-    const file = await db
-      .selectFrom('file')
-      .select(FILE_COLUMNS)
-      .where('file.id', '=', id)
-      .forUpdate()
-      .executeTakeFirst();
-    if (!file) throw new AppError(404, 'File not found');
-    if (file.deleted_at === null) return c.json(serializeFile(file));
-
-    // Nothing is auto-restored on the way up: un-deleting a folder somebody
-    // else deleted, without being asked to, is not this route's decision.
-    const blocked = await deletedAncestor(db, file.folder_id);
-    if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That file'));
-
-    const folderId = file.folder_id;
-    const filename = query.filename ?? file.filename;
-    const taken = await db
-      .selectFrom('file')
-      .select(['file.id as id'])
-      .where('file.project_id', '=', access.projectId)
-      .where('file.deleted_at', 'is', null)
-      .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
-      .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
-      .where(sql<boolean>`lower(file.filename) = lower(${filename})`)
-      .executeTakeFirst();
-    if (taken) throw new AppError(409, `A file named "${filename}" is already there`);
-
-    try {
-      const row = await db
-        .updateTable('file')
-        .set({ filename, deleted_at: null, deleted_by: null, updated_at: new Date() })
-        .where('file.id', '=', id)
-        .returning(FILE_COLUMNS)
-        .executeTakeFirstOrThrow();
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
-        project_id: access.projectId,
-        file_id: id,
-      });
-      return c.json(serializeFile(row));
-    } catch (error) {
-      // The check above races two restores against each other; the index is
-      // what actually decides.
-      if (isUniqueViolation(error)) {
-        throw new AppError(409, `A file named "${filename}" is already there`);
-      }
-      throw error;
-    }
+    // A name typed into the Deleted view is a name a person chose, so it locks.
+    const restored = await restoreFile(c, id, {
+      filename: query.filename,
+      lockName: query.filename !== undefined,
+    });
+    return c.json(restored);
   }
 );

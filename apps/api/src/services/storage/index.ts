@@ -22,3 +22,13 @@ export function deleteStoredObjectsAfterCommit(
     await Promise.all(keys.map((key) => provider.delete(key).catch(() => {})));
   });
 }
+
+// transactionMiddleware rethrows from inside the transaction, so a request that
+// fails never reaches its post-commit hooks. Bytes already written therefore
+// have to be reclaimed here and now, and a cleanup failure is swallowed rather
+// than replacing the real response.
+export async function reclaim(storageKey: string): Promise<void> {
+  await storage()
+    .delete(storageKey)
+    .catch(() => {});
+}

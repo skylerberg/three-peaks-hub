@@ -18,6 +18,8 @@ export const EVENT_CATALOG = {
   deck_created: { carriesActor: true },
   deck_updated: { carriesActor: true },
   deck_deleted: { carriesActor: true },
+  deck_import_started: { carriesActor: true },
+  deck_import_finished: { carriesActor: true },
   members_changed: { carriesActor: true },
 } as const;
 

@@ -72,6 +72,27 @@ export interface DeckCard {
   quantity: Generated<number>;
 }
 
+export interface DeckImport {
+  created_at: Generated<Timestamp>;
+  deck_id: string;
+  folder_id: string | null;
+  id: string;
+  source_kind: string;
+  source_label: string | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface DeckImportCard {
+  added_to_deck_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  detached_at: Timestamp | null;
+  file_id: string;
+  id: string;
+  identity_key: string;
+  import_id: string;
+  page_number: number;
+}
+
 export interface File {
   byte_size: Int8;
   checksum: string | null;
@@ -84,6 +105,7 @@ export interface File {
   id: string;
   image_height: number | null;
   image_width: number | null;
+  name_locked: Generated<boolean>;
   project_id: string;
   storage_key: string;
   updated_at: Generated<Timestamp>;
@@ -114,6 +136,39 @@ export interface Folder {
   parent_id: string | null;
   project_id: string;
   updated_at: Generated<Timestamp>;
+}
+
+export interface ImportRun {
+  finished_at: Timestamp | null;
+  id: string;
+  import_id: string;
+  page_count: number;
+  source_label: string | null;
+  started_at: Generated<Timestamp>;
+  started_by: string;
+  status: string;
+  summary: Json | null;
+}
+
+export interface ImportRunCard {
+  file_version_number: number | null;
+  id: string;
+  import_card_id: string | null;
+  matched_by: string | null;
+  name: string;
+  outcome: string;
+  page_number: number | null;
+  restored: Generated<boolean>;
+  run_id: string;
+}
+
+export interface ImportRunPage {
+  card_id: string;
+  id: string;
+  identity_key: string;
+  matched_by: string | null;
+  page_number: number;
+  run_id: string;
 }
 
 export interface PersonalAccessToken {
@@ -155,9 +210,14 @@ export interface DB {
   component_model: ComponentModel;
   deck: Deck;
   deck_card: DeckCard;
+  deck_import: DeckImport;
+  deck_import_card: DeckImportCard;
   file: File;
   file_version: FileVersion;
   folder: Folder;
+  import_run: ImportRun;
+  import_run_card: ImportRunCard;
+  import_run_page: ImportRunPage;
   personal_access_token: PersonalAccessToken;
   project: Project;
   project_member: ProjectMember;

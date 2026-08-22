@@ -20,6 +20,8 @@ const PAYLOAD_FIELDS: Record<RealtimeEventType, readonly string[]> = {
   deck_created: ['project_id', 'deck_id'],
   deck_updated: ['project_id', 'deck_id'],
   deck_deleted: ['project_id', 'deck_id'],
+  deck_import_started: ['project_id', 'deck_id', 'run_id'],
+  deck_import_finished: ['project_id', 'deck_id', 'run_id'],
   members_changed: ['project_id'],
 };
 

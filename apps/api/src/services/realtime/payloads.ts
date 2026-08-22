@@ -21,6 +21,10 @@ interface EventPayloads extends Record<RealtimeEventType, object> {
   deck_created: { project_id: string; deck_id: string };
   deck_updated: { project_id: string; deck_id: string };
   deck_deleted: { project_id: string; deck_id: string };
+  deck_import_started: { project_id: string; deck_id: string; run_id: string };
+  // Fires when a run is abandoned as well as when it finishes; the payload does
+  // not say which, and a client that cares reads the run back.
+  deck_import_finished: { project_id: string; deck_id: string; run_id: string };
   members_changed: { project_id: string };
 }
 

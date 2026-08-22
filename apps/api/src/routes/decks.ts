@@ -6,6 +6,7 @@ import {
   assertProjectAccess,
   assertProjectWrite,
 } from '../services/authorization.ts';
+import { FILE_COLUMNS, serializeFile } from '../services/files.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
@@ -110,23 +111,10 @@ async function readDeckCards(c: Pick<AppContext, 'get'>, deckId: string) {
     .get('db')
     .selectFrom('deck_card')
     .innerJoin('file', 'file.id', 'deck_card.file_id')
-    .select([
-      'deck_card.file_id as file_id',
-      'deck_card.quantity as quantity',
-      'deck_card.position as position',
-      'file.id as f_id',
-      'file.project_id as f_project_id',
-      'file.folder_id as f_folder_id',
-      'file.filename as f_filename',
-      'file.content_type as f_content_type',
-      'file.byte_size as f_byte_size',
-      'file.image_width as f_image_width',
-      'file.image_height as f_image_height',
-      'file.uploaded_by as f_uploaded_by',
-      'file.created_at as f_created_at',
-      'file.updated_at as f_updated_at',
-      'file.deleted_at as f_deleted_at',
-    ])
+    // The same columns and the same serializer every other read of a file uses.
+    // Building the embedded object by hand here is what left name_locked off it
+    // while the schema went on declaring it.
+    .select(['deck_card.quantity as quantity', 'deck_card.position as position', ...FILE_COLUMNS])
     .where('deck_card.deck_id', '=', deckId)
     // id breaks the tie, so a listing is stable rather than whatever order the
     // planner happened to return equal positions in.
@@ -135,23 +123,10 @@ async function readDeckCards(c: Pick<AppContext, 'get'>, deckId: string) {
     .execute();
 
   return rows.map((row) => ({
-    file_id: row.file_id,
+    file_id: row.id,
     quantity: row.quantity,
     position: row.position,
-    file: {
-      id: row.f_id,
-      project_id: row.f_project_id,
-      folder_id: row.f_folder_id,
-      filename: row.f_filename,
-      content_type: row.f_content_type,
-      byte_size: Number(row.f_byte_size),
-      image_width: row.f_image_width,
-      image_height: row.f_image_height,
-      uploaded_by: row.f_uploaded_by,
-      created_at: new Date(row.f_created_at).toISOString(),
-      updated_at: new Date(row.f_updated_at).toISOString(),
-      deleted_at: row.f_deleted_at === null ? null : new Date(row.f_deleted_at).toISOString(),
-    },
+    file: serializeFile(row),
   }));
 }
 
