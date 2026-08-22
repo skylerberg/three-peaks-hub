@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatBytes, isModelSource } from '@three-peaks/shared';
+  import Thumbnail from './Thumbnail.svelte';
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
   import { downloadFile } from '../lib/download.ts';
@@ -230,14 +231,7 @@
           <li class="flex flex-col gap-2 rounded-md border border-edge bg-surface p-3">
             <div class="flex items-start gap-3">
               {#if isImage(file.content_type)}
-                <!-- Same-origin and authenticated: the bytes are served by the
-                     API because who may read them depends on membership. -->
-                <img
-                  src="/api/files/{file.id}/download"
-                  alt=""
-                  loading="lazy"
-                  class="size-12 shrink-0 rounded object-cover"
-                />
+                <Thumbnail fileId={file.id} />
               {:else}
                 <span aria-hidden="true" class="text-2xl">📄</span>
               {/if}

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
+import { TINY_PNG } from './lib/fixtures.mjs';
 import { createProject, inspectApi, signUp } from './lib/session.mjs';
 
 const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 5220);
@@ -148,6 +149,38 @@ async function run() {
       'the downloaded bytes are the ones that were uploaded',
       saved.body === contents,
       saved.detail ?? String(saved.body)
+    );
+
+    // --- an image row draws its thumbnail ----------------------------------
+    // The bytes are behind the bearer credential, so a row cannot simply name
+    // them in an `<img src>`: a request the browser starts carries no
+    // Authorization header, and every thumbnail in the explorer answered 401
+    // while it did. What replaces it -- an authorized fetch, an object URL, and
+    // an <img> that decodes it -- only exists in a real engine.
+    const pngPath = join(dir, 'probe-art.png');
+    writeFileSync(pngPath, TINY_PNG);
+    await browser.setInputFiles('input[type="file"]', pngPath);
+    await browser.page.waitForSelector('button[aria-label="Download probe-art.png"]', {
+      timeout: 15_000,
+    });
+
+    const thumbnail = await browser.page
+      .waitForFunction(
+        () => {
+          const image = document.querySelector('li img');
+          // naturalWidth, not merely a src: it says the engine decoded the
+          // bytes, which a 401 body would never have got as far as.
+          return image?.src.startsWith('blob:') && image.naturalWidth > 0 ? 'decoded' : null;
+        },
+        { timeout: 15_000 }
+      )
+      .then((handle) => handle.jsonValue())
+      .catch(() => null);
+
+    check(
+      'an image row draws a thumbnail from bytes it was allowed to read',
+      thumbnail === 'decoded',
+      'no <img> with decoded blob bytes appeared within fifteen seconds'
     );
 
     // --- the quota meter reflects the upload -------------------------------
