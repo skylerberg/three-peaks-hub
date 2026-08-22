@@ -1,19 +1,9 @@
 import { fetchMock, jsonResponse } from './api/testUtils.ts';
 import { render } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import { projects } from './lib/projects.svelte.ts';
 import { toasts } from './lib/toasts.svelte.ts';
-
-// jsdom opens this one for real, and the reconnect backoff behind it then
-// outlives the test that opened it.
-class InertSocket {
-  static readonly OPEN = 1;
-  readyState = 0;
-  close(): void {}
-  send(): void {}
-}
-vi.stubGlobal('WebSocket', InertSocket);
 
 const USER = { id: 'u1', email: 'a@example.com', name: 'A', email_verified: true };
 

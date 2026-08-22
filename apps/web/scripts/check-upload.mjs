@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { apiReachable, createProject, signUp } from './lib/session.mjs';
+import { createProject, inspectApi, signUp } from './lib/session.mjs';
 
 const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 5220);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
@@ -31,8 +31,13 @@ function check(name, condition, detail = '') {
 }
 
 async function run() {
-  if (!(await apiReachable(API))) {
-    const message = `[check:upload] no API at ${API}`;
+  const api = await inspectApi(API);
+  if (!api.ok) {
+    const message = `[check:upload] ${api.reason}`;
+    if (!api.absent) {
+      console.error(message);
+      return 1;
+    }
     // Under CI the API is a service the workflow starts, so its absence is a
     // broken gate rather than a local convenience.
     if (process.env.CI) {
@@ -45,7 +50,11 @@ async function run() {
 
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
-    server: { port: PORT, strictPort: false, proxy: { '/api': API } },
+    server: {
+      port: PORT,
+      strictPort: false,
+      proxy: { '/api': API, '/ws': { target: API, ws: true } },
+    },
     logLevel: 'error',
   });
   await server.listen();
