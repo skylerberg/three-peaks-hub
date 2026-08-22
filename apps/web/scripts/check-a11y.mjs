@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
+import { TINY_PNG } from './lib/fixtures.mjs';
 import { createProject, inspectApi, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
@@ -47,13 +48,6 @@ const SCHEMES = ['light', 'dark'];
 const selftest = process.argv.includes('--selftest');
 const PORT = Number(process.env.A11Y_PROBE_PORT ?? 5200);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
-
-// A 4x4 opaque PNG. The studio only needs something it will accept as a source;
-// what it looks like does not change a single contrast ratio.
-const TINY_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFElEQVR4nGP8//8/AzZgYsAB6CcBAFcMAwHKQGQCAAAAAElFTkSuQmCC',
-  'base64'
-);
 
 // A fresh account per screen and per colour scheme: the probes upload files, and
 // an account carried from one screen to the next would make each run depend on

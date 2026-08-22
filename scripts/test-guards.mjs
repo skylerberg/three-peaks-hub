@@ -332,4 +332,19 @@ export const guards = [
     testName: 'does not reconnect after the server says the credential is gone',
     runner: 'web',
   },
+  {
+    name: 'a thumbnail presents the credential its bytes are behind',
+    package: 'web',
+    file: 'src/components/Thumbnail.svelte',
+    // Exactly the shape the `<img src>` this replaced had: a request the
+    // browser makes on its own carries no Authorization header, and every
+    // thumbnail in the explorer answered 401.
+    find:
+      '        const response = await fetch(`/api/files/${id}/download`, ' +
+      '{ headers: authHeader() });',
+    replace: '        const response = await fetch(`/api/files/${id}/download`);',
+    tests: ['src/components/Thumbnail.svelte.test.ts'],
+    testName: 'reads the bytes with the credential and shows them',
+    runner: 'web',
+  },
 ];
