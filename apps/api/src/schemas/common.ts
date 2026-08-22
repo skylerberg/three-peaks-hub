@@ -34,4 +34,18 @@ export const password = type(`string >= ${PASSWORD_MIN_LENGTH}`).to(
   `string <= ${PASSWORD_MAX_LENGTH}`
 );
 
+// A numeric bound written the way ArkType parses it. Generic over the two ends
+// rather than taking `number`, because ArkType reads the string as a type:
+// widened to `string` it has nothing to infer from.
+export const numberRange = <Min extends number, Max extends number>([min, max]: readonly [
+  Min,
+  Max,
+]) => `${min} <= number <= ${max}` as const;
+
 export const idSchema = type({ id: uuid });
+
+// Every project-scoped listing takes exactly this and nothing more. Shared
+// rather than restated per route: two identical exports would give one shape
+// two component names, and the $ref the spec writes would depend on the order
+// the barrel happened to be walked in.
+export const projectQuerySchema = type({ project_id: uuid });

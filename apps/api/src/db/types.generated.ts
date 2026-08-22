@@ -27,6 +27,8 @@ export type JsonPrimitive = boolean | number | string | null;
 
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
+export type Numeric = ColumnType<string, number | string, number | string>;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface AppUser {
@@ -48,6 +50,26 @@ export interface ComponentModel {
   source_file_id: string;
   updated_at: Generated<Timestamp>;
   updated_by: string;
+}
+
+export interface Deck {
+  back_file_id: string | null;
+  card_height_mm: Numeric;
+  card_width_mm: Numeric;
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  id: string;
+  name: string;
+  project_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface DeckCard {
+  deck_id: string;
+  file_id: string;
+  id: string;
+  position: number;
+  quantity: Generated<number>;
 }
 
 export interface File {
@@ -131,6 +153,8 @@ export interface Session {
 export interface DB {
   app_user: AppUser;
   component_model: ComponentModel;
+  deck: Deck;
+  deck_card: DeckCard;
   file: File;
   file_version: FileVersion;
   folder: Folder;

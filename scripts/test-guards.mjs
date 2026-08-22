@@ -432,4 +432,46 @@ export const guards = [
     testName: 'discards a response that a newer request has already superseded',
     runner: 'web',
   },
+  {
+    // The one that looks right in every screenshot and is wrong on every sheet.
+    // A three-column grid makes it worse: the set of positions a backing page
+    // occupies is symmetric either way, so only the pairing gives it away.
+    name: 'a backing page is mirrored, so a back lands behind its own front',
+    package: 'api',
+    file: 'packages/shared/src/print.ts',
+    root: true,
+    find: '  return { index: row * grid.columns + (grid.columns - 1 - column), rotate_180: false };',
+    replace: '  return { index: row * grid.columns + column, rotate_180: false };',
+    tests: ['src/print.test.ts'],
+    testName: 'puts a long-edge back where the paper flip lands it',
+    runner: 'shared',
+  },
+  {
+    // Six cards a sheet on minis, and nothing about the output looks wrong --
+    // it is simply a third more paper than it needed to be.
+    name: 'the packing tries the card turned as well as upright',
+    package: 'api',
+    file: 'packages/shared/src/print.ts',
+    root: true,
+    find: '  const rotated = turned.columns * turned.rows > upright.columns * upright.rows;',
+    replace: '  const rotated = false;',
+    tests: ['src/print.test.ts'],
+    testName: 'fits mini cards 18 to a US Letter sheet',
+    runner: 'shared',
+  },
+  {
+    // Asserting access where a mutation needs write is the defect convention 4
+    // names, and it reads as a plausible copy from the route above it.
+    name: 'replacing a deck’s cards asserts write, not merely access',
+    package: 'api',
+    file: 'src/routes/decks.ts',
+    find:
+      "    const access = await assertDeckAccess(c, deckId, 'write');\n" +
+      "    const { cards } = c.req.valid('json')",
+    replace:
+      "    const access = await assertDeckAccess(c, deckId, 'read');\n" +
+      "    const { cards } = c.req.valid('json')",
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'refuses a viewer editing the cards with 403',
+  },
 ];

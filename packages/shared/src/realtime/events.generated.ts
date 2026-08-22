@@ -2,6 +2,9 @@
 // Regenerate with: pnpm run generate
 
 export type RealtimeEventType =
+  | 'deck_created'
+  | 'deck_deleted'
+  | 'deck_updated'
   | 'file_deleted'
   | 'file_updated'
   | 'file_uploaded'
@@ -15,6 +18,24 @@ export type RealtimeEventType =
   | 'project_updated';
 
 export type RealtimeEvent =
+  | {
+      type: 'deck_created';
+      project_id: string;
+      deck_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'deck_deleted';
+      project_id: string;
+      deck_id: string;
+      actor_user_id: string;
+    }
+  | {
+      type: 'deck_updated';
+      project_id: string;
+      deck_id: string;
+      actor_user_id: string;
+    }
   | {
       type: 'file_deleted';
       project_id: string;

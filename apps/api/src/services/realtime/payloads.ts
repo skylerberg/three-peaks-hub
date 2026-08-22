@@ -18,6 +18,9 @@ interface EventPayloads extends Record<RealtimeEventType, object> {
   file_deleted: { project_id: string; file_id: string };
   file_version_created: { project_id: string; file_id: string };
   model_updated: { project_id: string; file_id: string };
+  deck_created: { project_id: string; deck_id: string };
+  deck_updated: { project_id: string; deck_id: string };
+  deck_deleted: { project_id: string; deck_id: string };
   members_changed: { project_id: string };
 }
 

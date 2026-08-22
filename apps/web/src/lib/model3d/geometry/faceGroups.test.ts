@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BoxGeometry, ExtrudeGeometry } from 'three';
 import { DEFAULT_CARD_SETTINGS } from '@three-peaks/shared';
 import { roundedRectShape } from '../shapes/roundedRect.ts';
+import { MM } from '../units.ts';
 import { buildCardGeometry } from './card.ts';
 import { BACK_GROUP, FRONT_GROUP, RIM_GROUP, assignFaceGroups, remapCapUVs } from './faceGroups.ts';
 
@@ -129,10 +130,13 @@ describe('buildCardGeometry', () => {
     if (!box) throw new Error('no bounding box');
 
     // The size asked for is the size of the piece, bevel included. Before the
-    // bevel was offset inwards this measured 63.66 mm.
-    expect(box.max.x - box.min.x).toBeCloseTo(0.0635, 6);
-    expect(box.max.y - box.min.y).toBeCloseTo(0.0889, 6);
-    expect(box.max.z - box.min.z).toBeCloseTo(0.00032, 7);
+    // bevel was offset inwards a 63.5 mm card measured 63.66 mm.
+    //
+    // Read off the settings rather than written out, so this keeps asserting
+    // the thing it is about when the default card size moves.
+    expect(box.max.x - box.min.x).toBeCloseTo(DEFAULT_CARD_SETTINGS.width_mm * MM, 6);
+    expect(box.max.y - box.min.y).toBeCloseTo(DEFAULT_CARD_SETTINGS.height_mm * MM, 6);
+    expect(box.max.z - box.min.z).toBeCloseTo(DEFAULT_CARD_SETTINGS.thickness_mm * MM, 7);
     expect(box.max.z + box.min.z).toBeCloseTo(0, 6);
   });
 

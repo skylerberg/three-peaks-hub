@@ -42,6 +42,8 @@ const SCREENS = [
   { name: 'model-studio', authed: true, reach: reachModelStudio },
   { name: 'file-versions', authed: true, reach: reachFileVersions },
   { name: 'deleted', authed: true, reach: reachDeleted },
+  { name: 'deck-editor', authed: true, reach: reachDeckEditor },
+  { name: 'print', authed: true, reach: reachPrint },
 ];
 
 const SCHEMES = ['light', 'dark'];
@@ -103,6 +105,37 @@ async function reachFileVersions(browser, base, scheme) {
   await browser.page.waitForSelector(`button[aria-label="Download version 1 of ${filename}"]`, {
     timeout: 15_000,
   });
+}
+
+// Creates a deck through the real form and leaves the editor open with the file
+// picker showing -- between them the deck screens carry more labelled controls
+// than anything else in the app: two selects, four number inputs and a list
+// whose reorder buttons are icons with nothing but an aria-label to read.
+async function reachDeckEditor(browser, base, scheme) {
+  await freshProject(browser, base, `deck-${scheme}`);
+  await browser.page.waitForSelector('a:has-text("Decks")', { timeout: 15_000 });
+  await browser.click('a:has-text("Decks")');
+
+  await browser.page.waitForSelector('button:has-text("New deck")', { timeout: 15_000 });
+  await browser.click('button:has-text("New deck")');
+  await browser.page.fill('input[maxlength="120"]', `Proof ${scheme}`);
+  await browser.click('button[type="submit"]');
+
+  // The editor is a different screen, not a panel: waiting for its own heading
+  // is what keeps axe off the list it navigated away from.
+  await browser.page.waitForSelector('h2:has-text("Cards")', { timeout: 15_000 });
+  await browser.click('button:has-text("Add cards")');
+  await browser.page.waitForSelector('button:has-text("Add every image here")', {
+    timeout: 15_000,
+  });
+}
+
+async function reachPrint(browser, base, scheme) {
+  await reachDeckEditor(browser, base, `print-${scheme}`);
+  await browser.click('a:has-text("Print this deck")');
+  // Every deck has to be read before the options render, and axe reading the
+  // spinner instead would report a screen with nothing on it as clean.
+  await browser.page.waitForSelector('button:has-text("Generate PDF")', { timeout: 30_000 });
 }
 
 async function reachDeleted(browser, base, scheme) {

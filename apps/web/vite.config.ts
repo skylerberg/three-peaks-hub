@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { svelteTesting } from '@testing-library/svelte/vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -26,6 +27,21 @@ export default defineConfig({
   // Source-only workspace package: Vite must treat it as source rather than
   // trying to prebundle a package with no build output.
   optimizeDeps: { exclude: ['@three-peaks/shared'] },
+
+  // jsPDF's browser build carries `import('html2canvas')`, `import('canvg')` and
+  // `import('dompurify')` inside methods this app never calls. They are optional
+  // dependencies pnpm is told not to install, and a dynamic import is still a
+  // specifier Vite has to resolve at transform time -- so without these three
+  // the dev server 500s and the build fails, on a code path that cannot run.
+  // The stub throws if one is ever genuinely reached.
+  resolve: {
+    alias: Object.fromEntries(
+      ['html2canvas', 'canvg', 'dompurify'].map((name) => [
+        name,
+        fileURLToPath(new URL('./src/lib/print/jspdfUnavailable.ts', import.meta.url)),
+      ])
+    ),
+  },
 
   // three is ~650 kB on its own and is the only thing above the 500 kB default.
   // It is already in a chunk of its own -- the studio screen imports the model3d

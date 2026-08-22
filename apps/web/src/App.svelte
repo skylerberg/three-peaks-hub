@@ -2,6 +2,8 @@
   import Toasts from './components/ui/Toasts.svelte';
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
+  import Deck from './routes/Deck.svelte';
+  import Decks from './routes/Decks.svelte';
   import Deleted from './routes/Deleted.svelte';
   import FileVersions from './routes/FileVersions.svelte';
   import ForgotPassword from './routes/ForgotPassword.svelte';
@@ -9,10 +11,12 @@
   import Members from './routes/Members.svelte';
   import Model3d from './routes/Model3d.svelte';
   import NotFound from './routes/NotFound.svelte';
+  import Print from './routes/Print.svelte';
   import Project from './routes/Project.svelte';
   import Projects from './routes/Projects.svelte';
   import ResetPassword from './routes/ResetPassword.svelte';
   import Signup from './routes/Signup.svelte';
+  import { decks } from './lib/decks.svelte.ts';
   import { deleted } from './lib/deleted.svelte.ts';
   import { files } from './lib/files.svelte.ts';
   import { models } from './lib/model3d.svelte.ts';
@@ -48,6 +52,7 @@
     if (session.status === 'anon') {
       projects.reset();
       files.reset();
+      decks.reset();
       deleted.reset();
       models.reset();
       versions.reset();
@@ -93,6 +98,12 @@
       <Members projectId={route.params.projectId} />
     {:else if route.name === 'deleted'}
       <Deleted projectId={route.params.projectId} />
+    {:else if route.name === 'decks'}
+      <Decks projectId={route.params.projectId} />
+    {:else if route.name === 'deck'}
+      <Deck projectId={route.params.projectId} deckId={route.params.deckId} />
+    {:else if route.name === 'print'}
+      <Print projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'model'}
       <Model3d projectId={route.params.projectId} fileId={route.params.fileId} />
     {:else if route.name === 'versions'}

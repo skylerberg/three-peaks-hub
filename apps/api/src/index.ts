@@ -10,6 +10,7 @@ import { corsMiddleware } from './middleware/cors.ts';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
 import { transactionMiddleware } from './middleware/transaction.ts';
 import { authRouter, publicAuthRouter } from './routes/auth.ts';
+import { decksRouter } from './routes/decks.ts';
 import { docsRouter } from './routes/docs.ts';
 import { filesRouter } from './routes/files.ts';
 import { healthCheck } from './routes/health.ts';
@@ -60,6 +61,7 @@ app.route('/api/auth', authRouter);
 app.route('/api/projects', projectsRouter);
 app.route('/api/files', filesRouter);
 app.route('/api/models', modelsRouter);
+app.route('/api/decks', decksRouter);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);

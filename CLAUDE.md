@@ -294,6 +294,79 @@ Settings live in `component_model`, one row per source image, and the bounds the
 API enforces are named once in `packages/shared/src/models3d.ts` so no input can
 offer a value the server will reject.
 
+# Decks, and printable sheets
+
+A **deck** is an ordered list of card images with a copy count each, one card
+size, and one image on the back. `/projects/:projectId/print` turns any selection
+of decks into a US Letter PDF: cards packed as tightly as the paper allows, with
+a backing page behind every sheet.
+
+**Card sizes are Panda Game Manufacturing's**, in
+`packages/shared/src/cards.ts`, and both features that size a card read that one
+list — the 3D studio and the sheets. They are 63 × 88 rather than 63.5 × 88.9 on
+purpose: a proof cut at home is then the same trim as the production order. The
+guidebook's bleed, margin and corner radius live there too; the Letter proof
+prints at trim and uses none of them.
+
+A deck stores its size as **millimetres and nothing else**. The named size is
+derived on read by matching those two numbers, for the same reason `file_version`
+has no pointer column.
+
+**Deleting a deck is not soft.** Everything soft delete protects is stored bytes,
+and a deck holds none — so there is no tombstone, no purge, and the confirm
+dialog says as much. Its images are untouched. A card whose image is merely
+deleted keeps its row and its place in the deck; only a purge takes it out,
+through the foreign key.
+
+## Sheets
+
+`packages/shared/src/print.ts` is the whole layout, and it is pure: no DOM, no
+bytes, no library. It knows nothing about decks, so a future token or tile
+printer reuses it unchanged.
+
+Two things there are worth knowing before changing anything:
+
+- **`planGrid` tries the card turned as well as upright**, and a quarter turn is
+  worth six cards a sheet on minis. Only two trials are needed, because turning
+  the page instead of the card yields the same pair of products — so every page
+  this emits is portrait.
+- **`backPlacement` is where duplex is won or lost.** The printer's flip is what
+  mirrors the page, so the back page is drawn as if read from the front with the
+  slots transposed. A short-edge flip also arrives inverted, and that is the one
+  case where the artwork itself is turned.
+
+A sheet may hold cards from several decks, so the back is resolved per slot
+rather than per sheet. That is what `check:print` exists to hold: it builds two
+decks with different backs, generates the real PDF in a real browser, and reads
+the placements back out of the content streams. Position alone would not catch
+the bug — on a three-column grid an unmirrored backing page occupies exactly the
+right set of boxes.
+
+Sheets are planned inside a **printer margin**, 6.35 mm by default, because a
+consumer printer will not lay ink nearer the edge than that and the outer row
+would come out clipped. It is a setting rather than a constant: borderless
+printing is worth half a sheet again on square cards.
+
+## Building the file
+
+All of it runs in the browser, like the 3D studio, and `apps/web/src/lib/print/`
+is reached only by `await import()` — so jsPDF sits in a chunk only this screen
+pays for and `apps/api` gains no PDF dependency.
+
+- **jsPDF takes millimetres and a page size directly**, which is why the numbers
+  the planner computes are the numbers it is handed. There is no unit layer.
+- **Every image is embedded once and referenced by alias.** With copy counts the
+  same artwork repeats constantly, and re-embedding it per slot is the difference
+  between a four-megabyte file and a hundred-and-sixty-megabyte one.
+- **Only JPEG is passed through untouched.** jsPDF decodes and re-encodes every
+  PNG anyway, and its decoder refuses files a browser renders happily, so PNGs go
+  through the canvas that already decoded them.
+- jsPDF reaches for `html2canvas`, `canvg` and `dompurify` from methods this app
+  never calls. They are refused by `ignoredOptionalDependencies` and aliased in
+  `apps/web/vite.config.ts` to a stub that explains itself — a dynamic import is
+  still a specifier Vite must resolve, so without the alias the build fails on a
+  branch that cannot run.
+
 # Running things
 
 ```sh

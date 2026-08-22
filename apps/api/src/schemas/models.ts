@@ -1,15 +1,12 @@
 import { type } from 'arktype';
 import { MAX_MODEL_SEED, MODEL_LIMITS } from '@three-peaks/shared';
+import { numberRange as range } from './common.ts';
 
 const { card, wood } = MODEL_LIMITS;
 
 // Bounds come from packages/shared so the web app's inputs cannot offer a value
 // this rejects, and a number without them is how a thickness of 1e9 reaches the
 // extruder and hangs the tab.
-// Generic over the bounds rather than taking `number`, because ArkType parses
-// the string as a type: widened to `string` it has nothing to infer from.
-const range = <Min extends number, Max extends number>([min, max]: readonly [Min, Max]) =>
-  `${min} <= number <= ${max}` as const;
 
 const seed = type(`0 <= number.integer <= ${MAX_MODEL_SEED}`);
 
