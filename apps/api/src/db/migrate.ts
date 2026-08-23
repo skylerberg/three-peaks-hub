@@ -23,6 +23,13 @@ function isRetryable(error: unknown): boolean {
   return code !== undefined && RETRYABLE_SQLSTATES.has(code);
 }
 
+// The CLI lives in migrate-cli.ts, and nothing here may run at import time.
+// `apps/api/src/index.ts` imports this module for reportPendingMigrations, and
+// build:prod is an esbuild bundle — so anything at this module's top level ends
+// up at the top level of dist/index.mjs, where the server's own entrypoint
+// guard is written. An `import.meta.url === argv[1]` guard on a CLI block here
+// was false from source and true once bundled, which ran the migration CLI on
+// every API boot and exited 1 before a single request was served.
 function migrationFolder(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 }
@@ -100,20 +107,6 @@ async function run(direction: 'up' | 'down'): Promise<void> {
   }
 }
 
-export async function migrateToLatest(): Promise<void> {
-  await run('up');
-}
-
-// Doubles as the CLI the migrate Job runs: `node --import tsx src/db/migrate.ts`.
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const direction = process.argv[2] === 'down' ? 'down' : 'up';
-  try {
-    await run(direction);
-    logger.info('migrations complete');
-    await db.destroy();
-  } catch (error) {
-    logger.error('migration run failed', { error });
-    await db.destroy();
-    process.exit(1);
-  }
+export async function runMigrations(direction: 'up' | 'down' = 'up'): Promise<void> {
+  await run(direction);
 }

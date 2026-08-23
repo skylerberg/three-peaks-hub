@@ -98,8 +98,8 @@ export async function setup(): Promise<void> {
   await acquireRunLock(database);
 
   // Imported after the database exists: the module opens a pool on import.
-  const { migrateToLatest } = await import('../../src/db/migrate.ts');
-  await migrateToLatest();
+  const { runMigrations } = await import('../../src/db/migrate.ts');
+  await runMigrations();
 
   const { db } = await import('../../src/db/index.ts');
   const { sql } = await import('kysely');

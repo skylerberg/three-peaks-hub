@@ -469,7 +469,7 @@ moves the Vite proxy, which matters as soon as a second branch is in flight and
 the main checkout already holds 17310.
 
 **Development ports are one block: web 17300, api 17310, preview 17320, the
-browser probes 17330-17332.** Not 3001 and 5173, which every other project on
+browser probes 17330-17332, and the bundle probe 17333.** Not 3001 and 5173, which every other project on
 the same laptop also defaults to — a sibling project's API answered here on 3001
 for a while, and because its `/health` looks exactly like this one's, the browser
 probes ran against it and failed fifteen seconds later inside a screen. The gaps
@@ -502,6 +502,13 @@ from under the first.
   source correct and the tests green, which is indistinguishable from a guard
   that works. Guards sharing a database run serially, because the advisory run
   lock refuses two suites against one database — correctly.
+- **`check:bundle`** builds `apps/api/dist/index.mjs` and boots it. Everything
+  else here reads the source tree or runs it through tsx, so the artefact the
+  image actually starts was covered by nothing, and a bug that exists only once
+  bundled took the deploy down for eight releases while the previous one went on
+  serving. `apps/api/scripts/check-bundle.mjs` has the mechanism; the rule it
+  leaves behind is that a CLI belongs in its own file, never at the top of a
+  module the server imports.
 - **`check:comments`** reads the prose and fails on the same sentence in two
   files, and on a file or symbol named in prose that no longer resolves. When it
   fires, give the rule one owner — the module that implements it — and cut the
