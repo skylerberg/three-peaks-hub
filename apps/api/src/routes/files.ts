@@ -13,6 +13,7 @@ import {
   FILE_COLUMNS,
   appendFileVersion,
   assertQuota,
+  assertUploadSize,
   projectStorageUsed,
   restoreFile,
   serializeFile,
@@ -810,6 +811,7 @@ filesRouter.post(
     // Checked before the transfer on what the client claims, and again below on
     // what actually arrived — the header is a hint, not a guarantee.
     const declaredLength = Number(c.req.header('content-length') ?? 0);
+    assertUploadSize(declaredLength);
     if (declaredLength > 0) await assertQuota(c, projectId, declaredLength);
 
     const body = c.req.raw.body;
@@ -1002,6 +1004,7 @@ filesRouter.post(
     // Checked before the transfer on what the client claims, and again below on
     // what actually arrived.
     const declaredLength = Number(c.req.header('content-length') ?? 0);
+    assertUploadSize(declaredLength);
     if (declaredLength > 0) await assertQuota(c, access.projectId, declaredLength);
 
     const body = c.req.raw.body;

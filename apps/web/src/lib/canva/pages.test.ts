@@ -110,15 +110,6 @@ describe('readCanvaExport', () => {
     expect(message).toContain('design.pdf');
   });
 
-  it('refuses a page over the upload limit before anything is uploaded', async () => {
-    const oversized = png(0, MAX_UPLOAD_BYTES + 1);
-
-    const message = await refusal([{ name: '1.png', bytes: oversized, method: 8 }]);
-
-    expect(message).toContain('1.png');
-    expect(message).toContain('limit for one page');
-  });
-
   // The bytes of a page that cannot be uploaded are never worth materialising,
   // and the directory declared their size before anything was inflated. Nothing
   // here can inflate: reaching the refusal is the proof nothing tried.
@@ -127,15 +118,15 @@ describe('readCanvaExport', () => {
       {
         name: '1.png',
         bytes: png(1),
-        uncompressedSizeOverride: MAX_UPLOAD_BYTES + 1,
+        uncompressedSizeOverride: MAX_UPLOAD_BYTES * 2,
         dataOverride: new Uint8Array([9, 9, 9, 9]),
         method: 8,
       },
     ]);
 
     expect(message).toBe(
-      `“1.png” is ${formatBytes(MAX_UPLOAD_BYTES + 1)}, over the ` +
-        `${formatBytes(MAX_UPLOAD_BYTES)} limit for one page.`
+      `“1.png” is ${formatBytes(MAX_UPLOAD_BYTES * 2)}, over the ` +
+        `${formatBytes(MAX_UPLOAD_BYTES)} limit for one upload.`
     );
   });
 

@@ -13,6 +13,7 @@
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
+  import { assertUploadSize } from '../lib/upload.ts';
 
   interface Props {
     projectId: string;
@@ -200,6 +201,7 @@
       const query = new URLSearchParams({ project_id: current.project_id, filename });
       if (current.folder_id) query.set('folder_id', current.folder_id);
 
+      assertUploadSize(bytes.byteLength);
       const response = await fetch(`/api/files/upload?${query}`, {
         method: 'POST',
         headers: { 'Content-Type': 'model/gltf-binary', ...authHeader() },

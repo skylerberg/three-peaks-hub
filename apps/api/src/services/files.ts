@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { Transform, type Readable } from 'node:stream';
 import { sql } from 'kysely';
-import { PROJECT_STORAGE_QUOTA_BYTES } from '@three-peaks/shared';
+import {
+  MAX_UPLOAD_BYTES,
+  PROJECT_STORAGE_QUOTA_BYTES,
+  uploadTooLargeMessage,
+} from '@three-peaks/shared';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
 import { blockedMessage, deletedAncestor } from './folderTree.ts';
@@ -77,6 +81,16 @@ export async function projectStorageUsed(
   return Number(row?.total ?? 0);
 }
 
+// Refuses an oversized body on what the request claims, before a byte of it is
+// read. The cap below is the gate that counts, but it can only trip partway
+// through a transfer already paid for and can no longer say how big the file
+// actually was — so the claim is worth answering when it is this far out.
+export function assertUploadSize(declaredLength: number): void {
+  if (declaredLength > MAX_UPLOAD_BYTES) {
+    throw new AppError(413, uploadTooLargeMessage(MAX_UPLOAD_BYTES, declaredLength));
+  }
+}
+
 export async function assertQuota(
   c: Pick<AppContext, 'get'>,
   projectId: string,
@@ -120,7 +134,7 @@ export async function storeUpload(
       byteSize += chunk.length;
       if (byteSize > maxBytes) {
         overflowed = true;
-        callback(new AppError(413, 'File is too large'));
+        callback(new AppError(413, uploadTooLargeMessage(maxBytes)));
         return;
       }
       if (headLength < SNIFF_BYTES) {
@@ -133,6 +147,13 @@ export async function storeUpload(
     },
   });
 
+  // The consumer attaches its own error handler, but not necessarily in this
+  // tick: diskStorage awaits a mkdir before its pipeline, and a cap that trips
+  // in the gap leaves the refusal on a stream nothing is listening to — an
+  // uncaught exception, and with no process handler installed, the server gone.
+  // The put still rejects, and `overflowed` is what tells the catch below which
+  // rejection it is.
+  counted.on('error', () => {});
   body.pipe(counted);
 
   try {
@@ -144,7 +165,7 @@ export async function storeUpload(
     // and swallow any error doing so — a cleanup failure must not replace the
     // real response with a confusing one.
     await provider.delete(storageKey).catch(() => {});
-    if (overflowed) throw new AppError(413, 'File is too large');
+    if (overflowed) throw new AppError(413, uploadTooLargeMessage(maxBytes));
     throw error;
   }
 

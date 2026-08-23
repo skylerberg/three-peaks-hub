@@ -21,7 +21,7 @@ import { openApiSpec } from './spec/openapi.ts';
 import { attachRealtime, realtimeEventsDocument, startBus } from './services/realtime/index.ts';
 import { assertPublicRoutes } from './utils/assert-public-routes.ts';
 import { logger } from './utils/logger.ts';
-import { startupFailureMessage } from './utils/serverStartup.ts';
+import { REQUEST_TIMEOUT_MS, startupFailureMessage } from './utils/serverStartup.ts';
 import type { Variables } from './types/index.ts';
 
 // Fail the boot rather than the request. Each of these misconfigurations is
@@ -97,7 +97,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   });
 
+  const httpServer = server as unknown as import('node:http').Server;
+  httpServer.requestTimeout = REQUEST_TIMEOUT_MS;
+
   // /ws rides the raw HTTP upgrade on the same server, so it is same-origin with
   // the API and needs no second port or certificate.
-  attachRealtime(server as unknown as import('node:http').Server);
+  attachRealtime(httpServer);
 }

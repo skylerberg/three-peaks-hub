@@ -1,6 +1,8 @@
 import '../api/testUtils.ts';
 import { fetchMock, jsonResponse } from '../api/testUtils.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { MAX_UPLOAD_BYTES, formatBytes } from '@three-peaks/shared';
+import { apiMessage } from '../api/client.ts';
 import { files } from './files.svelte.ts';
 
 const PROJECT = '2f1c9e5a-8b3d-4f1e-9c2a-7d6b5e4f3a21';
@@ -109,5 +111,48 @@ describe('FileStore.load', () => {
     await inFlight;
 
     expect(files.listing).toBeNull();
+  });
+});
+
+// A File of the size claimed, without allocating it: only `size` is read before
+// the request, and half a gigabyte of zeroes in jsdom is not worth the seconds.
+function fileOf(name: string, size: number): File {
+  const file = new File(['x'], name, { type: 'application/zip' });
+  Object.defineProperty(file, 'size', { value: size });
+  return file;
+}
+
+describe('FileStore.upload', () => {
+  beforeEach(() => {
+    files.reset();
+    fetchMock.mockReset();
+  });
+
+  it('refuses a file over the limit without sending it', async () => {
+    const oversized = fileOf('export.zip', MAX_UPLOAD_BYTES * 2);
+    const caught = await files.upload(PROJECT, null, oversized).catch((error: unknown) => error);
+
+    expect(apiMessage(caught)).toBe(
+      `That file is ${formatBytes(MAX_UPLOAD_BYTES * 2)}, over the ` +
+        `${formatBytes(MAX_UPLOAD_BYTES)} limit for one upload.`
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    // The row the explorer draws while a transfer is in flight: nothing was
+    // ever in flight.
+    expect(files.pending).toHaveLength(0);
+  });
+
+  // apiMessage shows an ApiError and nothing else, so a plain Error thrown here
+  // reached the toast as "could not reach the server" -- for a refusal the
+  // server had taken the trouble to explain.
+  it('carries the refusal the API wrote out to the caller', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(413, { error: 'Project storage quota exceeded' }));
+
+    const caught = await files
+      .upload(PROJECT, null, fileOf('card.png', 8))
+      .catch((error: unknown) => error);
+
+    expect(apiMessage(caught)).toBe('Project storage quota exceeded');
+    expect(files.pending).toHaveLength(0);
   });
 });

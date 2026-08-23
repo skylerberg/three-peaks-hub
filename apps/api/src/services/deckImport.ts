@@ -15,6 +15,7 @@ import type { ImportAccess, ImportRunAccess } from './authorization.ts';
 import {
   appendFileVersion,
   assertQuota,
+  assertUploadSize,
   freeFilename,
   restoreFile,
   storeUpload,
@@ -1048,6 +1049,7 @@ export async function importPage(
     throw new AppError(409, blockedMessage({ id: folderId, name: folder.name }, 'This import'));
   }
 
+  assertUploadSize(input.declaredLength);
   if (input.declaredLength > 0) await assertQuota(c, access.projectId, input.declaredLength);
 
   const stored = await storeUpload(input.body, MAX_UPLOAD_BYTES, input.declaredContentType);

@@ -1,5 +1,6 @@
 import type { components } from '@three-peaks/shared/api';
 import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
+import { assertUploadSize } from './upload.ts';
 
 type FileRow = components['schemas']['File'];
 // A version only ever appears nested in a response, so the spec has no named
@@ -46,6 +47,7 @@ class VersionStore {
   // Answers whether a version was created: identical bytes are a 200 that
   // changed nothing, which the caller has to be able to say out loud.
   async upload(fileId: string, file: File): Promise<boolean> {
+    assertUploadSize(file.size);
     // The file IS the body, as the upload route wants it, so this cannot go
     // through the generated client and asks for the credential by hand.
     const response = await fetch(`/api/files/${fileId}/versions`, {

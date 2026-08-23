@@ -1,6 +1,7 @@
 import type { components } from '@three-peaks/shared/api';
-import { api, assertOk, authHeader } from '../api/client.ts';
+import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
 import { newId } from './ids.ts';
+import { assertUploadSize } from './upload.ts';
 
 type Folder = components['schemas']['Folder'];
 type DirectoryListing = components['schemas']['DirectoryListing'];
@@ -65,6 +66,7 @@ class FileStore {
   }
 
   async upload(projectId: string, folderId: string | null, file: File): Promise<void> {
+    assertUploadSize(file.size);
     const key = `${file.name}-${crypto.randomUUID()}`;
     this.pending = [...this.pending, { key, filename: file.name }];
 
@@ -86,8 +88,16 @@ class FileStore {
       });
 
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error ?? `Upload failed with status ${response.status}`);
+        // An ApiError rather than an Error: apiMessage shows only the former,
+        // and every other kind reaches a toast as "could not reach the server"
+        // — which is what a refusal the server took the trouble to explain read
+        // as here.
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new ApiError(
+          response.status,
+          body.error ?? `Upload failed with status ${response.status}`,
+          body
+        );
       }
     } finally {
       this.pending = this.pending.filter((entry) => entry.key !== key);

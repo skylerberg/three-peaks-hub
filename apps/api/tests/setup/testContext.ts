@@ -90,8 +90,16 @@ class TestApiClient {
 
   // Raw bytes with the metadata in the query string, which is how uploads
   // actually arrive.
-  postBytes(path: string, body: BodyInit, contentType = 'application/octet-stream') {
-    return this.send('POST', path, { body, headers: { 'Content-Type': contentType } });
+  postBytes(
+    path: string,
+    body: BodyInit,
+    contentType = 'application/octet-stream',
+    extraHeaders?: Record<string, string>
+  ) {
+    return this.send('POST', path, {
+      body,
+      headers: { 'Content-Type': contentType, ...extraHeaders },
+    });
   }
 
   // Deliberately not JSON.stringify'd, for the malformed-body cases.

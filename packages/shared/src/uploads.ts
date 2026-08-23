@@ -1,13 +1,16 @@
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+// The cap on one upload, in bytes. Every caller pre-validates against it before
+// a byte leaves the browser, so an oversized file is refused in a millisecond
+// rather than after the whole transfer; the API re-checks what actually arrives,
+// because a content-length is a claim.
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 export const MAX_AVATAR_BYTES = 11 * 1024 * 1024;
 // A project pays for every version it has kept and for everything it has
 // deleted but not purged, so 1 GiB was roughly one deck.
 export const PROJECT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 
-// The web app pre-validates against this so a 200 MB file fails in a
-// millisecond instead of after 50 MB of transfer. The API is the actual gate —
-// and it decides an image's type by magic bytes, never by what the client
-// declares here.
+// The web app pre-validates against this too. The API is the actual gate — and
+// it decides an image's type by magic bytes, never by what the client declares
+// here.
 export const ALLOWED_IMAGE_TYPES = [
   'image/png',
   'image/jpeg',
@@ -58,4 +61,23 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+// The one sentence a refused upload is answered with, said by the browser
+// before the transfer starts and by the API when an oversized body arrives
+// anyway. `byteSize` is omitted only where the cap tripped mid-stream: the body
+// was never fully read, so its total is a number nothing here knows. `subject`
+// is how a caller that can name the file names it instead.
+export function uploadTooLargeMessage(
+  maxBytes: number,
+  byteSize?: number,
+  subject = 'That file'
+): string {
+  const limit = formatBytes(maxBytes);
+  const size = byteSize === undefined ? null : formatBytes(byteSize);
+  // A file a hair over rounds to the same string as the limit itself, and
+  // "that file is 500 MB, over the 500 MB limit" reads as a contradiction
+  // rather than as a refusal.
+  const measured = size === null || size === limit ? `${subject} is` : `${subject} is ${size},`;
+  return `${measured} over the ${limit} limit for one upload.`;
 }
