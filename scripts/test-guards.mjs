@@ -59,6 +59,52 @@ export const guards = [
     testName: 'decides the content type by magic bytes',
   },
   {
+    name: 'an upload declaring an oversized length never starts',
+    package: 'api',
+    file: 'src/routes/files.ts',
+    // Without this the body is read to the cap and refused there, which costs
+    // the whole transfer and can no longer say how big the file was.
+    find:
+      '    assertUploadSize(declaredLength);\n' +
+      '    if (declaredLength > 0) await assertQuota(c, projectId, declaredLength);',
+    replace: '    if (declaredLength > 0) await assertQuota(c, projectId, declaredLength);',
+    tests: ['tests/e2e/files.test.ts'],
+    testName: 'refuses an upload whose declared length is over the limit',
+  },
+  {
+    name: 'an oversized upload is refused before it is sent',
+    package: 'web',
+    file: 'src/lib/upload.ts',
+    find: '  if (byteSize > MAX_UPLOAD_BYTES) {',
+    replace: '  if (false) {',
+    tests: ['src/lib/files.svelte.test.ts'],
+    testName: 'refuses a file over the limit without sending it',
+    runner: 'web',
+  },
+  {
+    name: 'a refused upload reaches the screen as what the API said',
+    package: 'web',
+    file: 'src/lib/files.svelte.ts',
+    // apiMessage shows an ApiError and nothing else, so the plain Error this
+    // threw before reached the toast as "could not reach the server".
+    find: '        throw new ApiError(',
+    replace: '        throw new Error(',
+    tests: ['src/lib/files.svelte.test.ts'],
+    testName: 'carries the refusal the API wrote out to the caller',
+    runner: 'web',
+  },
+  {
+    name: 'the upload cap does not leave its refusal unhandled',
+    package: 'api',
+    file: 'src/services/files.ts',
+    // Without the listener the cap emits on a stream nothing is watching yet,
+    // which is an uncaught exception rather than a 413.
+    find: "  counted.on('error', () => {});",
+    replace: '  void counted;',
+    tests: ['src/services/files.test.ts'],
+    testName: 'refuses a body past the cap',
+  },
+  {
     name: 'RIFF that is not WebP is not an image',
     package: 'api',
     file: 'src/services/imageSniff.ts',

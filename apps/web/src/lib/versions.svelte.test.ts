@@ -1,6 +1,7 @@
 import '../api/testUtils.ts';
 import { fetchMock, jsonResponse } from '../api/testUtils.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { MAX_UPLOAD_BYTES, formatBytes } from '@three-peaks/shared';
 import { versions } from './versions.svelte.ts';
 
 const PROJECT = '2f1c9e5a-8b3d-4f1e-9c2a-7d6b5e4f3a21';
@@ -133,6 +134,19 @@ describe('VersionStore.upload', () => {
     await expect(versions.upload(FILE, bytes())).rejects.toThrow(
       'That would exceed the project storage quota.'
     );
+  });
+
+  // Appending a version is the second way to put bytes on a file, and the API
+  // caps it exactly as the first one does -- after the transfer.
+  it('refuses a file over the limit without sending it', async () => {
+    const oversized = bytes();
+    Object.defineProperty(oversized, 'size', { value: MAX_UPLOAD_BYTES * 2 });
+
+    await expect(versions.upload(FILE, oversized)).rejects.toThrow(
+      `That file is ${formatBytes(MAX_UPLOAD_BYTES * 2)}, over the ` +
+        `${formatBytes(MAX_UPLOAD_BYTES)} limit for one upload.`
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

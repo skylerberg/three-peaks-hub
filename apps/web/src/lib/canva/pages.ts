@@ -2,7 +2,7 @@ import {
   IMPORT_TITLE_MAX_LENGTH,
   MAX_DECK_CARDS,
   MAX_UPLOAD_BYTES,
-  formatBytes,
+  uploadTooLargeMessage,
 } from '@three-peaks/shared';
 import { parsePageName } from './pageName.ts';
 import { sniffImageType } from './sniff.ts';
@@ -64,8 +64,7 @@ export async function readCanvaExport(file: Blob): Promise<CanvaPage[]> {
     // zip.ts holds that declaration to what actually comes out.
     if (entry.uncompressedSize > MAX_UPLOAD_BYTES) {
       throw new ZipError(
-        `“${entry.name}” is ${formatBytes(entry.uncompressedSize)}, over the ` +
-          `${formatBytes(MAX_UPLOAD_BYTES)} limit for one page.`
+        uploadTooLargeMessage(MAX_UPLOAD_BYTES, entry.uncompressedSize, `“${entry.name}”`)
       );
     }
 

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MAX_UPLOAD_BYTES, formatBytes } from '@three-peaks/shared';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
 const PNG = Buffer.from([
@@ -48,6 +49,33 @@ describe('project files', () => {
       // attachment, never inline: user-supplied bytes rendered inline on this
       // origin would be same-origin script.
       expect(res.headers.get('content-disposition')).toContain('attachment');
+    });
+
+    // Refused on what the request declares, before a byte of the body is read.
+    // The cap in storeUpload is the gate that counts, but it can only trip
+    // partway through a transfer already paid for -- and by then the size it
+    // could have named is gone with the rest of the body.
+    it('refuses an upload whose declared length is over the limit', async () => {
+      const declared = MAX_UPLOAD_BYTES * 2;
+      const res = await owner.api.postBytes(
+        `/api/files/upload?project_id=${projectId}&filename=export.zip`,
+        'the first bytes of a much larger file' as unknown as BodyInit,
+        'application/zip',
+        { 'Content-Length': String(declared) }
+      );
+
+      expect(res.status).toBe(413);
+      expect((await res.json()).error).toBe(
+        `That file is ${formatBytes(declared)}, over the ` +
+          `${formatBytes(MAX_UPLOAD_BYTES)} limit for one upload.`
+      );
+
+      const listing = await (
+        await owner.api.get(`/api/files/directory?project_id=${projectId}`)
+      ).json();
+      expect(listing.files.map((f: { filename: string }) => f.filename)).not.toContain(
+        'export.zip'
+      );
     });
 
     // The declared Content-Type is ignored; what the bytes actually are is what
