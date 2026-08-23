@@ -211,6 +211,10 @@ jobs:
           cat /tmp/api.log >&2
           exit 1
 
+      # Before the browser probes: this one boots the artefact the image runs,
+      # and nothing else in CI ever does.
+      - run: pnpm run check:bundle
+
       - run: pnpm run check:upload
       - run: pnpm run check:model3d
       - run: pnpm run check:print

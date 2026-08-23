@@ -55,7 +55,7 @@ await setup.end();
 const url = `postgres://${env.db.user}:${encodeURIComponent(env.db.password)}@${env.db.hostname}:${env.db.port}/${scratch}`;
 
 try {
-  const migrated = spawnSync('node', ['--import', 'tsx', 'src/db/migrate.ts'], {
+  const migrated = spawnSync('node', ['--import', 'tsx', 'src/db/migrate-cli.ts'], {
     stdio: 'inherit',
     env: { ...process.env, DB_DATABASE: scratch },
   });

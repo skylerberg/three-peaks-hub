@@ -27,7 +27,7 @@ spec:
           # Runs the TypeScript directly through tsx, which is why src/ ships in
           # the image alongside the bundle and why tsx is a dependency rather
           # than a devDependency.
-          command: ['node', '--import', 'tsx', 'src/db/migrate.ts']
+          command: ['node', '--import', 'tsx', 'src/db/migrate-cli.ts']
           env:
             - name: ENVIRONMENT
               value: production
