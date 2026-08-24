@@ -17,6 +17,16 @@
   }
   let { fileId, alt = '', version, class: className = 'size-12', fit = 'cover' }: Props = $props();
 
+  // Value-compared, and read by the effect below instead of the props
+  // themselves. A parent passes these as a getter over the row it is drawing --
+  // `get fileId() { return $.get(card).file_id }` inside a keyed each -- so an
+  // effect reading the prop is subscribed to the row, not to the string. A list
+  // replaced with equal-valued rows, which is what every save of a deck's cards
+  // returns, then marks this effect dirty for every thumbnail on screen. A
+  // $derived recomputes but stops there when its value has not changed.
+  const currentFileId = $derived(fileId);
+  const currentVersion = $derived(version);
+
   let frame = $state<HTMLElement | null>(null);
   let url = $state<string | null>(null);
   // A plain binding, not $state: it is written in teardown, where a $state write
@@ -30,11 +40,11 @@
   }
 
   $effect(() => {
-    const id = fileId;
+    const id = currentFileId;
     // Read out here rather than inside read(): a prop touched only from the
     // async closure is not a dependency of this effect, so moving between two
     // versions would leave the first image on screen.
-    const wanted = version;
+    const wanted = currentVersion;
     const node = frame;
     url = null;
     if (!node) return;
