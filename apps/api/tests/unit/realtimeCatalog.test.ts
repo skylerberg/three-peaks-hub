@@ -15,14 +15,14 @@ describe('the realtime event tables', () => {
 
   it('gives every event a project_id, which is what delivery routes on', () => {
     for (const [type, entry] of Object.entries(document.events)) {
-      expect(entry.payload, `${type} must carry project_id`).toContain('project_id');
+      expect(Object.keys(entry.payload), `${type} must carry project_id`).toContain('project_id');
     }
   });
 
   it('names the acting user on every event whose catalog row says so', () => {
     for (const [type, entry] of Object.entries(EVENT_CATALOG)) {
       const payload = document.events[type].payload;
-      expect(payload.includes('actor_user_id'), type).toBe(entry.carriesActor);
+      expect('actor_user_id' in payload, type).toBe(entry.carriesActor);
     }
   });
 

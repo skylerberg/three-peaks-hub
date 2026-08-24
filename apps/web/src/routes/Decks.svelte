@@ -61,6 +61,17 @@
     realtime.subscribe(id);
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
+      // The row this listing draws is on the event. Only for a deck already
+      // listed: one this screen has never seen still has to be read, and its
+      // deck_created is what says so.
+      if (
+        event.type === 'deck_updated' &&
+        event.deck &&
+        decks.decks.some((deck) => deck.id === event.deck_id)
+      ) {
+        decks.applyDeckUpdate(event.deck);
+        return;
+      }
       void decks.refreshList().catch(() => {});
     });
     return () => {

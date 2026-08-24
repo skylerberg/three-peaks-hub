@@ -118,6 +118,17 @@
     let pending: ReturnType<typeof setTimeout> | null = null;
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
+      if (event.type === 'deck_updated') {
+        // Another deck in this project moving says nothing about this one.
+        if (event.deck_id !== deckId) return;
+        // What changed rides on the event, so there is nothing to go and read.
+        // A pod on the previous release carries neither row, and that falls
+        // through to the reload below.
+        if (event.deck) {
+          decks.applyDeckUpdate(event.deck, event.cards);
+          return;
+        }
+      }
       if (pending) clearTimeout(pending);
       pending = setTimeout(() => {
         pending = null;

@@ -37,6 +37,7 @@ function card(fileId: string, quantity: number, position: number) {
       byte_size: 10,
       image_width: 744,
       image_height: 1039,
+      name_locked: false,
       uploaded_by: 'someone',
       deleted_at: null,
       created_at: '2026-01-01T00:00:00.000Z',
@@ -168,5 +169,92 @@ describe('DeckStore', () => {
     fetchMock.mockImplementationOnce(async () => jsonResponse(422, { error: 'nope' }));
     await expect(decks.saveCards(DECK, [])).rejects.toThrow();
     expect(decks.saving).toBe(false);
+  });
+
+  describe('applying what an event carried', () => {
+    async function loaded() {
+      fetchMock.mockImplementationOnce(async () =>
+        jsonResponse(200, { deck: deck(), cards: [card('a', 1, 0)] })
+      );
+      await decks.loadDeck(DECK);
+    }
+
+    it('takes the deck and its cards without a request', async () => {
+      await loaded();
+      fetchMock.mockReset();
+
+      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }), [
+        card('a', 4, 0),
+        card('b', 1, 1),
+      ]);
+
+      expect(decks.deck?.name).toBe('Renamed');
+      expect(decks.cards.map((entry) => entry.quantity)).toEqual([4, 1]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    // A rename leaves the contents alone and the event says so by carrying no
+    // cards. Reading that as "no cards" would empty the screen.
+    it('leaves the cards alone when the event carried none', async () => {
+      await loaded();
+
+      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }));
+
+      expect(decks.deck?.name).toBe('Renamed');
+      expect(decks.cards.map((entry) => entry.file_id)).toEqual(['a']);
+    });
+
+    it('updates the row in the listing too', async () => {
+      fetchMock.mockImplementationOnce(async () =>
+        jsonResponse(200, { decks: [deck({ name: 'Base game' })] })
+      );
+      await decks.loadList(PROJECT);
+
+      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }));
+
+      expect(decks.decks[0].name).toBe('Renamed');
+    });
+
+    it('ignores an event for a deck that is not the one open', async () => {
+      await loaded();
+
+      decks.applyDeckUpdate(deck({ id: 'another', name: 'Not this one' }));
+
+      expect(decks.deck?.name).toBe('Base game');
+    });
+
+    // Applying answers no request, so it is outside the generation counters. A
+    // GET issued before the edit committed lands after it and would otherwise
+    // put the screen back on the row the edit replaced.
+    it('does not let a response older than what was applied overwrite it', async () => {
+      await loaded();
+
+      let release: (() => void) | null = null;
+      const issued = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      // The refresh answers with the row as it stood before the edit the event
+      // carried, which is what a GET issued a moment earlier would return.
+      fetchMock.mockImplementationOnce(async () => {
+        release?.();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return jsonResponse(200, {
+          deck: deck({ name: 'Stale', updated_at: '2026-01-01T00:00:00.000Z' }),
+          cards: [card('a', 1, 0)],
+        });
+      });
+
+      const load = decks.refreshDeck();
+      await issued;
+      decks.applyDeckUpdate(deck({ name: 'Applied', updated_at: '2026-03-01T00:00:00.000Z' }), [
+        card('a', 9, 0),
+      ]);
+      await load;
+
+      expect(decks.deck?.name).toBe('Applied');
+      expect(decks.cards[0].quantity).toBe(9);
+      expect(decks.loadingDeck).toBe(false);
+    });
   });
 });
