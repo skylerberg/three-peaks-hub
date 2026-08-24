@@ -875,4 +875,16 @@ export const guards = [
     testName: 'does not reload the thumbnails when a copy count changes',
     runner: 'web',
   },
+  {
+    // The same shape one level out: decks.deck is a new object after every
+    // save, so reading the field off it re-read a row whose id had not moved.
+    name: 'an unchanged card back is not read again',
+    package: 'web',
+    file: 'src/routes/Deck.svelte',
+    find: '    const id = backFileId;',
+    replace: '    const id = decks.deck?.back_file_id ?? null;',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'does not re-read the card back when a copy count changes',
+    runner: 'web',
+  },
 ];

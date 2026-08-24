@@ -58,9 +58,9 @@ function cardFile(n: number) {
 
 // Over the wire, so the rows are the brand-new objects a real response carries
 // rather than the ones the caller already holds.
-function deckPayload(quantities: number[]): string {
+function deckPayload(quantities: number[], backFileId: string | null = null): string {
   return JSON.stringify({
-    deck: DECK_ROW,
+    deck: { ...DECK_ROW, back_file_id: backFileId },
     cards: quantities.map((quantity, index) => {
       const file = cardFile(index + 1);
       return { file_id: file.id, quantity, position: index, file };
@@ -68,7 +68,7 @@ function deckPayload(quantities: number[]): string {
   });
 }
 
-function stubDeckWithCards(): void {
+function stubDeckWithCards(backFileId: string | null = null): void {
   fetchMock.mockImplementation(async (input, init) => {
     // openapi-fetch hands fetch a Request rather than an init, and the PUT and
     // the GET share a path here.
@@ -81,14 +81,17 @@ function stubDeckWithCards(): void {
     if (url.includes(`/api/decks/${DECK}/import`)) {
       return jsonResponse(404, { error: 'This deck has no import' });
     }
+    if (backFileId && url.endsWith(`/api/files/${backFileId}`)) {
+      return jsonResponse(200, { ...cardFile(9), id: backFileId, filename: 'back.png' });
+    }
     if (url.includes(`/api/decks/${DECK}/cards`) && method === 'PUT') {
-      return new Response(deckPayload([3, 1, 1]), {
+      return new Response(deckPayload([3, 1, 1], backFileId), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }
     if (url.includes(`/api/decks/${DECK}`)) {
-      return new Response(deckPayload([1, 1, 1]), {
+      return new Response(deckPayload([1, 1, 1], backFileId), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -119,6 +122,10 @@ function thumbnailReads(): number {
 
 function deckLoads(): number {
   return urlsRequested().filter((url) => url.endsWith(`/api/decks/${DECK}`)).length;
+}
+
+function fileRowReads(fileId: string): number {
+  return urlsRequested().filter((url) => url.endsWith(`/api/files/${fileId}`)).length;
 }
 
 function stubApi(): void {
@@ -269,5 +276,26 @@ describe('Deck editor', () => {
     // screen that never reloaded.
     expect(deckLoads()).toBeGreaterThan(loadsBefore);
     expect(thumbnailReads()).toBe(3);
+  });
+
+  // The card back is named by id, so its row is a request of its own -- and the
+  // save replaces decks.deck, which used to re-read that row every time even
+  // though the id on it had not moved.
+  it('does not re-read the card back when a copy count changes', async () => {
+    const BACK = '1111111a-2222-4333-8444-000000000009';
+    stubDeckWithCards(BACK);
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByText('back.png');
+    await screen.findByRole('button', { name: 'Add cards' });
+    expect(fileRowReads(BACK)).toBe(1);
+
+    const copies = await screen.findAllByLabelText('Copies');
+    await fireEvent.change(copies[0], { target: { value: '3' } });
+
+    await waitFor(() => expect(decks.cards[0].quantity).toBe(3));
+    await wait(SETTLE_MS);
+
+    expect(fileRowReads(BACK)).toBe(1);
   });
 });

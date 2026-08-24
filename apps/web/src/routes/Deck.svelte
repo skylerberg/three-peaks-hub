@@ -84,9 +84,14 @@
       });
   });
 
+  // Value-compared, for the reason Thumbnail.svelte spells out at its own: the
+  // save replaces decks.deck, so reading the field straight re-read the same
+  // row on every copy count edit.
+  const backFileId = $derived(decks.deck?.back_file_id ?? null);
+
   // The back is named by id only, so its row has to be read to draw it.
   $effect(() => {
-    const id = decks.deck?.back_file_id ?? null;
+    const id = backFileId;
     if (!id) {
       backFile = null;
       return;
