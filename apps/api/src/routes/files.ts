@@ -14,7 +14,9 @@ import {
   appendFileVersion,
   assertQuota,
   assertUploadSize,
+  fileWithUsage,
   projectStorageUsed,
+  serializeVersion,
   restoreFile,
   serializeFile,
   storeUpload,
@@ -62,7 +64,7 @@ import {
   unauthorizedErrorResponse,
   validationErrorResponse,
 } from '../schemas/errors.ts';
-import type { AppHono, Connection } from '../types/index.ts';
+import type { AppContext, AppHono, Connection } from '../types/index.ts';
 
 export const filesRouter: AppHono = new Hono();
 
@@ -74,6 +76,19 @@ const standardErrors = {
 
 // deleted_at is deliberately not on the wire: nothing reads one folder by id,
 // and the deleted listing carries the fact where it is needed.
+// A new version moves the file's mirror columns and the project's total as well
+// as adding a row, so the event carries all three rather than the one a client
+// would then have to read the others back for.
+async function versionEventData(
+  c: Pick<AppContext, 'get'>,
+  projectId: string,
+  fileId: string,
+  version: ReturnType<typeof serializeVersion>
+) {
+  const { storage_used_bytes: used, ...file } = await fileWithUsage(c, projectId, fileId);
+  return { version, file, storage_used_bytes: used };
+}
+
 function serializeFolder(row: FolderRow) {
   return {
     id: row.id,
@@ -110,21 +125,6 @@ const VERSION_COLUMNS = [
   'file_version.created_by as created_by',
   'file_version.created_at as created_at',
 ] as const;
-
-function serializeVersion(row: VersionRow, currentNumber: number) {
-  return {
-    file_id: row.file_id,
-    version_number: row.version_number,
-    content_type: row.content_type,
-    byte_size: Number(row.byte_size),
-    checksum: row.checksum,
-    image_width: row.image_width,
-    image_height: row.image_height,
-    created_by: row.created_by,
-    created_at: new Date(row.created_at).toISOString(),
-    is_current: row.version_number === currentNumber,
-  };
-}
 
 // A file uploaded by a pod running the release before file_version existed has
 // bytes and no rows of its own. Until something appends to it, its mirror
@@ -490,11 +490,15 @@ filesRouter.post(
         })
         .returning(FOLDER_COLUMNS)
         .executeTakeFirstOrThrow();
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_created', {
-        project_id: body.project_id,
-        folder_id: row.id,
-      });
-      return c.json(serializeFolder(row), 201);
+      const created = serializeFolder(row);
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'folder_created',
+        body.project_id,
+        created
+      );
+      return c.json(created, 201);
     } catch (error) {
       // Both the id primary key and the case-folded name index land here. The
       // pre-check above cannot cover the name: two creates can pass it together.
@@ -565,11 +569,15 @@ filesRouter.patch(
         .returning(FOLDER_COLUMNS)
         .executeTakeFirst();
       if (!row) throw new AppError(409, 'That folder is deleted. Restore it first');
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_updated', {
-        project_id: access.projectId,
-        folder_id: id,
-      });
-      return c.json(serializeFolder(row));
+      const updated = serializeFolder(row);
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'folder_updated',
+        access.projectId,
+        updated
+      );
+      return c.json(updated);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new AppError(409, 'A folder with that name already exists there');
@@ -609,14 +617,20 @@ filesRouter.delete(
         // A repeat delete leaves the first one's record intact.
         .where('folder.id', '=', id)
         .where('folder.deleted_at', 'is', null)
-        .returning(['folder.id as id'])
+        .returning(FOLDER_COLUMNS)
         .executeTakeFirst();
 
       if (row) {
-        publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_deleted', {
-          project_id: access.projectId,
-          folder_id: id,
-        });
+        publishAfterCommit(
+          c.get('postCommitHooks'),
+          c.get('user').id,
+          'folder_deleted',
+          access.projectId,
+          {
+            ...serializeFolder(row),
+            purged: false,
+          }
+        );
       }
       return c.body(null, 204);
     }
@@ -668,6 +682,14 @@ filesRouter.delete(
             .where('file.id', 'in', fileIds)
             .execute();
 
+    // Read before the delete: after it there is no row to describe, and a
+    // client cannot be told which folder to drop.
+    const purgedRow = await db
+      .selectFrom('folder')
+      .select(FOLDER_COLUMNS)
+      .where('folder.id', '=', id)
+      .executeTakeFirst();
+
     await db.deleteFrom('folder').where('folder.id', '=', id).execute();
 
     const keys = new Set<string>();
@@ -677,10 +699,18 @@ filesRouter.delete(
     }
 
     deleteStoredObjectsAfterCommit(c.get('postCommitHooks'), [...keys]);
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_deleted', {
-      project_id: access.projectId,
-      folder_id: id,
-    });
+    if (purgedRow) {
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'folder_deleted',
+        access.projectId,
+        {
+          ...serializeFolder(purgedRow),
+          purged: true,
+        }
+      );
+    }
 
     return c.body(null, 204);
   }
@@ -743,11 +773,15 @@ filesRouter.post(
         .where('folder.id', '=', id)
         .returning(FOLDER_COLUMNS)
         .executeTakeFirstOrThrow();
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'folder_updated', {
-        project_id: access.projectId,
-        folder_id: id,
-      });
-      return c.json(serializeFolder(row));
+      const restored = serializeFolder(row);
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'folder_updated',
+        access.projectId,
+        restored
+      );
+      return c.json(restored);
     } catch (error) {
       // The check above races two restores against each other; the index is
       // what actually decides.
@@ -869,10 +903,13 @@ filesRouter.post(
       throw error;
     }
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_uploaded', {
-      project_id: projectId,
-      file_id: row.id,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_uploaded',
+      projectId,
+      await fileWithUsage(c, projectId, row.id)
+    );
     return c.json(serializeFile(row), 201);
   }
 );
@@ -1035,10 +1072,13 @@ filesRouter.post(
       return c.json({ created: false, version }, 200);
     }
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_version_created', {
-      project_id: access.projectId,
-      file_id: id,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_version_created',
+      access.projectId,
+      await versionEventData(c, access.projectId, id, version)
+    );
     return c.json({ created: true, version }, 201);
   }
 );
@@ -1130,10 +1170,13 @@ filesRouter.post(
       return c.json({ created: false, version }, 200);
     }
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_version_created', {
-      project_id: access.projectId,
-      file_id: id,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_version_created',
+      access.projectId,
+      await versionEventData(c, access.projectId, id, version)
+    );
     return c.json({ created: true, version }, 201);
   }
 );
@@ -1233,11 +1276,15 @@ filesRouter.patch(
         .returning(FILE_COLUMNS)
         .executeTakeFirst();
       if (!row) throw new AppError(409, 'That file is deleted. Restore it first');
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
-        project_id: access.projectId,
-        file_id: id,
-      });
-      return c.json(serializeFile(row));
+      const updated = serializeFile(row);
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'file_updated',
+        access.projectId,
+        updated
+      );
+      return c.json(updated);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new AppError(409, 'A file with that name already exists there');
@@ -1288,10 +1335,16 @@ filesRouter.delete(
         .executeTakeFirst();
 
       if (marked) {
-        publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_deleted', {
-          project_id: access.projectId,
-          file_id: id,
-        });
+        publishAfterCommit(
+          c.get('postCommitHooks'),
+          c.get('user').id,
+          'file_deleted',
+          access.projectId,
+          {
+            ...(await fileWithUsage(c, access.projectId, id)),
+            purged: false,
+          }
+        );
       }
       return c.body(null, 204);
     }
@@ -1304,6 +1357,9 @@ filesRouter.delete(
       .where('file_version.file_id', '=', id)
       .execute();
 
+    // Before the delete: afterwards there is no row left to describe.
+    const doomed = await fileWithUsage(c, access.projectId, id);
+
     const row = await db
       .deleteFrom('file')
       .where('file.id', '=', id)
@@ -1313,10 +1369,18 @@ filesRouter.delete(
     if (row) {
       const keys = new Set<string>([row.storage_key, ...versions.map((v) => v.storage_key)]);
       deleteStoredObjectsAfterCommit(c.get('postCommitHooks'), [...keys]);
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_deleted', {
-        project_id: access.projectId,
-        file_id: id,
-      });
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'file_deleted',
+        access.projectId,
+        {
+          ...doomed,
+          // The sum is taken before the rows go, so it still counts this file.
+          storage_used_bytes: await projectStorageUsed(c, access.projectId),
+          purged: true,
+        }
+      );
     }
     return c.body(null, 204);
   }

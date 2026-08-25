@@ -112,7 +112,10 @@ modelsRouter.put(
   async (c) => {
     const fileId = c.req.param('fileId');
     const access = await assertFileAccess(c, fileId, 'write');
-    const { settings } = c.req.valid('json') as { settings: ModelSettings };
+    // Typed from the schema that just validated it rather than from shared's
+    // ModelSettings, which is looser about the colours. The strict value goes
+    // into the looser column and onto the event without a cast at either.
+    const { settings } = c.req.valid('json') as typeof putComponentModelRequestSchema.infer;
 
     await assertBackFileInProject(c, settings, access.projectId);
 
@@ -147,10 +150,14 @@ modelsRouter.put(
       ])
       .executeTakeFirstOrThrow();
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'model_updated', {
-      project_id: access.projectId,
-      file_id: fileId,
-    });
-    return c.json(serialize(row));
+    const model = serialize(row);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'model_updated',
+      access.projectId,
+      { ...model, settings }
+    );
+    return c.json(model);
   }
 );

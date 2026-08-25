@@ -27,6 +27,13 @@ class ModelStore {
   // realtime event lands. Only the newest may assign.
   #generation = 0;
 
+  // Settings saved elsewhere. The file row is untouched by this event because
+  // the image did not change, and #remembered is left alone: it holds what this
+  // person dialled in for the other kind, which is theirs and not the row's.
+  applySettings(settings: ModelSettings): void {
+    this.settings = settings;
+  }
+
   async load(fileId: string): Promise<void> {
     this.#generation += 1;
     const generation = this.#generation;

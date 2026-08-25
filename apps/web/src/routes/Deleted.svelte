@@ -57,6 +57,10 @@
   $effect(() => {
     const id = projectId;
     realtime.subscribe(id);
+    // The one listing that still reads itself back. An entry here carries its
+    // `path` and its `blocked_by`, and neither is on the row an event names:
+    // both are answers about the tombstoned tree above it, and deleting one
+    // folder changes `blocked_by` for entries this event says nothing about.
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
       void deleted.refresh().catch(() => {});

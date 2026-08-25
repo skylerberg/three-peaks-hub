@@ -63,6 +63,22 @@ class DeckImportStore {
   #bindingGeneration = 0;
   #runGeneration = 0;
 
+  // What a binding event carried, applied rather than read back -- the name
+  // comes with it, so this costs nothing.
+  applyBinding(deckId: string, binding: DeckImport | null, folderName: string | null): void {
+    if (this.bindingDeckId !== deckId) return;
+    this.binding = binding;
+    this.folderName = folderName;
+  }
+
+  // A run opening and closing is the one thing about the binding that moves
+  // without the binding row being rewritten, so it is derived from the run
+  // event rather than announced twice.
+  applyOpenRun(deckId: string, runId: string | null): void {
+    if (this.bindingDeckId !== deckId || !this.binding) return;
+    this.binding = { ...this.binding, open_run_id: runId };
+  }
+
   async loadBinding(projectId: string, deckId: string): Promise<void> {
     this.#bindingGeneration += 1;
     const generation = this.#bindingGeneration;

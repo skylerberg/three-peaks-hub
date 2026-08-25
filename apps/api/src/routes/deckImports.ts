@@ -42,10 +42,26 @@ import {
   startImportRunRequestSchema,
   startedImportRunSchema,
 } from '../schemas/imports.ts';
-import type { AppHono } from '../types/index.ts';
+import type { AppContext, AppHono } from '../types/index.ts';
 
 // Its own router rather than more of routes/decks.ts: that file is the deck a
 // person edits by hand, and this one is what an export does to it.
+// The folder's name, so the event carries what the screen prints rather than
+// leaving every client to resolve the id it was given.
+async function bindingFolderName(
+  c: Pick<AppContext, 'get'>,
+  folderId: string | null
+): Promise<string | null> {
+  if (!folderId) return null;
+  const row = await c
+    .get('db')
+    .selectFrom('folder')
+    .select(['folder.name as name'])
+    .where('folder.id', '=', folderId)
+    .executeTakeFirst();
+  return row?.name ?? null;
+}
+
 export const deckImportsRouter: AppHono = new Hono();
 
 const standardErrors = {
@@ -97,10 +113,13 @@ deckImportsRouter.put(
       sourceLabel: body.source_label ?? null,
     });
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
-      project_id: access.projectId,
-      deck_id: deckId,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_import_binding_changed',
+      access.projectId,
+      { deck_id: deckId, binding, folder_name: await bindingFolderName(c, binding.folder_id) }
+    );
     return created ? c.json(binding, 201) : c.json(binding);
   }
 );
@@ -146,10 +165,13 @@ deckImportsRouter.delete(
     const access = await assertImportAccess(c, deckId, 'write');
     await unbindImport(c, access);
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
-      project_id: access.projectId,
-      deck_id: deckId,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_import_binding_changed',
+      access.projectId,
+      { deck_id: deckId, binding: null, folder_name: null }
+    );
     return c.body(null, 204);
   }
 );

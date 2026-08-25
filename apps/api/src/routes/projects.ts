@@ -27,7 +27,7 @@ import {
   unauthorizedErrorResponse,
   validationErrorResponse,
 } from '../schemas/errors.ts';
-import type { AppHono } from '../types/index.ts';
+import type { AppContext, AppHono } from '../types/index.ts';
 
 export const projectsRouter: AppHono = new Hono();
 
@@ -221,10 +221,16 @@ projectsRouter.patch(
       .returning(['id', 'name', 'description', 'created_by', 'created_at', 'updated_at'])
       .executeTakeFirstOrThrow();
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'project_updated', {
-      project_id: id,
-    });
-    return c.json(serialize({ ...row, role: access.role }));
+    const serialized = serialize({ ...row, role: access.role });
+    const { role: _role, ...broadcast } = serialized;
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'project_updated',
+      id,
+      broadcast
+    );
+    return c.json(serialized);
   }
 );
 
@@ -282,13 +288,43 @@ projectsRouter.delete(
     }
 
     deleteStoredObjectsAfterCommit(c.get('postCommitHooks'), [...keys]);
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'project_deleted', {
-      project_id: id,
-    });
+    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'project_deleted', id, { id });
 
     return c.body(null, 204);
   }
 );
+
+// One reader for the list, so what a members_changed event carries and what the
+// listing route answers with cannot come apart.
+async function readMembers(c: Pick<AppContext, 'get'>, projectId: string) {
+  const db = c.get('db');
+
+  const creator = await db
+    .selectFrom('project as p')
+    .innerJoin('app_user as u', 'u.id', 'p.created_by')
+    .select(['u.id as user_id', 'u.email as email', 'u.name as name'])
+    .where('p.id', '=', projectId)
+    .executeTakeFirstOrThrow();
+
+  const members = await db
+    .selectFrom('project_member as m')
+    .innerJoin('app_user as u', 'u.id', 'm.user_id')
+    .select(['u.id as user_id', 'u.email as email', 'u.name as name', 'm.role as role'])
+    .where('m.project_id', '=', projectId)
+    .orderBy('u.name', 'asc')
+    .execute();
+
+  return [
+    { ...creator, role: 'editor' as const, is_creator: true },
+    ...members.map((member) => ({
+      user_id: member.user_id,
+      email: member.email,
+      name: member.name,
+      role: normalizeProjectRole(member.role),
+      is_creator: false,
+    })),
+  ];
+}
 
 projectsRouter.get(
   '/:id/members',
@@ -308,35 +344,7 @@ projectsRouter.get(
   async (c) => {
     const id = c.req.param('id');
     await assertProjectAccess(c, id);
-    const db = c.get('db');
-
-    const creator = await db
-      .selectFrom('project as p')
-      .innerJoin('app_user as u', 'u.id', 'p.created_by')
-      .select(['u.id as user_id', 'u.email as email', 'u.name as name'])
-      .where('p.id', '=', id)
-      .executeTakeFirstOrThrow();
-
-    const members = await db
-      .selectFrom('project_member as m')
-      .innerJoin('app_user as u', 'u.id', 'm.user_id')
-      .select(['u.id as user_id', 'u.email as email', 'u.name as name', 'm.role as role'])
-      .where('m.project_id', '=', id)
-      .orderBy('u.name', 'asc')
-      .execute();
-
-    return c.json({
-      members: [
-        { ...creator, role: 'editor' as const, is_creator: true },
-        ...members.map((member) => ({
-          user_id: member.user_id,
-          email: member.email,
-          name: member.name,
-          role: normalizeProjectRole(member.role),
-          is_creator: false,
-        })),
-      ],
-    });
+    return c.json({ members: await readMembers(c, id) });
   }
 );
 
@@ -389,7 +397,9 @@ projectsRouter.put(
       .onConflict((oc) => oc.columns(['project_id', 'user_id']).doUpdateSet({ role: body.role }))
       .execute();
 
-    publishAfterCommit(c.get('postCommitHooks'), user.id, 'members_changed', { project_id: id });
+    publishAfterCommit(c.get('postCommitHooks'), user.id, 'members_changed', id, {
+      members: await readMembers(c, id),
+    });
     return c.body(null, 204);
   }
 );
@@ -426,7 +436,9 @@ projectsRouter.delete(
       .where('project_member.user_id', '=', targetUserId)
       .execute();
 
-    publishAfterCommit(c.get('postCommitHooks'), user.id, 'members_changed', { project_id: id });
+    publishAfterCommit(c.get('postCommitHooks'), user.id, 'members_changed', id, {
+      members: await readMembers(c, id),
+    });
     return c.body(null, 204);
   }
 );

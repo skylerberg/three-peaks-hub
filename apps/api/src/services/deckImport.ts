@@ -13,14 +13,20 @@ import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
 import type { ImportAccess, ImportRunAccess } from './authorization.ts';
 import {
+  FILE_COLUMNS,
   appendFileVersion,
   assertQuota,
   assertUploadSize,
+  fileWithUsage,
   freeFilename,
+  projectStorageUsed,
   restoreFile,
+  serializeFile,
+  serializeVersion,
   storeUpload,
   type StoredUpload,
 } from './files.ts';
+import { readDeck, readDeckCards } from './decks.ts';
 import { blockedMessage, deletedAncestor } from './folderTree.ts';
 import { publishAfterCommit } from './realtime/index.ts';
 import { deleteStoredObjectsAfterCommit, reclaim } from './storage/index.ts';
@@ -838,12 +844,18 @@ export async function startRun(
     )
     .execute();
 
-  publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_import_started', {
-    project_id: access.projectId,
-    deck_id: access.deckId,
-    run_id: id,
-  });
-  return { ...(await readRun(c, id)), plan: summarizePlan(planned, mapping) };
+  const run = await readRun(c, id);
+  publishAfterCommit(
+    c.get('postCommitHooks'),
+    c.get('user').id,
+    'deck_import_started',
+    access.projectId,
+    {
+      deck_id: access.deckId,
+      run,
+    }
+  );
+  return { ...run, plan: summarizePlan(planned, mapping) };
 }
 
 async function lockRun(db: Connection, runId: string) {
@@ -874,12 +886,18 @@ export async function abandonRun(c: Ctx, access: ImportRunAccess): Promise<Seria
     .where('import_run.id', '=', access.runId)
     .execute();
 
-  publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_import_finished', {
-    project_id: access.projectId,
-    deck_id: access.deckId,
-    run_id: access.runId,
-  });
-  return await readRun(c, access.runId);
+  const abandoned = await readRun(c, access.runId);
+  publishAfterCommit(
+    c.get('postCommitHooks'),
+    c.get('user').id,
+    'deck_import_finished',
+    access.projectId,
+    {
+      deck_id: access.deckId,
+      run: abandoned,
+    }
+  );
+  return abandoned;
 }
 
 // --- one page ---------------------------------------------------------------
@@ -1197,20 +1215,35 @@ async function landPage(
   // One event per page, whatever combination of create, restore, version and
   // rename this page turned out to be.
   if (createdFile) {
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_uploaded', {
-      project_id: run.projectId,
-      file_id: file.id,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_uploaded',
+      run.projectId,
+      await fileWithUsage(c, run.projectId, file.id)
+    );
   } else if (appended.created) {
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_version_created', {
-      project_id: run.projectId,
-      file_id: file.id,
-    });
+    const { storage_used_bytes: used, ...row } = await fileWithUsage(c, run.projectId, file.id);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_version_created',
+      run.projectId,
+      {
+        version: serializeVersion(appended.version, appended.version.version_number),
+        file: row,
+        storage_used_bytes: used,
+      }
+    );
   } else if (restored || finalName !== previousName) {
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
-      project_id: run.projectId,
-      file_id: file.id,
-    });
+    const { storage_used_bytes: _used, ...row } = await fileWithUsage(c, run.projectId, file.id);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_updated',
+      run.projectId,
+      row
+    );
   }
 
   return {
@@ -1386,15 +1419,16 @@ export async function finishRun(c: Ctx, access: ImportRunAccess): Promise<RunDet
 
   const hooks = c.get('postCommitHooks');
   const actor = c.get('user').id;
-  publishAfterCommit(hooks, actor, 'deck_import_finished', {
-    project_id: access.projectId,
+  const [finished, deck, cards] = await Promise.all([
+    readRun(c, access.runId),
+    readDeck(c, access.deckId),
+    readDeckCards(c, access.deckId),
+  ]);
+  publishAfterCommit(hooks, actor, 'deck_import_finished', access.projectId, {
     deck_id: access.deckId,
-    run_id: access.runId,
+    run: finished,
   });
-  publishAfterCommit(hooks, actor, 'deck_updated', {
-    project_id: access.projectId,
-    deck_id: access.deckId,
-  });
+  publishAfterCommit(hooks, actor, 'deck_updated', access.projectId, { deck, cards });
 
   return await readRunDetail(c, access.importId, access.runId);
 }
@@ -1520,11 +1554,32 @@ async function tombstoneUnmatched(c: Ctx, access: ImportRunAccess): Promise<Tomb
   // The mapping row is kept, neither detached nor deleted. Keeping it reserves
   // the identity key, and the reserved key is what lets the card come back as a
   // restore rather than as a duplicate three runs later.
-  for (const row of rows) {
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_deleted', {
-      project_id: access.projectId,
-      file_id: row.file_id,
-    });
+  // One usage read for the batch: a per-card fileWithUsage would run two
+  // queries for every card an import takes out.
+  const used = await projectStorageUsed(c, access.projectId);
+  const tombstoned = await c
+    .get('db')
+    .selectFrom('file')
+    .select(FILE_COLUMNS)
+    .where(
+      'file.id',
+      'in',
+      rows.map((row) => row.file_id)
+    )
+    .execute();
+
+  for (const row of tombstoned) {
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_deleted',
+      access.projectId,
+      {
+        ...serializeFile(row),
+        storage_used_bytes: used,
+        purged: false,
+      }
+    );
   }
 
   return rows;

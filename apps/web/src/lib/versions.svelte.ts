@@ -44,6 +44,25 @@ class VersionStore {
     await this.load(current.id);
   }
 
+  // The row this screen is showing, changed under it -- a rename, or a
+  // tombstone somebody else stamped.
+  applyFile(row: FileRow): void {
+    if (this.file?.id !== row.id) return;
+    this.file = row;
+  }
+
+  // A version appended elsewhere. History only grows and the newest number is
+  // the current one, so this goes on the front and takes the flag with it.
+  applyVersion(row: FileRow, version: FileVersion): void {
+    if (this.file?.id !== row.id) return;
+    this.file = row;
+    if (this.versions.some((entry) => entry.version_number === version.version_number)) return;
+    this.versions = [
+      version,
+      ...this.versions.map((entry) => (entry.is_current ? { ...entry, is_current: false } : entry)),
+    ];
+  }
+
   // Answers whether a version was created: identical bytes are a 200 that
   // changed nothing, which the caller has to be able to say out loud.
   async upload(fileId: string, file: File): Promise<boolean> {

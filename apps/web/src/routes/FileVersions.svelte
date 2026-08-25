@@ -73,15 +73,27 @@
     realtime.subscribe(id);
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
-      if (!('file_id' in event) || event.file_id !== fileId) return;
-      void versions.refresh().catch((caught: unknown) => {
-        // A soft delete answers with the row and its tombstone, so a 404 here
-        // means the bytes are gone for good; the history on screen would offer
-        // to restore versions that no longer exist.
-        if (caught instanceof ApiError && caught.status === 404) {
+      if (event.type === 'file_version_created') {
+        if (event.data.file.id !== fileId) return;
+        versions.applyVersion(event.data.file, event.data.version);
+        return;
+      }
+      if (event.type === 'file_updated') {
+        if (event.data.id !== fileId) return;
+        versions.applyFile(event.data);
+        return;
+      }
+      if (event.type === 'file_deleted') {
+        if (event.data.id !== fileId) return;
+        // A soft delete leaves the row and its history; a purge takes the bytes
+        // for good, and the history on screen would go on offering to restore
+        // versions that no longer exist.
+        if (event.data.purged) {
           error = 'That file has been permanently deleted.';
+          return;
         }
-      });
+        versions.applyFile(event.data);
+      }
     });
 
     return () => {

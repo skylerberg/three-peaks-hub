@@ -97,7 +97,7 @@ describe('realtime over a websocket', () => {
     const created = events.find((event) => event.type === 'folder_created')!;
     expect(created.project_id).toBe(projectId);
     // Every event names who caused it, so a client can ignore its own echo.
-    expect(created.actor_user_id).toBe(owner.id);
+    expect((created.data as { actor_user_id: string }).actor_user_id).toBe(owner.id);
 
     socket.close();
   });
@@ -172,8 +172,19 @@ describe('realtime over a websocket', () => {
     const announced = events.find((event) => event.type === 'file_version_created');
     expect(announced).toBeDefined();
     expect(announced!.project_id).toBe(projectId);
-    expect(announced!.file_id).toBe(fileId);
-    expect(announced!.actor_user_id).toBe(owner.id);
+    const versionData = announced!.data as {
+      version: { file_id: string; version_number: number; is_current: boolean };
+      file: { id: string; byte_size: number };
+      storage_used_bytes: number;
+      actor_user_id: string;
+    };
+    expect(versionData.version.file_id).toBe(fileId);
+    expect(versionData.version.is_current).toBe(true);
+    // Both halves and the total: the row that was added, the mirror it moved,
+    // and the number the explorer's meter draws.
+    expect(versionData.file.id).toBe(fileId);
+    expect(versionData.storage_used_bytes).toBeGreaterThan(0);
+    expect(versionData.actor_user_id).toBe(owner.id);
     events.length = 0;
 
     expect(
@@ -194,11 +205,10 @@ describe('realtime over a websocket', () => {
     expect(code).toBe(4401);
   });
 
-  // The bus carries { type, payload }; the wire frame is { type, ...payload },
-  // which is what packages/shared's generated union describes. Without this,
-  // the two shapes can drift and the only symptom is a client reading undefined
-  // off every event.
-  it('sends a flat frame whose fields match the published document', async () => {
+  // The frame on the wire is the envelope the document declares. Without this
+  // the two can drift and the only symptom is a client reading undefined off
+  // every event.
+  it('sends the envelope the published document declares', async () => {
     const { socket, events } = await connect(owner.token);
 
     await owner.api.post('/api/files/folders', { project_id: projectId, name: 'Wire Shape' });
@@ -206,11 +216,16 @@ describe('realtime over a websocket', () => {
 
     const event = events.find((entry) => entry.type === 'folder_created')!;
     expect(event).toBeDefined();
-    expect(event).not.toHaveProperty('payload');
+    expect(Object.keys(event).sort()).toEqual(['data', 'project_id', 'type']);
 
     const { realtimeEventsDocument } = await import('../../src/services/realtime/document.ts');
-    const declared = realtimeEventsDocument().events.folder_created.payload;
-    expect(Object.keys(event).sort()).toEqual([...Object.keys(declared), 'type'].sort());
+    const schemas = (
+      realtimeEventsDocument().components as {
+        schemas: Record<string, { properties: { data: { properties: Record<string, unknown> } } }>;
+      }
+    ).schemas;
+    const declared = Object.keys(schemas.FolderCreatedEvent.properties.data.properties).sort();
+    expect(Object.keys(event.data as object).sort()).toEqual(declared);
 
     socket.close();
   });
@@ -236,7 +251,7 @@ describe('realtime over a websocket', () => {
     });
     await settle();
 
-    const event = events.findLast((entry) => entry.type === 'deck_updated') as unknown as {
+    const event = events.findLast((entry) => entry.type === 'deck_updated')!.data as {
       deck: { id: string; total_copies: number };
       cards: { file_id: string; quantity: number }[];
     };
@@ -247,10 +262,9 @@ describe('realtime over a websocket', () => {
     socket.close();
   });
 
-  // An edit to the deck's own row leaves its contents alone, and reading five
-  // hundred card rows to announce a rename would be the wasted work this whole
-  // change is removing.
-  it('leaves the cards off a deck_updated that did not touch them', async () => {
+  // One fixed shape: a rename carries the cards it did not touch, so no client
+  // has to test which half of the payload turned up.
+  it('carries both halves even when only the deck row moved', async () => {
     const { socket, events } = await connect(owner.token);
 
     const deck = await (
@@ -264,12 +278,12 @@ describe('realtime over a websocket', () => {
     await owner.api.patch(`/api/decks/${deck.id}`, { name: 'Renamed twice' });
     await settle();
 
-    const event = events.findLast((entry) => entry.type === 'deck_updated') as unknown as {
+    const event = events.findLast((entry) => entry.type === 'deck_updated')!.data as {
       deck: { name: string };
-      cards?: unknown;
+      cards: unknown[];
     };
     expect(event.deck.name).toBe('Renamed twice');
-    expect(event).not.toHaveProperty('cards');
+    expect(event.cards).toEqual([]);
 
     socket.close();
   });

@@ -125,15 +125,16 @@ export function attachRealtime(server: Server): () => void {
   // Delivery re-checks access for every event rather than trusting the
   // subscription, so membership removed mid-connection takes effect at once.
   const unsubscribeBus = subscribeToBus((entry) => {
-    const projectId = (entry.payload as { project_id?: string }).project_id;
+    const projectId = entry.project_id;
     if (!projectId) return;
 
-    // Flattened at the socket boundary: the bus carries { type, payload } because
-    // that is convenient to route on internally, but the wire frame is
-    // { type, ...payload } so a client can narrow on `type` and read the fields
-    // directly. packages/shared's generated union describes this shape, and
+    // The envelope goes out as it arrived: { type, project_id, data }. It was
+    // flattened to { type, ...payload } while every payload was a bag of ids,
+    // which stops working the moment one is a row -- a file's own id and its
+    // project's would both be spelled the same at the top level.
+    // packages/shared's generated union describes this shape, and
     // tests/e2e/realtime.test.ts holds the two together.
-    const message = JSON.stringify({ type: entry.type, ...entry.payload });
+    const message = JSON.stringify(entry);
     void (async () => {
       for (const connection of connectionsForProject(projectId)) {
         try {

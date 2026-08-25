@@ -65,6 +65,25 @@ export const FILE_COLUMNS = [
   'file.deleted_at as deleted_at',
 ] as const;
 
+// The file row plus the project total, which is what every event about a file's
+// bytes carries: a row on its own cannot move the explorer's storage meter.
+export async function fileWithUsage(
+  c: Pick<AppContext, 'get'>,
+  projectId: string,
+  fileId: string
+): Promise<ReturnType<typeof serializeFile> & { storage_used_bytes: number }> {
+  const [row, used] = await Promise.all([
+    c
+      .get('db')
+      .selectFrom('file')
+      .select(FILE_COLUMNS)
+      .where('file.id', '=', fileId)
+      .executeTakeFirstOrThrow(),
+    projectStorageUsed(c, projectId),
+  ]);
+  return { ...serializeFile(row), storage_used_bytes: used };
+}
+
 export async function projectStorageUsed(
   c: Pick<AppContext, 'get'>,
   projectId: string
@@ -202,6 +221,36 @@ interface FileVersionRow {
   image_height: number | null;
   created_by: string;
   created_at: Date;
+}
+
+// A new version is always the current one at the moment it is written, so the
+// import path passes its own number; the versions route passes the file's.
+export function serializeVersion(
+  row: {
+    file_id: string;
+    version_number: number;
+    content_type: string;
+    byte_size: string | number;
+    checksum: string | null;
+    image_width: number | null;
+    image_height: number | null;
+    created_by: string;
+    created_at: Date | string;
+  },
+  currentNumber: number
+) {
+  return {
+    file_id: row.file_id,
+    version_number: row.version_number,
+    content_type: row.content_type,
+    byte_size: Number(row.byte_size),
+    checksum: row.checksum,
+    image_width: row.image_width,
+    image_height: row.image_height,
+    created_by: row.created_by,
+    created_at: new Date(row.created_at).toISOString(),
+    is_current: row.version_number === currentNumber,
+  };
 }
 
 interface AppendResult {
@@ -424,13 +473,17 @@ export async function restoreFile(
       .where('file.id', '=', fileId)
       .returning(FILE_COLUMNS)
       .executeTakeFirstOrThrow();
+    const restored = serializeFile(row);
     if (opts.notify !== false) {
-      publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'file_updated', {
-        project_id: file.project_id,
-        file_id: fileId,
-      });
+      publishAfterCommit(
+        c.get('postCommitHooks'),
+        c.get('user').id,
+        'file_updated',
+        file.project_id,
+        restored
+      );
     }
-    return serializeFile(row);
+    return restored;
   } catch (error) {
     // Two restores of one file can pass the pre-check at once. The partial
     // name index is what refuses the second.

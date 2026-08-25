@@ -127,25 +127,36 @@ part of the OpenAPI spec — it has no request or response to describe. Its type
 are a second document at `GET /api/realtime-events.json`.
 
 Three tables are pinned to each other: `eventCatalog.ts` says which types exist,
-`payloads.ts` gives each a shape (keyed by the catalog, so a type with no
-payload does not compile), and `closeCodes.ts` is the set a client must route
+`payloads.ts` gives each one an **arktype schema** — the same schema the REST
+route already answers with — and `closeCodes.ts` is the set a client must route
 on. `publishAfterCommit` is generic over the type, so a payload that disagrees
 with its row is a type error at the publish site.
 
-**An event may carry what changed rather than only its id**, and `deck_updated`
-is the one that does: the deck row always, its cards when the edit was to them.
-A screen holding that deck applies it and reads nothing back. Three things make
-that safe to copy onto another type. Both row fields are optional, because a pod
-on the previous release publishes neither and a client that receives neither has
-to fall back to the reload — the same rolling-deploy rule migrations follow.
-Applying answers no request, so it sits outside the generation counters that keep
-two loads in order, and `decks.svelte.ts` settles the race on the row's own
-`updated_at` instead. And `document.ts` names the OpenAPI component a field takes
-its shape from rather than restating the shape, so the REST client and the
-realtime client cannot describe one row two different ways; `generate-clients.mjs`
-refuses a name the spec does not define. What it costs is bytes on the bus: a
-deck at `MAX_DECK_CARDS` is the largest thing published, traded against every
-client holding it open fetching that same list a moment later.
+**Every event carries what changed, and no consumer reloads to find out.** The
+envelope is `{ type, project_id, data }`: the project id rides outside because
+it is what delivery routes on, and a row that happens not to carry one would
+reach nobody. Only a delete sends an id alone, because a deleted row is all the
+id there is left.
+
+Three rules keep it working, and all three were learned by getting it wrong:
+
+- **A payload is a schema, never a TypeScript type.** An interface is gone by
+  the time `realtime-events.json` is dumped, so a payload described by one can
+  only be published as a list of field names — and a list of names can only
+  describe strings. That is the whole reason this repo shipped a year of empty
+  events and six screens that answered them by reloading. `document.ts` builds
+  an OpenAPI 3.1 document from the schemas and `generate-clients.mjs` runs the
+  same generator over it as over the API spec.
+- **A payload carries what the screen draws, not only the row.** A file event
+  carries `storage_used_bytes` because a row cannot move the explorer's meter; a
+  binding event carries `folder_name` because the binding names its folder by id.
+  A payload that leaves one of those out sends the client back for it, which is
+  the reload again wearing a smaller hat.
+- **A screen that cannot place an event says so.** `files.apply` returns false
+  and its caller reloads. The deleted listing is the standing example: an entry
+  there carries a `path` and a `blocked_by` computed from the tombstoned tree
+  above it, and one delete changes `blocked_by` for rows its event never names.
+  `file_uploaded` is the other limit — no payload can carry the bytes.
 
 The bus is in-process until `REDIS_URL` is set. **Subscribing is not
 authorization**: a socket may name any project id, and delivery re-checks access

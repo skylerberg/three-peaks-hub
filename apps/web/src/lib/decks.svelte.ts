@@ -80,16 +80,33 @@ class DeckStore {
     return Date.parse(held.updated_at) > Date.parse(incoming.updated_at);
   }
 
-  // What a deck_updated event carries, applied instead of read back. The deck
-  // row always comes with one; its cards only when the edit was to them, so an
-  // absent list leaves the ones on screen alone rather than emptying them.
-  applyDeckUpdate(deck: Deck, cards?: readonly DeckCard[]): void {
+  // What a deck_updated event carries, applied instead of read back. Both
+  // halves always arrive, so there is nothing to test for here.
+  applyDeckUpdate(deck: Deck, cards: readonly DeckCard[]): void {
     const listed = this.decks.findIndex((entry) => entry.id === deck.id);
     if (listed !== -1) this.decks[listed] = deck;
 
     if (this.deck?.id !== deck.id) return;
     this.deck = deck;
-    if (cards) this.cards = [...cards];
+    this.cards = [...cards];
+  }
+
+  // The listing sorts on the server; a row added here has to land where a
+  // reload would have put it.
+  // A card embeds the file row it draws from, and renaming or deleting that
+  // file publishes a file event rather than a deck one. Nothing about deck
+  // membership moves here -- only the row inside the card.
+  applyCardFile(file: DeckCard['file']): void {
+    this.cards = this.cards.map((card) => (card.file_id === file.id ? { ...card, file } : card));
+  }
+
+  applyDeckCreated(deck: Deck): void {
+    if (this.decks.some((entry) => entry.id === deck.id)) return;
+    this.decks = [...this.decks, deck].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  applyDeckDeleted(deckId: string): void {
+    this.decks = this.decks.filter((entry) => entry.id !== deckId);
   }
 
   // Reads one deck without touching the open one, which is what the print

@@ -170,27 +170,30 @@ describe('Deck editor', () => {
     delete statics.revokeObjectURL;
   });
 
-  // An import publishes one file event per page, so a fifty-page run would
-  // otherwise reload the whole deck fifty times for everyone watching it.
-  it('reloads the deck once for a burst of realtime events, not once each', async () => {
+  // An import publishes one file event per page. That used to reload the deck
+  // once per burst; now it costs no request at all, which is what the
+  // coalescing window existed to limit.
+  it('reads nothing back for a burst of realtime events', async () => {
+    stubDeckWithCards();
     realtime.start('tok');
     FakeWebSocket.last().open();
 
     render(Deck, { projectId: PROJECT, deckId: DECK });
-    await wait(AFTER_THE_WINDOW_MS);
+    await waitFor(() => expect(thumbnailReads()).toBe(3));
 
-    const refresh = vi.spyOn(decks, 'refreshDeck').mockResolvedValue();
+    const before = urlsRequested().length;
     for (let page = 1; page <= 20; page += 1) {
       FakeWebSocket.last().receive({
-        type: 'file.updated',
+        type: 'file_updated',
         project_id: PROJECT,
-        file_id: `file-${page}`,
+        data: { ...cardFile(1), filename: `renamed-${page}.png`, actor_user_id: 'someone' },
       });
     }
     await wait(AFTER_THE_WINDOW_MS);
 
-    expect(refresh).toHaveBeenCalledTimes(1);
-    refresh.mockRestore();
+    expect(urlsRequested().length).toBe(before);
+    // And the last one is on screen, without anything having been read.
+    await screen.findByText('renamed-20.png');
   });
 
   // The history screen is read-only, so it is offered outside the editor-only
@@ -252,32 +255,6 @@ describe('Deck editor', () => {
     expect(thumbnailReads()).toBe(3);
   });
 
-  // A pod on the previous release publishes ids and nothing else, and a tab on
-  // this bundle has to keep working against one -- so an event with no rows on
-  // it still falls through to the reload it always did.
-  it('reads the deck back when the event carried no rows', async () => {
-    stubDeckWithCards();
-    realtime.start('tok');
-    FakeWebSocket.last().open();
-
-    render(Deck, { projectId: PROJECT, deckId: DECK });
-    await waitFor(() => expect(thumbnailReads()).toBe(3));
-
-    const loadsBefore = deckLoads();
-    FakeWebSocket.last().receive({
-      type: 'deck_updated',
-      project_id: PROJECT,
-      deck_id: DECK,
-      actor_user_id: 'someone',
-    });
-    await wait(AFTER_THE_WINDOW_MS);
-
-    // Assert the reload happened at all, or this case passes by measuring a
-    // screen that never reloaded.
-    expect(deckLoads()).toBeGreaterThan(loadsBefore);
-    expect(thumbnailReads()).toBe(3);
-  });
-
   // The card back is named by id, so its row is a request of its own -- and the
   // save replaces decks.deck, which used to re-read that row every time even
   // though the id on it had not moved.
@@ -315,10 +292,11 @@ describe('Deck editor', () => {
     FakeWebSocket.last().receive({
       type: 'deck_updated',
       project_id: PROJECT,
-      deck_id: DECK,
-      actor_user_id: 'someone-else',
-      deck: { ...DECK_ROW, name: 'Renamed elsewhere', updated_at: '2026-06-01T00:00:00.000Z' },
-      cards: JSON.parse(deckPayload([3, 1, 1])).cards,
+      data: {
+        deck: { ...DECK_ROW, name: 'Renamed elsewhere', updated_at: '2026-06-01T00:00:00.000Z' },
+        cards: JSON.parse(deckPayload([3, 1, 1])).cards,
+        actor_user_id: 'someone-else',
+      },
     });
     await wait(AFTER_THE_WINDOW_MS);
 
@@ -342,11 +320,16 @@ describe('Deck editor', () => {
     FakeWebSocket.last().receive({
       type: 'deck_updated',
       project_id: PROJECT,
-      deck_id: '9999999a-2222-4333-8444-999999999999',
-      actor_user_id: 'someone-else',
+      data: {
+        deck: { ...DECK_ROW, id: '9999999a-2222-4333-8444-999999999999', name: 'Another deck' },
+        cards: [],
+        actor_user_id: 'someone-else',
+      },
     });
     await wait(AFTER_THE_WINDOW_MS);
 
     expect(deckLoads()).toBe(loadsBefore);
+    // And this deck is untouched by it.
+    expect(screen.getByRole('heading', { name: 'Base game' })).toBeInTheDocument();
   });
 });
