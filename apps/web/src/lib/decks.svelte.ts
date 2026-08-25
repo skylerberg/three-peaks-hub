@@ -56,6 +56,13 @@ class DeckStore {
     try {
       const data = assertOk(await api.GET('/api/decks/{deckId}', { params: { path: { deckId } } }));
       if (generation !== this.#deckGeneration) return;
+      // A response can be older than an event already applied -- this GET may
+      // have been issued before that edit committed, and applying does not go
+      // through the generation counters because it answers no request. The
+      // row's own timestamp settles which is newer rather than the order the
+      // two happened to arrive in, and the cards route moves that timestamp
+      // too, so it stands for the cards as well.
+      if (this.#supersededBy(data.deck)) return;
       this.deck = data.deck;
       this.cards = data.cards;
     } finally {
@@ -65,6 +72,24 @@ class DeckStore {
 
   async refreshDeck(): Promise<void> {
     if (this.deck) await this.loadDeck(this.deck.id);
+  }
+
+  #supersededBy(incoming: Deck): boolean {
+    const held = this.deck;
+    if (!held || held.id !== incoming.id) return false;
+    return Date.parse(held.updated_at) > Date.parse(incoming.updated_at);
+  }
+
+  // What a deck_updated event carries, applied instead of read back. The deck
+  // row always comes with one; its cards only when the edit was to them, so an
+  // absent list leaves the ones on screen alone rather than emptying them.
+  applyDeckUpdate(deck: Deck, cards?: readonly DeckCard[]): void {
+    const listed = this.decks.findIndex((entry) => entry.id === deck.id);
+    if (listed !== -1) this.decks[listed] = deck;
+
+    if (this.deck?.id !== deck.id) return;
+    this.deck = deck;
+    if (cards) this.cards = [...cards];
   }
 
   // Reads one deck without touching the open one, which is what the print

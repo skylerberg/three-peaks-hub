@@ -1,3 +1,4 @@
+import type { deckCardSchema, deckSchema } from '../../schemas/decks.ts';
 import type { RealtimeEventType } from './eventCatalog.ts';
 
 // The payload shape for each type, as a second table pinned to the first: the
@@ -19,7 +20,16 @@ interface EventPayloads extends Record<RealtimeEventType, object> {
   file_version_created: { project_id: string; file_id: string };
   model_updated: { project_id: string; file_id: string };
   deck_created: { project_id: string; deck_id: string };
-  deck_updated: { project_id: string; deck_id: string };
+  // The only event that carries what changed rather than only what changed.
+  // Both rows are optional and a client that gets neither reloads, which is
+  // what a pod on the previous release leaves it doing; `cards` is absent when
+  // the edit was to the deck's own row and left its contents alone.
+  deck_updated: {
+    project_id: string;
+    deck_id: string;
+    deck?: typeof deckSchema.infer;
+    cards?: (typeof deckCardSchema.infer)[];
+  };
   deck_deleted: { project_id: string; deck_id: string };
   deck_import_started: { project_id: string; deck_id: string; run_id: string };
   // Fires when a run is abandoned as well as when it finishes; the payload does

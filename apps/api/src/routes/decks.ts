@@ -301,11 +301,16 @@ decksRouter.patch(
       throw error;
     }
 
+    const updated = await readDeck(c, deckId);
+    // The row it is about to answer with, so a client applies rather than
+    // reloading to learn what moved. Its cards are untouched here, so they are
+    // left off rather than read for nothing.
     publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
       project_id: access.projectId,
       deck_id: deckId,
+      deck: updated,
     });
-    return c.json(await readDeck(c, deckId));
+    return c.json(updated);
   }
 );
 
@@ -396,12 +401,19 @@ decksRouter.put(
       .where('deck.id', '=', deckId)
       .execute();
 
+    const [deck, saved] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
+
+    // Both rows, which is the whole of what this route changed. A deck holds at
+    // most MAX_DECK_CARDS of them and each carries its file, so this is the
+    // largest event the bus carries -- the trade against every client that has
+    // the deck open reading the same list back a moment later.
     publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
       project_id: access.projectId,
       deck_id: deckId,
+      deck,
+      cards: saved,
     });
 
-    const [deck, saved] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
     return c.json({ deck, cards: saved });
   }
 );

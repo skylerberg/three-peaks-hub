@@ -1,6 +1,8 @@
 // AUTO-GENERATED FROM apps/api's realtime document. DO NOT EDIT.
 // Regenerate with: pnpm run generate
 
+import type { components } from '../api/schema.generated.ts';
+
 export type RealtimeEventType =
   | 'deck_created'
   | 'deck_deleted'
@@ -50,6 +52,8 @@ export type RealtimeEvent =
       type: 'deck_updated';
       project_id: string;
       deck_id: string;
+      deck?: components['schemas']['Deck'];
+      cards?: components['schemas']['DeckWithCards']['cards'];
       actor_user_id: string;
     }
   | {

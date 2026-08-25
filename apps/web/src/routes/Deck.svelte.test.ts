@@ -252,10 +252,10 @@ describe('Deck editor', () => {
     expect(thumbnailReads()).toBe(3);
   });
 
-  // The other half of the same flash: the save publishes deck_updated, nothing
-  // excludes the socket that caused it, and the reload lands a second set of
-  // equal-valued rows a third of a second later.
-  it('does not reload the thumbnails when a realtime event reloads the deck', async () => {
+  // A pod on the previous release publishes ids and nothing else, and a tab on
+  // this bundle has to keep working against one -- so an event with no rows on
+  // it still falls through to the reload it always did.
+  it('reads the deck back when the event carried no rows', async () => {
     stubDeckWithCards();
     realtime.start('tok');
     FakeWebSocket.last().open();
@@ -297,5 +297,56 @@ describe('Deck editor', () => {
     await wait(SETTLE_MS);
 
     expect(fileRowReads(BACK)).toBe(1);
+  });
+
+  // The whole point of putting the rows on the event: the screen learns what
+  // changed without asking, so a burst of edits by someone else costs this tab
+  // nothing.
+  it('applies a deck_updated that carries the rows instead of reading the deck back', async () => {
+    stubDeckWithCards();
+    realtime.start('tok');
+    FakeWebSocket.last().open();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await waitFor(() => expect(thumbnailReads()).toBe(3));
+    await screen.findByRole('button', { name: 'Add cards' });
+
+    const loadsBefore = deckLoads();
+    FakeWebSocket.last().receive({
+      type: 'deck_updated',
+      project_id: PROJECT,
+      deck_id: DECK,
+      actor_user_id: 'someone-else',
+      deck: { ...DECK_ROW, name: 'Renamed elsewhere', updated_at: '2026-06-01T00:00:00.000Z' },
+      cards: JSON.parse(deckPayload([3, 1, 1])).cards,
+    });
+    await wait(AFTER_THE_WINDOW_MS);
+
+    await screen.findByRole('heading', { name: 'Renamed elsewhere' });
+    expect(screen.getAllByDisplayValue('3')).toHaveLength(1);
+    expect(deckLoads()).toBe(loadsBefore);
+    expect(thumbnailReads()).toBe(3);
+  });
+
+  // One project holds several decks. Another one moving says nothing about this
+  // one, and reading it back to discover that is the wasted request.
+  it('ignores a deck_updated for another deck in the project', async () => {
+    stubDeckWithCards();
+    realtime.start('tok');
+    FakeWebSocket.last().open();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await waitFor(() => expect(thumbnailReads()).toBe(3));
+
+    const loadsBefore = deckLoads();
+    FakeWebSocket.last().receive({
+      type: 'deck_updated',
+      project_id: PROJECT,
+      deck_id: '9999999a-2222-4333-8444-999999999999',
+      actor_user_id: 'someone-else',
+    });
+    await wait(AFTER_THE_WINDOW_MS);
+
+    expect(deckLoads()).toBe(loadsBefore);
   });
 });

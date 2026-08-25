@@ -73,6 +73,20 @@ describe('realtime over a websocket', () => {
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 250));
 
+  const PNG = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  ]);
+
+  async function upload(filename: string): Promise<string> {
+    const query = new URLSearchParams({ project_id: projectId, filename });
+    const response = await owner.api.postBytes(
+      `/api/files/upload?${query}`,
+      PNG as unknown as BodyInit,
+      'image/png'
+    );
+    return (await response.json()).id as string;
+  }
+
   it('delivers a mutation to a subscribed member', async () => {
     const { socket, events } = await connect(owner.token);
 
@@ -196,7 +210,66 @@ describe('realtime over a websocket', () => {
 
     const { realtimeEventsDocument } = await import('../../src/services/realtime/document.ts');
     const declared = realtimeEventsDocument().events.folder_created.payload;
-    expect(Object.keys(event).sort()).toEqual([...declared, 'type'].sort());
+    expect(Object.keys(event).sort()).toEqual([...Object.keys(declared), 'type'].sort());
+
+    socket.close();
+  });
+
+  // The point of the whole enriched payload: a client learns what changed
+  // without a request back. A frame carrying only ids sends every screen
+  // holding that deck to the API at once.
+  it('carries the deck and its cards on a deck_updated', async () => {
+    const { socket, events } = await connect(owner.token);
+
+    const deck = await (
+      await owner.api.post('/api/decks', {
+        project_id: projectId,
+        name: 'Carried',
+        card_width_mm: 63,
+        card_height_mm: 88,
+      })
+    ).json();
+
+    const fileId = await upload('card.png');
+    await owner.api.put(`/api/decks/${deck.id}/cards`, {
+      cards: [{ file_id: fileId, quantity: 2 }],
+    });
+    await settle();
+
+    const event = events.findLast((entry) => entry.type === 'deck_updated') as unknown as {
+      deck: { id: string; total_copies: number };
+      cards: { file_id: string; quantity: number }[];
+    };
+    expect(event.deck.id).toBe(deck.id);
+    expect(event.deck.total_copies).toBe(2);
+    expect(event.cards).toEqual([expect.objectContaining({ file_id: fileId, quantity: 2 })]);
+
+    socket.close();
+  });
+
+  // An edit to the deck's own row leaves its contents alone, and reading five
+  // hundred card rows to announce a rename would be the wasted work this whole
+  // change is removing.
+  it('leaves the cards off a deck_updated that did not touch them', async () => {
+    const { socket, events } = await connect(owner.token);
+
+    const deck = await (
+      await owner.api.post('/api/decks', {
+        project_id: projectId,
+        name: 'Renamed',
+        card_width_mm: 63,
+        card_height_mm: 88,
+      })
+    ).json();
+    await owner.api.patch(`/api/decks/${deck.id}`, { name: 'Renamed twice' });
+    await settle();
+
+    const event = events.findLast((entry) => entry.type === 'deck_updated') as unknown as {
+      deck: { name: string };
+      cards?: unknown;
+    };
+    expect(event.deck.name).toBe('Renamed twice');
+    expect(event).not.toHaveProperty('cards');
 
     socket.close();
   });

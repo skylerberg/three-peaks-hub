@@ -132,6 +132,21 @@ payload does not compile), and `closeCodes.ts` is the set a client must route
 on. `publishAfterCommit` is generic over the type, so a payload that disagrees
 with its row is a type error at the publish site.
 
+**An event may carry what changed rather than only its id**, and `deck_updated`
+is the one that does: the deck row always, its cards when the edit was to them.
+A screen holding that deck applies it and reads nothing back. Three things make
+that safe to copy onto another type. Both row fields are optional, because a pod
+on the previous release publishes neither and a client that receives neither has
+to fall back to the reload — the same rolling-deploy rule migrations follow.
+Applying answers no request, so it sits outside the generation counters that keep
+two loads in order, and `decks.svelte.ts` settles the race on the row's own
+`updated_at` instead. And `document.ts` names the OpenAPI component a field takes
+its shape from rather than restating the shape, so the REST client and the
+realtime client cannot describe one row two different ways; `generate-clients.mjs`
+refuses a name the spec does not define. What it costs is bytes on the bus: a
+deck at `MAX_DECK_CARDS` is the largest thing published, traded against every
+client holding it open fetching that same list a moment later.
+
 The bus is in-process until `REDIS_URL` is set. **Subscribing is not
 authorization**: a socket may name any project id, and delivery re-checks access
 for every event — which is what makes membership removal take effect without a

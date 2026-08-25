@@ -887,4 +887,39 @@ export const guards = [
     testName: 'does not re-read the card back when a copy count changes',
     runner: 'web',
   },
+  {
+    // Falling through to the reload is what this whole change removes, and it
+    // is invisible on screen -- the deck arrives either way, one request later.
+    name: 'an event carrying the rows is applied rather than read back',
+    package: 'web',
+    file: 'src/routes/Deck.svelte',
+    find: '          decks.applyDeckUpdate(event.deck, event.cards);\n          return;',
+    replace: '          decks.applyDeckUpdate(event.deck, event.cards);',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'applies a deck_updated that carries the rows instead of reading the deck back',
+    runner: 'web',
+  },
+  {
+    name: 'another deck moving does not reload this one',
+    package: 'web',
+    file: 'src/routes/Deck.svelte',
+    find: '        if (event.deck_id !== deckId) return;',
+    replace: '        if (false) return;',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'ignores a deck_updated for another deck in the project',
+    runner: 'web',
+  },
+  {
+    // Applying answers no request, so it sits outside the generation counters
+    // that keep two loads in order. Without this the older of the two wins
+    // whenever it is the one that lands second.
+    name: 'a response older than what was applied does not overwrite it',
+    package: 'web',
+    file: 'src/lib/decks.svelte.ts',
+    find: '      if (this.#supersededBy(data.deck)) return;',
+    replace: '      if (false) return;',
+    tests: ['src/lib/decks.svelte.test.ts'],
+    testName: 'does not let a response older than what was applied overwrite it',
+    runner: 'web',
+  },
 ];
