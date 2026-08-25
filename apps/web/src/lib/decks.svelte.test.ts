@@ -193,12 +193,12 @@ describe('DeckStore', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    // A rename leaves the contents alone and the event says so by carrying no
-    // cards. Reading that as "no cards" would empty the screen.
-    it('leaves the cards alone when the event carried none', async () => {
+    it('takes the cards a rename carried, which are the ones it already had', async () => {
       await loaded();
 
-      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }));
+      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }), [
+        card('a', 1, 0),
+      ]);
 
       expect(decks.deck?.name).toBe('Renamed');
       expect(decks.cards.map((entry) => entry.file_id)).toEqual(['a']);
@@ -210,7 +210,7 @@ describe('DeckStore', () => {
       );
       await decks.loadList(PROJECT);
 
-      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }));
+      decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }), []);
 
       expect(decks.decks[0].name).toBe('Renamed');
     });
@@ -218,7 +218,7 @@ describe('DeckStore', () => {
     it('ignores an event for a deck that is not the one open', async () => {
       await loaded();
 
-      decks.applyDeckUpdate(deck({ id: 'another', name: 'Not this one' }));
+      decks.applyDeckUpdate(deck({ id: 'another', name: 'Not this one' }), []);
 
       expect(decks.deck?.name).toBe('Base game');
     });

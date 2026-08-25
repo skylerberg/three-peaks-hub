@@ -156,3 +156,119 @@ describe('FileStore.upload', () => {
     expect(files.pending).toHaveLength(0);
   });
 });
+
+describe('FileStore.apply', () => {
+  const FOLDER = 'folder-1';
+
+  function fileRow(id: string, filename: string, folderId: string | null = null) {
+    return {
+      id,
+      project_id: PROJECT,
+      folder_id: folderId,
+      filename,
+      content_type: 'text/plain',
+      byte_size: 10,
+      image_width: null,
+      image_height: null,
+      name_locked: false,
+      uploaded_by: 'someone',
+      deleted_at: null,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  function folderRow(id: string, name: string, parentId: string | null = null) {
+    return {
+      id,
+      project_id: PROJECT,
+      parent_id: parentId,
+      name,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  function envelope(type: string, data: Record<string, unknown>) {
+    return { type, project_id: PROJECT, data: { ...data, actor_user_id: 'someone' } } as never;
+  }
+
+  beforeEach(() => {
+    files.reset();
+    fetchMock.mockReset();
+    files.listing = { ...listing(0, 0), files: [fileRow('a', 'a.txt'), fileRow('c', 'c.txt')] };
+  });
+
+  // The listing is ordered by the server, so a row put in here has to land
+  // where a reload would have put it or the explorer jumps on the next load.
+  it('inserts an uploaded file in the order the listing is sorted in', () => {
+    expect(
+      files.apply(envelope('file_uploaded', { ...fileRow('b', 'b.txt'), storage_used_bytes: 99 }))
+    ).toBe(true);
+
+    expect(files.listing!.files.map((row) => row.filename)).toEqual(['a.txt', 'b.txt', 'c.txt']);
+    // A row cannot move the project total on its own, so the event carries it.
+    expect(files.listing!.storage_used_bytes).toBe(99);
+  });
+
+  it('takes a file out of the listing when it is moved elsewhere', () => {
+    files.apply(envelope('file_updated', fileRow('a', 'a.txt', FOLDER)));
+    expect(files.listing!.files.map((row) => row.id)).toEqual(['c']);
+  });
+
+  it('replaces the row and moves the meter when a version lands', () => {
+    files.apply(
+      envelope('file_version_created', {
+        version: { file_id: 'a', version_number: 2, is_current: true },
+        file: { ...fileRow('a', 'a.txt'), byte_size: 4096 },
+        storage_used_bytes: 4096,
+      })
+    );
+
+    expect(files.listing!.files[0].byte_size).toBe(4096);
+    expect(files.listing!.storage_used_bytes).toBe(4096);
+  });
+
+  it('drops a tombstoned file from the live listing', () => {
+    files.apply(
+      envelope('file_deleted', {
+        ...fileRow('a', 'a.txt'),
+        deleted_at: '2026-02-01T00:00:00.000Z',
+        storage_used_bytes: 10,
+        purged: false,
+      })
+    );
+
+    expect(files.listing!.files.map((row) => row.id)).toEqual(['c']);
+  });
+
+  it('follows a rename of the folder it is showing', () => {
+    files.listing = {
+      ...files.listing!,
+      folder: folderRow(FOLDER, 'Old'),
+      breadcrumb: [folderRow(FOLDER, 'Old')],
+    };
+
+    files.apply(envelope('folder_updated', folderRow(FOLDER, 'New')));
+
+    expect(files.listing!.folder!.name).toBe('New');
+    expect(files.listing!.breadcrumb[0].name).toBe('New');
+  });
+
+  // The one it cannot absorb: what is on screen has stopped existing, and only
+  // a reload can decide what to show instead.
+  it('asks for a reload when the folder being shown is deleted', () => {
+    files.listing = { ...files.listing!, folder: folderRow(FOLDER, 'Here'), breadcrumb: [] };
+
+    expect(
+      files.apply(envelope('folder_deleted', { ...folderRow(FOLDER, 'Here'), purged: false }))
+    ).toBe(false);
+  });
+
+  it('ignores an event for another project', () => {
+    expect(files.apply({ type: 'file_deleted', project_id: 'other', data: {} } as never)).toBe(
+      true
+    );
+    expect(files.listing!.files).toHaveLength(2);
+  });
+});

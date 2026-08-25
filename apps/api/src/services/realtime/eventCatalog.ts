@@ -18,9 +18,17 @@ export const EVENT_CATALOG = {
   deck_created: { carriesActor: true },
   deck_updated: { carriesActor: true },
   deck_deleted: { carriesActor: true },
+  deck_import_binding_changed: { carriesActor: true },
   deck_import_started: { carriesActor: true },
   deck_import_finished: { carriesActor: true },
   members_changed: { carriesActor: true },
 } as const;
 
 export type RealtimeEventType = keyof typeof EVENT_CATALOG;
+
+// The subset whose payload names who made the change. Derived from the table
+// rather than listed again, so payloads.ts and publishAfterCommit read the same
+// answer this file gives.
+export type ActorEventType = {
+  [K in RealtimeEventType]: (typeof EVENT_CATALOG)[K]['carriesActor'] extends true ? K : never;
+}[RealtimeEventType];

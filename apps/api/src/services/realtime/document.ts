@@ -1,69 +1,77 @@
 import { CLOSE_CODES, CLOSE_CODE_REASONS } from './closeCodes.ts';
 import { EVENT_CATALOG, type RealtimeEventType } from './eventCatalog.ts';
+import { REALTIME_PAYLOAD_SCHEMAS } from './payloads.ts';
 
-// The shape payloads.ts gives each type, as a value: this document is dumped at
-// runtime, where an interface no longer exists. Keyed by RealtimeEventType so a
-// catalog entry missing here is a compile error -- widened to `string` it
-// published an empty payload instead, and an event whose generated client type
-// has lost its fields still type-checks on both sides.
+// /ws carries no HTTP request or response, so none of it can live in
+// openapi.json. This is the second document: an OpenAPI 3.1 file describing the
+// socket envelope and the close codes, declaring no paths, which the clients
+// generate types from exactly as they generate the API client from the spec.
 //
-// A field is either an id, or the shape of a schema the API already names in
-// its OpenAPI components -- `field` reaches one level in, for a component that
-// holds the row list rather than being it. The generator turns those into the
-// component types the REST client already exports, so the two documents cannot
-// describe one row two ways, and it fails if a name here resolves to nothing.
-type PayloadField = 'string' | { component: string; field?: string; optional?: true };
+// Built from the payload schemas rather than from a table of field names beside
+// them. A second table is a second answer -- it drifts, and while it existed it
+// could describe nothing but strings.
 
-const PAYLOAD_FIELDS: Record<RealtimeEventType, Readonly<Record<string, PayloadField>>> = {
-  project_updated: { project_id: 'string' },
-  project_deleted: { project_id: 'string' },
-  folder_created: { project_id: 'string', folder_id: 'string' },
-  folder_updated: { project_id: 'string', folder_id: 'string' },
-  folder_deleted: { project_id: 'string', folder_id: 'string' },
-  file_uploaded: { project_id: 'string', file_id: 'string' },
-  file_updated: { project_id: 'string', file_id: 'string' },
-  file_deleted: { project_id: 'string', file_id: 'string' },
-  file_version_created: { project_id: 'string', file_id: 'string' },
-  model_updated: { project_id: 'string', file_id: 'string' },
-  deck_created: { project_id: 'string', deck_id: 'string' },
-  deck_updated: {
-    project_id: 'string',
-    deck_id: 'string',
-    deck: { component: 'Deck', optional: true },
-    cards: { component: 'DeckWithCards', field: 'cards', optional: true },
-  },
-  deck_deleted: { project_id: 'string', deck_id: 'string' },
-  deck_import_started: { project_id: 'string', deck_id: 'string', run_id: 'string' },
-  deck_import_finished: { project_id: 'string', deck_id: 'string', run_id: 'string' },
-  members_changed: { project_id: 'string' },
-};
+function eventSchemaName(eventType: RealtimeEventType): string {
+  const pascal = eventType
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('');
+  return `${pascal}Event`;
+}
 
-export function realtimeEventsDocument() {
-  const events = Object.fromEntries(
-    Object.entries(EVENT_CATALOG).map(([type, entry]) => [
-      type,
-      {
-        // actor_user_id is merged in from the catalog rather than restated on
-        // every row, and it is required.
-        payload: {
-          ...PAYLOAD_FIELDS[type as RealtimeEventType],
-          ...(entry.carriesActor ? { actor_user_id: 'string' as const } : {}),
-        },
+export function realtimeEventsDocument(): Record<string, unknown> {
+  const schemas: Record<string, unknown> = {};
+  const refs: { $ref: string }[] = [];
+
+  for (const eventType of Object.keys(EVENT_CATALOG).sort() as RealtimeEventType[]) {
+    const name = eventSchemaName(eventType);
+    schemas[name] = {
+      type: 'object',
+      properties: {
+        type: { type: 'string', const: eventType },
+        // Named on the envelope rather than left to the payload: it is what
+        // delivery routes on, and a row that happens not to carry one would
+        // otherwise reach nobody.
+        project_id: { type: 'string' },
+        data: REALTIME_PAYLOAD_SCHEMAS[eventType].toJsonSchema(),
       },
-    ])
-  );
+      required: ['type', 'project_id', 'data'],
+      additionalProperties: false,
+    };
+    refs.push({ $ref: `#/components/schemas/${name}` });
+  }
 
   return {
-    // 2 since a payload became a map of field to shape rather than a list of
-    // names. Nothing reads this document at runtime -- it is generated from at
-    // build time -- so the bump is a marker rather than a compatibility branch.
-    version: 2,
-    events,
-    closeCodes: Object.fromEntries(
-      Object.entries(CLOSE_CODES).map(([name, code]) => [
-        code,
-        { name, reason: CLOSE_CODE_REASONS[code] },
-      ])
-    ),
+    openapi: '3.1.0',
+    info: {
+      title: 'Three Peaks Hub realtime events',
+      version: '2.0.0',
+      description:
+        'Generated from the declaration tables in src/services/realtime by `pnpm run realtime:dump`. ' +
+        'RealtimeEvent is the envelope a /ws socket receives and RealtimeCloseCode is what that ' +
+        'socket can be closed with. Not an HTTP API: it declares no paths.',
+    },
+    paths: {},
+    components: {
+      schemas: {
+        RealtimeEvent: { oneOf: refs },
+        // A generator keeps a schema's own description and drops its members',
+        // so every code's meaning has to be in this one string or it does not
+        // cross the boundary at all.
+        RealtimeCloseCode: {
+          description:
+            'Close codes a /ws socket can be closed with, beyond the standard RFC 6455 ones. ' +
+            Object.entries(CLOSE_CODES)
+              .map(([name, code]) => `${String(code)} (${name}): ${CLOSE_CODE_REASONS[code]}`)
+              .join(' '),
+          oneOf: Object.entries(CLOSE_CODES).map(([name, code]) => ({
+            type: 'integer',
+            const: code,
+            title: name,
+          })),
+        },
+        ...schemas,
+      },
+    },
   };
 }

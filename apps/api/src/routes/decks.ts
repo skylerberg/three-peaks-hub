@@ -6,7 +6,7 @@ import {
   assertProjectAccess,
   assertProjectWrite,
 } from '../services/authorization.ts';
-import { FILE_COLUMNS, serializeFile } from '../services/files.ts';
+import { readDeck, readDeckCards, serializeDeck, withCounts } from '../services/decks.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
@@ -28,7 +28,7 @@ import {
   unauthorizedErrorResponse,
   validationErrorResponse,
 } from '../schemas/errors.ts';
-import type { AppContext, AppHono, Connection } from '../types/index.ts';
+import type { AppHono } from '../types/index.ts';
 
 export const decksRouter: AppHono = new Hono();
 
@@ -37,98 +37,6 @@ const standardErrors = {
   ...notFoundErrorResponse,
   ...internalServerErrorResponse,
 };
-
-interface DeckRow {
-  id: string;
-  project_id: string;
-  name: string;
-  // numeric comes back from pg as a string, the way bigint does.
-  card_width_mm: string | number;
-  card_height_mm: string | number;
-  back_file_id: string | null;
-  created_by: string;
-  created_at: Date | string;
-  updated_at: Date | string;
-  card_count: string | number | null;
-  total_copies: string | number | null;
-}
-
-const DECK_COLUMNS = [
-  'deck.id as id',
-  'deck.project_id as project_id',
-  'deck.name as name',
-  'deck.card_width_mm as card_width_mm',
-  'deck.card_height_mm as card_height_mm',
-  'deck.back_file_id as back_file_id',
-  'deck.created_by as created_by',
-  'deck.created_at as created_at',
-  'deck.updated_at as updated_at',
-] as const;
-
-function serializeDeck(row: DeckRow) {
-  return {
-    id: row.id,
-    project_id: row.project_id,
-    name: row.name,
-    card_width_mm: Number(row.card_width_mm),
-    card_height_mm: Number(row.card_height_mm),
-    back_file_id: row.back_file_id,
-    created_by: row.created_by,
-    created_at: new Date(row.created_at).toISOString(),
-    updated_at: new Date(row.updated_at).toISOString(),
-    card_count: Number(row.card_count ?? 0),
-    total_copies: Number(row.total_copies ?? 0),
-  };
-}
-
-// The two totals every deck is listed with, as a correlated subquery each rather
-// than a join: a join to deck_card would multiply the deck rows and both numbers
-// would then have to be undone with a group by.
-function withCounts(db: Connection) {
-  return db.selectFrom('deck').select((eb) => [
-    ...DECK_COLUMNS,
-    eb
-      .selectFrom('deck_card')
-      .whereRef('deck_card.deck_id', '=', 'deck.id')
-      .select((inner) => inner.fn.countAll<string>().as('count'))
-      .as('card_count'),
-    eb
-      .selectFrom('deck_card')
-      .whereRef('deck_card.deck_id', '=', 'deck.id')
-      .select((inner) => inner.fn.sum<string>('deck_card.quantity').as('total'))
-      .as('total_copies'),
-  ]);
-}
-
-async function readDeck(c: Pick<AppContext, 'get'>, deckId: string) {
-  const row = await withCounts(c.get('db')).where('deck.id', '=', deckId).executeTakeFirst();
-  if (!row) throw new AppError(404, 'Deck not found');
-  return serializeDeck(row);
-}
-
-async function readDeckCards(c: Pick<AppContext, 'get'>, deckId: string) {
-  const rows = await c
-    .get('db')
-    .selectFrom('deck_card')
-    .innerJoin('file', 'file.id', 'deck_card.file_id')
-    // The same columns and the same serializer every other read of a file uses.
-    // Building the embedded object by hand here is what left name_locked off it
-    // while the schema went on declaring it.
-    .select(['deck_card.quantity as quantity', 'deck_card.position as position', ...FILE_COLUMNS])
-    .where('deck_card.deck_id', '=', deckId)
-    // id breaks the tie, so a listing is stable rather than whatever order the
-    // planner happened to return equal positions in.
-    .orderBy('deck_card.position', 'asc')
-    .orderBy('deck_card.id', 'asc')
-    .execute();
-
-  return rows.map((row) => ({
-    file_id: row.id,
-    quantity: row.quantity,
-    position: row.position,
-    file: serializeFile(row),
-  }));
-}
 
 decksRouter.get(
   '/',
@@ -219,11 +127,15 @@ decksRouter.post(
       throw error;
     }
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_created', {
-      project_id: body.project_id,
-      deck_id: id,
-    });
-    return c.json(await readDeck(c, id), 201);
+    const created = await readDeck(c, id);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_created',
+      body.project_id,
+      created
+    );
+    return c.json(created, 201);
   }
 );
 
@@ -301,15 +213,19 @@ decksRouter.patch(
       throw error;
     }
 
-    const updated = await readDeck(c, deckId);
-    // The row it is about to answer with, so a client applies rather than
-    // reloading to learn what moved. Its cards are untouched here, so they are
-    // left off rather than read for nothing.
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
-      project_id: access.projectId,
-      deck_id: deckId,
-      deck: updated,
-    });
+    // Both halves, even though this route left the cards alone: one fixed shape
+    // costs a read here and saves every client testing which half arrived.
+    const [updated, cards] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_updated',
+      access.projectId,
+      {
+        deck: updated,
+        cards,
+      }
+    );
     return c.json(updated);
   }
 );
@@ -334,10 +250,15 @@ decksRouter.delete(
 
     await c.get('db').deleteFrom('deck').where('deck.id', '=', deckId).execute();
 
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_deleted', {
-      project_id: access.projectId,
-      deck_id: deckId,
-    });
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_deleted',
+      access.projectId,
+      {
+        id: deckId,
+      }
+    );
     return c.body(null, 204);
   }
 );
@@ -403,16 +324,19 @@ decksRouter.put(
 
     const [deck, saved] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
 
-    // Both rows, which is the whole of what this route changed. A deck holds at
-    // most MAX_DECK_CARDS of them and each carries its file, so this is the
-    // largest event the bus carries -- the trade against every client that has
-    // the deck open reading the same list back a moment later.
-    publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', {
-      project_id: access.projectId,
-      deck_id: deckId,
-      deck,
-      cards: saved,
-    });
+    // A deck holds at most MAX_DECK_CARDS rows and each carries its file, so
+    // this is the largest event the bus carries -- the trade against every
+    // client with the deck open reading that same list back a moment later.
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_updated',
+      access.projectId,
+      {
+        deck,
+        cards: saved,
+      }
+    );
 
     return c.json({ deck, cards: saved });
   }

@@ -31,14 +31,15 @@
     files.load(projectId, folderId).catch((error) => toasts.error(apiMessage(error)));
   });
 
-  // Subscribed only while this project is on screen. Any event for it reloads
-  // the directory rather than patching it: the listing is one query and a
-  // reload is simpler than nine per-event mutations that can each drift.
+  // Subscribed only while this project is on screen. The event carries the row
+  // that moved, so the listing is patched rather than read back; `apply`
+  // answers false for the few it cannot place, and those still reload.
   $effect(() => {
     const id = projectId;
     realtime.subscribe(id);
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
+      if (files.apply(event)) return;
       void files.refresh().catch(() => {});
     });
     return () => {

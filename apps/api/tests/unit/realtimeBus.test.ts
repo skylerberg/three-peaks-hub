@@ -12,12 +12,13 @@ describe('the realtime bus', () => {
     subscribeToBus((entry) => seen.push(entry));
 
     await publish({
-      type: 'file_uploaded',
-      payload: { project_id: 'p1', file_id: 'f1', actor_user_id: 'u1' },
+      type: 'members_changed',
+      project_id: 'p1',
+      data: { members: [], actor_user_id: 'u1' },
     });
 
     expect(seen).toHaveLength(2);
-    expect(seen[0].type).toBe('file_uploaded');
+    expect(seen[0].type).toBe('members_changed');
   });
 
   // One bad subscriber must not stop delivery to the others; a listener that
@@ -30,11 +31,12 @@ describe('the realtime bus', () => {
     subscribeToBus((entry) => seen.push(entry.type));
 
     await publish({
-      type: 'project_updated',
-      payload: { project_id: 'p1', actor_user_id: 'u1' },
+      type: 'project_deleted',
+      project_id: 'p1',
+      data: { id: 'p1', actor_user_id: 'u1' },
     });
 
-    expect(seen).toEqual(['project_updated']);
+    expect(seen).toEqual(['project_deleted']);
   });
 
   it('stops delivering once unsubscribed', async () => {
@@ -42,7 +44,11 @@ describe('the realtime bus', () => {
     const off = subscribeToBus((entry) => seen.push(entry.type));
     off();
 
-    await publish({ type: 'project_deleted', payload: { project_id: 'p1', actor_user_id: 'u1' } });
+    await publish({
+      type: 'project_deleted',
+      project_id: 'p1',
+      data: { id: 'p1', actor_user_id: 'u1' },
+    });
     expect(seen).toEqual([]);
   });
 });
@@ -53,7 +59,7 @@ describe('publishAfterCommit', () => {
     subscribeToBus((entry) => seen.push(entry));
 
     const hooks: (() => void | Promise<void>)[] = [];
-    publishAfterCommit(hooks, 'actor-1', 'members_changed', { project_id: 'p1' });
+    publishAfterCommit(hooks, 'actor-1', 'members_changed', 'p1', { members: [] });
 
     // Queued, not sent: a request that rolls back never runs its hooks, which
     // is what stops an announcement for a write that did not happen.
@@ -64,18 +70,15 @@ describe('publishAfterCommit', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('merges the acting user into the payload', async () => {
+  it('merges the acting user into the data', async () => {
     const seen: RealtimeEnvelope[] = [];
     subscribeToBus((entry) => seen.push(entry));
 
     const hooks: (() => void | Promise<void>)[] = [];
-    publishAfterCommit(hooks, 'actor-1', 'file_deleted', { project_id: 'p1', file_id: 'f1' });
+    publishAfterCommit(hooks, 'actor-1', 'deck_deleted', 'p1', { id: 'd1' });
     await hooks[0]();
 
-    expect(seen[0].payload).toEqual({
-      project_id: 'p1',
-      file_id: 'f1',
-      actor_user_id: 'actor-1',
-    });
+    expect(seen[0].project_id).toBe('p1');
+    expect(seen[0].data).toEqual({ id: 'd1', actor_user_id: 'actor-1' });
   });
 });

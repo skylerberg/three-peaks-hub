@@ -10,4 +10,8 @@ writeFileSync(
   new URL('../realtime-events.json', import.meta.url),
   JSON.stringify(document, null, 2)
 );
-console.log(`wrote realtime-events.json (${Object.keys(document.events).length} event types)`);
+const schemas = (document.components as { schemas: Record<string, unknown> }).schemas;
+const count = Object.keys(schemas).filter(
+  (name) => name.endsWith('Event') && name !== 'RealtimeEvent'
+).length;
+console.log(`wrote realtime-events.json (${count} event types)`);

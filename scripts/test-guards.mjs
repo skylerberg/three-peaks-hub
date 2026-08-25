@@ -193,9 +193,8 @@ export const guards = [
     name: 'nothing is published for a request that rolled back',
     package: 'api',
     file: 'src/services/realtime/index.ts',
-    find: '  hooks.push(async () => {\n    await publish({ type, payload: { ...payload, actor_user_id: actorUserId } });\n  });',
-    replace:
-      '  void hooks;\n  void publish({ type, payload: { ...payload, actor_user_id: actorUserId } });',
+    find: '  hooks.push(async () => {',
+    replace: '  void hooks;\n  void (async () => {',
     tests: ['tests/unit/realtimeBus.test.ts'],
     testName: 'publishes nothing until the hook it queued is run',
   },
@@ -845,23 +844,6 @@ export const guards = [
     runner: 'web',
   },
   {
-    // One event per imported page, project-wide: a fifty-page run reloads the
-    // deck fifty times for everyone sitting on it.
-    name: 'a burst of realtime events reloads the deck once',
-    package: 'web',
-    file: 'src/routes/Deck.svelte',
-    find:
-      '      if (pending) clearTimeout(pending);\n' +
-      '      pending = setTimeout(() => {\n' +
-      '        pending = null;\n' +
-      '        void decks.refreshDeck().catch(() => {});\n' +
-      '      }, REFRESH_COALESCE_MS);',
-    replace: '      void decks.refreshDeck().catch(() => {});',
-    tests: ['src/routes/Deck.svelte.test.ts'],
-    testName: 'reloads the deck once for a burst of realtime events',
-    runner: 'web',
-  },
-  {
     // Reading the prop straight is what every other component here does, and it
     // looks like a needless indirection to take out. Inside a keyed each the
     // prop is a getter over the row, so the effect subscribes to the row and one
@@ -873,6 +855,32 @@ export const guards = [
     replace: '    const id = fileId;',
     tests: ['src/routes/Deck.svelte.test.ts'],
     testName: 'does not reload the thumbnails when a copy count changes',
+    runner: 'web',
+  },
+  {
+    // The listing is ordered by the server. Appending instead of inserting puts
+    // the row in the wrong place until the next load, which is exactly the kind
+    // of drift that made patching look riskier than reloading.
+    name: 'a row applied to the listing lands where a reload would have put it',
+    package: 'web',
+    file: 'src/lib/files.svelte.ts',
+    find: '    next.sort((a, b) => key(a).localeCompare(key(b)));',
+    replace: '    void key;',
+    tests: ['src/lib/files.svelte.test.ts'],
+    testName: 'inserts an uploaded file in the order the listing is sorted in',
+    runner: 'web',
+  },
+  {
+    // The folder on screen going away is the one event this store cannot
+    // absorb. Answering true leaves the explorer showing a folder that has
+    // stopped existing.
+    name: 'a deleted open folder falls back to a reload',
+    package: 'web',
+    file: 'src/lib/files.svelte.ts',
+    find: '        if (listing.folder?.id === gone || listing.breadcrumb.some((entry) => entry.id === gone)) {\n          return false;\n        }',
+    replace: '        void gone;',
+    tests: ['src/lib/files.svelte.test.ts'],
+    testName: 'asks for a reload when the folder being shown is deleted',
     runner: 'web',
   },
   {
@@ -888,25 +896,28 @@ export const guards = [
     runner: 'web',
   },
   {
-    // Falling through to the reload is what this whole change removes, and it
-    // is invisible on screen -- the deck arrives either way, one request later.
-    name: 'an event carrying the rows is applied rather than read back',
+    // Nothing reads the deck back any more, so dropping the apply does not fall
+    // through to a slower path -- the change simply never reaches the screen.
+    name: 'what a deck_updated carried reaches the screen',
     package: 'web',
     file: 'src/routes/Deck.svelte',
-    find: '          decks.applyDeckUpdate(event.deck, event.cards);\n          return;',
-    replace: '          decks.applyDeckUpdate(event.deck, event.cards);',
+    find: '          decks.applyDeckUpdate(event.data.deck, event.data.cards);\n          return;',
+    replace: '          return;',
     tests: ['src/routes/Deck.svelte.test.ts'],
     testName: 'applies a deck_updated that carries the rows instead of reading the deck back',
     runner: 'web',
   },
   {
-    name: 'another deck moving does not reload this one',
+    // The screen checks this too, but the store is where it is load-bearing:
+    // one project holds several decks, and an event for a sibling would
+    // otherwise replace the open one wholesale.
+    name: 'an event for another deck does not replace the open one',
     package: 'web',
-    file: 'src/routes/Deck.svelte',
-    find: '        if (event.deck_id !== deckId) return;',
-    replace: '        if (false) return;',
-    tests: ['src/routes/Deck.svelte.test.ts'],
-    testName: 'ignores a deck_updated for another deck in the project',
+    file: 'src/lib/decks.svelte.ts',
+    find: '    if (this.deck?.id !== deck.id) return;',
+    replace: '    if (false) return;',
+    tests: ['src/lib/decks.svelte.test.ts'],
+    testName: 'ignores an event for a deck that is not the one open',
     runner: 'web',
   },
   {

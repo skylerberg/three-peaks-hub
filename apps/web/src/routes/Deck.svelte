@@ -42,7 +42,6 @@
   const [minQuantity, maxQuantity] = DECK_QUANTITY_LIMITS;
   const limits = MODEL_LIMITS.card;
   const uid = $props.id();
-  const REFRESH_COALESCE_MS = 300;
 
   const presetId = $derived(deck ? (matchingCardPreset(deckCardSize(deck))?.id ?? '') : '');
   const totalCopies = $derived(cards.reduce((sum, card) => sum + card.quantity, 0));
@@ -113,30 +112,47 @@
   $effect(() => {
     const id = projectId;
     realtime.subscribe(id);
-    // Coalesced on a trailing edge: an import publishes one file event per page,
-    // so a fifty-page run would otherwise reload this deck fifty times over.
-    let pending: ReturnType<typeof setTimeout> | null = null;
+    // Nothing here reads anything back: every event carries what it changed.
+    // That is also why there is no coalescing left -- an import publishing one
+    // event per page costs this screen no requests at all.
     const off = realtime.on((event) => {
       if (event.project_id !== id) return;
-      if (event.type === 'deck_updated') {
-        // Another deck in this project moving says nothing about this one.
-        if (event.deck_id !== deckId) return;
-        // What changed rides on the event, so there is nothing to go and read.
-        // A pod on the previous release carries neither row, and that falls
-        // through to the reload below.
-        if (event.deck) {
-          decks.applyDeckUpdate(event.deck, event.cards);
+      switch (event.type) {
+        case 'deck_updated':
+          // Another deck in this project moving says nothing about this one.
+          if (event.data.deck.id !== deckId) return;
+          decks.applyDeckUpdate(event.data.deck, event.data.cards);
           return;
-        }
+        case 'deck_deleted':
+          if (event.data.id !== deckId) return;
+          error = 'That deck has been deleted.';
+          return;
+        // A card embeds its file row, so these reach the cards on screen even
+        // though none of them is about the deck.
+        case 'file_updated':
+        case 'file_deleted':
+          decks.applyCardFile(event.data);
+          return;
+        case 'file_version_created':
+          decks.applyCardFile(event.data.file);
+          return;
+        case 'deck_import_binding_changed':
+          if (event.data.deck_id !== deckId) return;
+          deckImports.applyBinding(deckId, event.data.binding, event.data.folder_name);
+          return;
+        case 'deck_import_started':
+          if (event.data.deck_id !== deckId) return;
+          deckImports.applyOpenRun(deckId, event.data.run.id);
+          return;
+        case 'deck_import_finished':
+          if (event.data.deck_id !== deckId) return;
+          deckImports.applyOpenRun(deckId, null);
+          return;
+        default:
+          return;
       }
-      if (pending) clearTimeout(pending);
-      pending = setTimeout(() => {
-        pending = null;
-        void decks.refreshDeck().catch(() => {});
-      }, REFRESH_COALESCE_MS);
     });
     return () => {
-      if (pending) clearTimeout(pending);
       off();
       realtime.unsubscribe(id);
     };

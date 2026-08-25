@@ -1,9 +1,11 @@
 import type { components } from '@three-peaks/shared/api';
+import type { RealtimeEvent } from '@three-peaks/shared/realtime';
 import { api, assertOk, authHeader } from '../api/client.ts';
 import { newId } from './ids.ts';
 import { assertUploadSize, readUploadResponse } from './upload.ts';
 
 type Folder = components['schemas']['Folder'];
+type FileRow = components['schemas']['File'];
 type DirectoryListing = components['schemas']['DirectoryListing'];
 
 interface PendingUpload {
@@ -50,6 +52,89 @@ class FileStore {
   async refresh(): Promise<void> {
     if (!this.listing) return;
     await this.load(this.listing.project_id, this.listing.folder?.id ?? null);
+  }
+
+  // The listing sorts on the server, so a row inserted here has to land where a
+  // reload would have put it. Postgres collates by its own rules and this does
+  // not, which can differ on names a locale orders unusually -- until the next
+  // load, which is the only cost.
+  static #insertSorted<T>(rows: T[], row: T, key: (entry: T) => string): T[] {
+    const next = [...rows, row];
+    next.sort((a, b) => key(a).localeCompare(key(b)));
+    return next;
+  }
+
+  #placeFolder(here: string | null, row: Folder): void {
+    const listing = this.listing;
+    if (!listing) return;
+    // A rename of the folder being shown, or of one in the trail above it.
+    if (listing.folder?.id === row.id) listing.folder = row;
+    listing.breadcrumb = listing.breadcrumb.map((entry) => (entry.id === row.id ? row : entry));
+
+    const rest = listing.folders.filter((entry) => entry.id !== row.id);
+    listing.folders =
+      (row.parent_id ?? null) === here
+        ? FileStore.#insertSorted(rest, row, (entry) => entry.name)
+        : rest;
+  }
+
+  #placeFile(here: string | null, row: FileRow): void {
+    const listing = this.listing;
+    if (!listing) return;
+    const rest = listing.files.filter((entry) => entry.id !== row.id);
+    // A tombstone leaves the live listing; it turns up on the deleted screen,
+    // which reads its own.
+    listing.files =
+      (row.folder_id ?? null) === here && row.deleted_at === null
+        ? FileStore.#insertSorted(rest, row, (entry) => entry.filename)
+        : rest;
+  }
+
+  // Applies what an event carried to the listing on screen. False means this
+  // store cannot place it and the caller should reload -- which is the honest
+  // answer for an event whose consequences are wider than the row it names.
+  apply(event: RealtimeEvent): boolean {
+    const listing = this.listing;
+    if (!listing || listing.project_id !== event.project_id) return true;
+    const here = listing.folder?.id ?? null;
+
+    switch (event.type) {
+      case 'folder_created':
+      case 'folder_updated':
+        this.#placeFolder(here, event.data);
+        return true;
+
+      case 'folder_deleted': {
+        // The folder being shown, or one above it, going away is not something
+        // a listing can absorb: what is on screen has stopped existing.
+        const gone = event.data.id;
+        if (listing.folder?.id === gone || listing.breadcrumb.some((entry) => entry.id === gone)) {
+          return false;
+        }
+        listing.folders = listing.folders.filter((entry) => entry.id !== gone);
+        return true;
+      }
+
+      case 'file_uploaded':
+      case 'file_deleted':
+        this.#placeFile(here, event.data);
+        listing.storage_used_bytes = event.data.storage_used_bytes;
+        return true;
+
+      case 'file_updated':
+        this.#placeFile(here, event.data);
+        return true;
+
+      case 'file_version_created':
+        this.#placeFile(here, event.data.file);
+        listing.storage_used_bytes = event.data.storage_used_bytes;
+        return true;
+
+      // A project going away, or its membership changing, is the screen's to
+      // answer rather than this listing's.
+      default:
+        return true;
+    }
   }
 
   // One folder, read without disturbing the listing the explorer is showing:

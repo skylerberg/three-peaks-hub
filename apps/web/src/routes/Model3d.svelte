@@ -143,8 +143,8 @@
     realtime.subscribe(id);
     const off = realtime.on((event) => {
       if (event.type !== 'model_updated') return;
-      if (event.project_id !== id || event.file_id !== fileId) return;
-      void models.load(fileId).catch(() => {});
+      if (event.project_id !== id || event.data.source_file_id !== fileId) return;
+      models.applySettings(event.data.settings);
     });
 
     return () => {
