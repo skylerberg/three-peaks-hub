@@ -1,7 +1,7 @@
 import type { components } from '@three-peaks/shared/api';
-import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
+import { api, assertOk, authHeader } from '../api/client.ts';
 import { newId } from './ids.ts';
-import { assertUploadSize } from './upload.ts';
+import { assertUploadSize, readUploadResponse } from './upload.ts';
 
 type Folder = components['schemas']['Folder'];
 type DirectoryListing = components['schemas']['DirectoryListing'];
@@ -87,18 +87,7 @@ class FileStore {
         body: file,
       });
 
-      if (!response.ok) {
-        // An ApiError rather than an Error: apiMessage shows only the former,
-        // and every other kind reaches a toast as "could not reach the server"
-        // — which is what a refusal the server took the trouble to explain read
-        // as here.
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new ApiError(
-          response.status,
-          body.error ?? `Upload failed with status ${response.status}`,
-          body
-        );
-      }
+      await readUploadResponse(response, `Upload failed with status ${response.status}`);
     } finally {
       this.pending = this.pending.filter((entry) => entry.key !== key);
     }

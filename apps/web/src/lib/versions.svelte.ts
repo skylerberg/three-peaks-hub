@@ -1,6 +1,6 @@
 import type { components } from '@three-peaks/shared/api';
-import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
-import { assertUploadSize } from './upload.ts';
+import { api, assertOk, authHeader } from '../api/client.ts';
+import { assertUploadSize, readUploadResponse } from './upload.ts';
 
 type FileRow = components['schemas']['File'];
 // A version only ever appears nested in a response, so the spec has no named
@@ -59,13 +59,10 @@ class VersionStore {
       body: file,
     });
 
-    const body = (await response.json().catch(() => ({}))) as {
-      created?: boolean;
-      error?: string;
-    };
-    if (!response.ok) {
-      throw new ApiError(response.status, body.error ?? `Upload failed (${response.status})`);
-    }
+    const body = await readUploadResponse<{ created?: boolean }>(
+      response,
+      `Upload failed (${response.status})`
+    );
     return body.created === true;
   }
 

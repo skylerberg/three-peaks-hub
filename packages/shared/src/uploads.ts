@@ -3,7 +3,6 @@
 // rather than after the whole transfer; the API re-checks what actually arrives,
 // because a content-length is a claim.
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-export const MAX_AVATAR_BYTES = 11 * 1024 * 1024;
 // A project pays for every version it has kept and for everything it has
 // deleted but not purged, so 1 GiB was roughly one deck.
 export const PROJECT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;

@@ -13,7 +13,7 @@
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
-  import { assertUploadSize } from '../lib/upload.ts';
+  import { assertUploadSize, readUploadResponse } from '../lib/upload.ts';
 
   interface Props {
     projectId: string;
@@ -208,10 +208,7 @@
         body: bytes,
       });
 
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new ApiError(response.status, body.error ?? 'The model could not be saved.');
-      }
+      await readUploadResponse(response, 'The model could not be saved.');
 
       toasts.success(`Saved ${filename} to this project.`);
     });

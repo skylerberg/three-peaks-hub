@@ -84,11 +84,11 @@ export const guards = [
   {
     name: 'a refused upload reaches the screen as what the API said',
     package: 'web',
-    file: 'src/lib/files.svelte.ts',
-    // apiMessage shows an ApiError and nothing else, so the plain Error this
-    // threw before reached the toast as "could not reach the server".
-    find: '        throw new ApiError(',
-    replace: '        throw new Error(',
+    file: 'src/lib/upload.ts',
+    // apiMessage shows an ApiError and nothing else, so the plain Error the
+    // explorer threw before reached the toast as "could not reach the server".
+    find: '  if (!response.ok) throw new ApiError(response.status, body.error ?? fallback, body);',
+    replace: '  if (!response.ok) throw new Error(body.error ?? fallback);',
     tests: ['src/lib/files.svelte.test.ts'],
     testName: 'carries the refusal the API wrote out to the caller',
     runner: 'web',
