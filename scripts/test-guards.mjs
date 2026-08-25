@@ -861,4 +861,30 @@ export const guards = [
     testName: 'reloads the deck once for a burst of realtime events',
     runner: 'web',
   },
+  {
+    // Reading the prop straight is what every other component here does, and it
+    // looks like a needless indirection to take out. Inside a keyed each the
+    // prop is a getter over the row, so the effect subscribes to the row and one
+    // copy count edit blanks and re-reads every image in the deck.
+    name: 'an identity-only prop change does not re-read a thumbnail',
+    package: 'web',
+    file: 'src/components/Thumbnail.svelte',
+    find: '    const id = currentFileId;',
+    replace: '    const id = fileId;',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'does not reload the thumbnails when a copy count changes',
+    runner: 'web',
+  },
+  {
+    // The same shape one level out: decks.deck is a new object after every
+    // save, so reading the field off it re-read a row whose id had not moved.
+    name: 'an unchanged card back is not read again',
+    package: 'web',
+    file: 'src/routes/Deck.svelte',
+    find: '    const id = backFileId;',
+    replace: '    const id = decks.deck?.back_file_id ?? null;',
+    tests: ['src/routes/Deck.svelte.test.ts'],
+    testName: 'does not re-read the card back when a copy count changes',
+    runner: 'web',
+  },
 ];

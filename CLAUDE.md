@@ -253,10 +253,16 @@ router library.
 - **A test that needs runes must be named `*.svelte.test.ts`.** Without the
   infix the runes are never compiled and the failure is silent: a `$derived`
   keeps handing back its first value.
-- Two Svelte 5 traps: `$state` returns a _proxy_, so a value captured for later
-  must be read back off the `$state` variable after assignment; and **writing**
+- Three Svelte 5 traps: `$state` returns a _proxy_, so a value captured for later
+  must be read back off the `$state` variable after assignment; **writing**
   `$state` during teardown silently does not survive, so bookkeeping that must
-  outlive an unmount belongs in a plain binding.
+  outlive an unmount belongs in a plain binding; and **a prop read inside an
+  `$effect` subscribes to whatever the parent's getter reads**, which inside a
+  keyed each is the row rather than the value it yields. A list replaced with
+  equal-valued rows — every save that shows its own response — then re-runs that
+  effect for every item, key or no key. An effect doing real work off a prop
+  reads it through a `$derived`, which compares by value and stops there;
+  `Thumbnail.svelte` is the one that has to.
 
 # The 3D studio
 

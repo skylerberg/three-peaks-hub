@@ -1,6 +1,6 @@
 import '../api/testUtils.ts';
 import { FakeWebSocket, fetchMock, jsonResponse } from '../api/testUtils.ts';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Deck from './Deck.svelte';
 import { deckImports } from '../lib/deckImports.svelte.ts';
@@ -13,6 +13,10 @@ const DECK = '3c7f1b2e-9a4d-4c6b-8e1f-2a3b4c5d6e7f';
 // Longer than the screen's own coalesce window, on real timers: the render and
 // the events both go through microtasks the fake clock does not drive.
 const AFTER_THE_WINDOW_MS = 600;
+
+// Long enough for an effect to have re-run and read the bytes again, short
+// enough that a green run says so quickly.
+const SETTLE_MS = 100;
 
 const DECK_ROW = {
   id: DECK,
@@ -28,8 +32,100 @@ const DECK_ROW = {
   total_copies: 0,
 };
 
+const OBJECT_URL = 'blob:http://localhost/thumb';
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cardFile(n: number) {
+  return {
+    id: `1111111a-2222-4333-8444-00000000000${n}`,
+    project_id: PROJECT,
+    folder_id: null,
+    filename: `card-${n}.png`,
+    content_type: 'image/png',
+    byte_size: 10,
+    image_width: 1000,
+    image_height: 1400,
+    name_locked: false,
+    uploaded_by: 'someone',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    deleted_at: null,
+  };
+}
+
+// Over the wire, so the rows are the brand-new objects a real response carries
+// rather than the ones the caller already holds.
+function deckPayload(quantities: number[], backFileId: string | null = null): string {
+  return JSON.stringify({
+    deck: { ...DECK_ROW, back_file_id: backFileId },
+    cards: quantities.map((quantity, index) => {
+      const file = cardFile(index + 1);
+      return { file_id: file.id, quantity, position: index, file };
+    }),
+  });
+}
+
+function stubDeckWithCards(backFileId: string | null = null): void {
+  fetchMock.mockImplementation(async (input, init) => {
+    // openapi-fetch hands fetch a Request rather than an init, and the PUT and
+    // the GET share a path here.
+    const request = typeof input === 'string' ? null : (input as Request);
+    const url = request?.url ?? (input as string);
+    const method = request?.method ?? (init as RequestInit | undefined)?.method ?? 'GET';
+    if (url.includes('/download')) {
+      return new Response('bytes', { status: 200, headers: { 'Content-Type': 'image/png' } });
+    }
+    if (url.includes(`/api/decks/${DECK}/import`)) {
+      return jsonResponse(404, { error: 'This deck has no import' });
+    }
+    if (backFileId && url.endsWith(`/api/files/${backFileId}`)) {
+      return jsonResponse(200, { ...cardFile(9), id: backFileId, filename: 'back.png' });
+    }
+    if (url.includes(`/api/decks/${DECK}/cards`) && method === 'PUT') {
+      return new Response(deckPayload([3, 1, 1], backFileId), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes(`/api/decks/${DECK}`)) {
+      return new Response(deckPayload([1, 1, 1], backFileId), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes(`/api/projects/${PROJECT}`)) {
+      return jsonResponse(200, {
+        id: PROJECT,
+        name: 'Colori',
+        description: null,
+        role: 'editor',
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      });
+    }
+    return jsonResponse(404, { error: `nothing stubbed for ${url}` });
+  });
+}
+
+function urlsRequested(): string[] {
+  return fetchMock.mock.calls.map((call) =>
+    typeof call[0] === 'string' ? call[0] : (call[0] as Request).url
+  );
+}
+
+function thumbnailReads(): number {
+  return urlsRequested().filter((url) => url.includes('/download')).length;
+}
+
+function deckLoads(): number {
+  return urlsRequested().filter((url) => url.endsWith(`/api/decks/${DECK}`)).length;
+}
+
+function fileRowReads(fileId: string): number {
+  return urlsRequested().filter((url) => url.endsWith(`/api/files/${fileId}`)).length;
 }
 
 function stubApi(): void {
@@ -62,10 +158,16 @@ describe('Deck editor', () => {
     fetchMock.mockReset();
     FakeWebSocket.reset();
     stubApi();
+    const statics = URL as unknown as Record<string, unknown>;
+    statics.createObjectURL = vi.fn(() => OBJECT_URL);
+    statics.revokeObjectURL = vi.fn();
   });
 
   afterEach(() => {
     realtime.stop();
+    const statics = URL as unknown as Record<string, unknown>;
+    delete statics.createObjectURL;
+    delete statics.revokeObjectURL;
   });
 
   // An import publishes one file event per page, so a fifty-page run would
@@ -125,5 +227,75 @@ describe('Deck editor', () => {
       expect(asked.some((url) => url.includes('/import/runs'))).toBe(false);
       view.unmount();
     }
+  });
+
+  // Every save sends the whole list and shows the response, so all three rows
+  // come back as new objects carrying the values they already had. The keyed
+  // each holds onto the DOM, and this still blanked and re-read every image in
+  // the deck: each Thumbnail is handed its id through a getter over the row.
+  it('does not reload the thumbnails when a copy count changes', async () => {
+    stubDeckWithCards();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await waitFor(() => expect(thumbnailReads()).toBe(3));
+    // The copies inputs are disabled until the role has come back.
+    await screen.findByRole('button', { name: 'Add cards' });
+
+    const copies = await screen.findAllByLabelText('Copies');
+    await fireEvent.change(copies[0], { target: { value: '3' } });
+
+    // The store, not the input: the input reads 3 the moment it is typed into,
+    // and it is the saved rows landing back in the store that used to flash.
+    await waitFor(() => expect(decks.cards[0].quantity).toBe(3));
+    await wait(SETTLE_MS);
+
+    expect(thumbnailReads()).toBe(3);
+  });
+
+  // The other half of the same flash: the save publishes deck_updated, nothing
+  // excludes the socket that caused it, and the reload lands a second set of
+  // equal-valued rows a third of a second later.
+  it('does not reload the thumbnails when a realtime event reloads the deck', async () => {
+    stubDeckWithCards();
+    realtime.start('tok');
+    FakeWebSocket.last().open();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await waitFor(() => expect(thumbnailReads()).toBe(3));
+
+    const loadsBefore = deckLoads();
+    FakeWebSocket.last().receive({
+      type: 'deck_updated',
+      project_id: PROJECT,
+      deck_id: DECK,
+      actor_user_id: 'someone',
+    });
+    await wait(AFTER_THE_WINDOW_MS);
+
+    // Assert the reload happened at all, or this case passes by measuring a
+    // screen that never reloaded.
+    expect(deckLoads()).toBeGreaterThan(loadsBefore);
+    expect(thumbnailReads()).toBe(3);
+  });
+
+  // The card back is named by id, so its row is a request of its own -- and the
+  // save replaces decks.deck, which used to re-read that row every time even
+  // though the id on it had not moved.
+  it('does not re-read the card back when a copy count changes', async () => {
+    const BACK = '1111111a-2222-4333-8444-000000000009';
+    stubDeckWithCards(BACK);
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByText('back.png');
+    await screen.findByRole('button', { name: 'Add cards' });
+    expect(fileRowReads(BACK)).toBe(1);
+
+    const copies = await screen.findAllByLabelText('Copies');
+    await fireEvent.change(copies[0], { target: { value: '3' } });
+
+    await waitFor(() => expect(decks.cards[0].quantity).toBe(3));
+    await wait(SETTLE_MS);
+
+    expect(fileRowReads(BACK)).toBe(1);
   });
 });
