@@ -212,7 +212,8 @@ jobs:
           exit 1
 
       # Before the browser probes: this one boots the artefact the image runs,
-      # and nothing else in CI ever does.
+      # and nothing else in CI ever does. check:all runs the half of it that
+      # needs no database, so the guard count is caught before a push.
       - run: pnpm run check:bundle
 
       - run: pnpm run check:upload

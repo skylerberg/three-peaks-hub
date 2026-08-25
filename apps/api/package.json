@@ -12,6 +12,7 @@
     "test": "node --env-file=.env.test node_modules/vitest/vitest.mjs run",
     "test:watch": "node --env-file=.env.test node_modules/vitest/vitest.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
+    "check:bundle:static": "node scripts/check-bundle.mjs --static",
     "migrate": "node --env-file=.env --import tsx src/db/migrate-cli.ts",
     "migrate:down": "node --env-file=.env --import tsx src/db/migrate-cli.ts down",
     "migrate:test": "node --env-file=.env.test --import tsx scripts/with-test-db.ts node --import tsx src/db/migrate-cli.ts",

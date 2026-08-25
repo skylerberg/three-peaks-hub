@@ -19,6 +19,10 @@ import { fileURLToPath } from 'node:url';
 
 const apiRoot = fileURLToPath(new URL('..', import.meta.url));
 const selftest = process.argv.includes('--selftest');
+// The half that needs no database: a build and a read. It runs in check:all,
+// where booting cannot -- that has to pass on a checkout with no dev database.
+// The boot half runs in CI's probes job, which has one.
+const staticOnly = process.argv.includes('--static');
 
 // Its own port in the development block, so a probe and a running dev server
 // never take each other's.
@@ -94,6 +98,22 @@ if (guards !== 1) {
   process.exit(1);
 }
 
+console.log('  ok   dist/index.mjs holds one entrypoint guard');
+
+if (selftest) {
+  const planted = `${bundle}\nif (${ENTRY_GUARD}) {}\n`;
+  if (planted.split(ENTRY_GUARD).length - 1 !== 2) {
+    console.error('[selftest] FAILED: a second entrypoint guard was not countable');
+    process.exit(1);
+  }
+  console.log('[selftest] a second entrypoint guard in the bundle is countable');
+}
+
+if (staticOnly) {
+  console.log('check:bundle passed (static; the boot runs in CI)');
+  process.exit(0);
+}
+
 const result = await boot(ENTRY);
 if (!result.ok) {
   console.error(`check:bundle FAILED: the bundle did not serve -- ${result.reason}`);
@@ -118,13 +138,6 @@ if (selftest) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-
-  const planted = `${bundle}\nif (${ENTRY_GUARD}) {}\n`;
-  if (planted.split(ENTRY_GUARD).length - 1 !== 2) {
-    console.error('[selftest] FAILED: a second entrypoint guard was not countable');
-    process.exit(1);
-  }
-  console.log('[selftest] a second entrypoint guard in the bundle is countable');
 }
 
 console.log('check:bundle passed');
