@@ -6,6 +6,7 @@ import { readCanvaExport } from './canva/pages.ts';
 import { ZipError } from './canva/zip.ts';
 import { files } from './files.svelte.ts';
 import { newId } from './ids.ts';
+import { readUploadResponse } from './upload.ts';
 
 type DeckImport = components['schemas']['DeckImport'];
 type ImportRun = components['schemas']['ImportRun'];
@@ -372,14 +373,7 @@ class DeckImportStore {
       body: new Blob([(await page.bytes()) as BlobPart], { type: page.content_type }),
     });
 
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      throw new ApiError(
-        response.status,
-        body.error ?? `Page ${page.page_number} failed (${response.status})`,
-        body
-      );
-    }
+    await readUploadResponse(response, `Page ${page.page_number} failed (${response.status})`);
   }
 
   async #readBinding(deckId: string): Promise<DeckImport | null> {
