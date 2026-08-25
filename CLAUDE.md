@@ -464,13 +464,23 @@ pnpm install && pnpm setup:env   # once per checkout or worktree
 pnpm dev                         # api on :17310, web on :17300
 ```
 
+**A second branch starts with `scripts/new-worktree.sh <branch> [base-ref]`**,
+not with `git worktree add` by hand. It fetches before it branches, so the base
+is not one commit behind whatever the lockfile policy now requires, and it
+copies `apps/api/.env` and `.env.test` across — untracked, and every check fails
+without them for reasons that have nothing to do with the branch.
+
 Native Postgres 18 and Redis (`brew`), no Docker for development. `API_PROXY_TARGET`
 moves the Vite proxy, which matters as soon as a second branch is in flight and
 the main checkout already holds 17310.
 
+`pnpm setup:env` writes `DB_USER` as your login name on macOS. Homebrew's initdb
+names the superuser after you and creates no `postgres` role, which is what the
+checked-in example says because that is what everything else gives you.
+
 **Development ports are one block: web 17300, api 17310, preview 17320, the
-browser probes 17330-17332, and the bundle probe 17333.** Not 3001 and 5173, which every other project on
-the same laptop also defaults to — a sibling project's API answered here on 3001
+browser probes 17330-17332, and the bundle probe 17333.** Not 3001 and 5173,
+which every other project on the same laptop also defaults to — a sibling project's API answered here on 3001
 for a while, and because its `/health` looks exactly like this one's, the browser
 probes ran against it and failed fifteen seconds later inside a screen. The gaps
 are deliberate: `pnpm dev` lets Vite walk upward from 17300 when a second

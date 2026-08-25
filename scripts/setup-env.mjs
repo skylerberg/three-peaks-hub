@@ -4,12 +4,24 @@
 // same fact CI works around with a heredoc. Every fresh clone and every new
 // worktree hits it on the first `pnpm dev`, and one idempotent command beats a
 // README paragraph.
-import { copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const dirs = ['apps/api'];
+
+// Homebrew's initdb makes the superuser the login name and creates no
+// `postgres` role at all, so the example's value is the one thing in it that
+// cannot work on the Mac this is developed on: every checkout and every
+// worktree met `role "postgres" does not exist` and edited two files by hand.
+// The example still says `postgres`, because that is what a Linux distribution
+// or a container gives you, and the deploy reads none of this.
+function localize(contents) {
+  if (process.platform !== 'darwin') return contents;
+  return contents.replace(/^DB_USER=postgres$/gm, `DB_USER=${userInfo().username}`);
+}
 
 let copied = 0;
 for (const dir of dirs) {
@@ -19,7 +31,7 @@ for (const dir of dirs) {
     if (!name.endsWith('.example')) continue;
     const target = join(abs, name.slice(0, -'.example'.length));
     if (existsSync(target)) continue;
-    copyFileSync(join(abs, name), target);
+    writeFileSync(target, localize(readFileSync(join(abs, name), 'utf8')));
     console.log(`created ${dir}/${name.slice(0, -'.example'.length)}`);
     copied += 1;
   }
