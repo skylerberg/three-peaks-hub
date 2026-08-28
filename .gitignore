@@ -25,6 +25,11 @@ apps/web/test-results/
 scripts/tmp-*
 apps/*/scripts/tmp-*
 
+# Python writes a bytecode cache beside tools/blender the moment anything
+# imports a module there, the test runner included.
+__pycache__/
+*.py[cod]
+
 .terraform/
 *.tfstate
 *.tfstate.*

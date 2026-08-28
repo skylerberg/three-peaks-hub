@@ -14,6 +14,7 @@
     "check:upload": "node scripts/check-upload.mjs",
     "check:model3d": "node scripts/check-model3d.mjs",
     "check:print": "node scripts/check-print.mjs",
+    "check:scene": "node scripts/check-scene.mjs",
     "check:canva-import": "node scripts/check-canva-import.mjs",
     "playwright:install": "playwright install chromium webkit",
     "check:all": "pnpm run type-check && pnpm test && pnpm run check:a11y && pnpm run build"

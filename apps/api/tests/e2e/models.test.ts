@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_CARD_SETTINGS, DEFAULT_WOOD_SETTINGS } from '@three-peaks/shared';
+import {
+  DEFAULT_BOARD_SETTINGS,
+  DEFAULT_BOX_SETTINGS,
+  DEFAULT_CARD_SETTINGS,
+  DEFAULT_WOOD_SETTINGS,
+} from '@three-peaks/shared';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
 const PNG = Buffer.from([
@@ -82,6 +87,21 @@ describe('component model settings', () => {
     expect(read.settings).toEqual(DEFAULT_WOOD_SETTINGS);
   });
 
+  // The column is jsonb, so the four kinds share one storage shape and only the
+  // schema tells them apart. Round-tripped here because a kind that validates
+  // and then comes back reshaped would look correct at the validator.
+  it.each([
+    ['a box', DEFAULT_BOX_SETTINGS],
+    ['a board', DEFAULT_BOARD_SETTINGS],
+  ])('stores and returns %s unchanged', async (_label, settings) => {
+    const saved = await owner.api.put(`/api/models/${fileId}`, { settings });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).settings).toEqual(settings);
+
+    const read = await (await owner.api.get(`/api/models/${fileId}`)).json();
+    expect(read.settings).toEqual(settings);
+  });
+
   describe('access', () => {
     it('answers 404 to a caller who cannot see the image at all', async () => {
       expect((await stranger.api.get(`/api/models/${fileId}`)).status).toBe(404);
@@ -126,7 +146,7 @@ describe('component model settings', () => {
 
     // The discriminant is what decides which builder runs, so a wood field on a
     // card is a mistake worth reporting rather than one to silently drop.
-    it('refuses settings whose kind is not one of the two', async () => {
+    it('refuses settings whose kind names no builder', async () => {
       const res = await owner.api.put(`/api/models/${fileId}`, {
         settings: { ...DEFAULT_CARD_SETTINGS, kind: 'metal' },
       });

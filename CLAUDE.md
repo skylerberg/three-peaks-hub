@@ -12,6 +12,7 @@ packages/shared     generated API + realtime clients, and the constants both
                     sides must agree on
 infra/terraform     the load balancer, buckets, certificates, monitoring
 infra/k8s           raw manifests, {COMMITHASH} substituted by the deploy
+tools/blender       the importer that opens an exported scene bundle
 ```
 
 # Package manager
@@ -293,8 +294,8 @@ router library.
 # The 3D studio
 
 `/projects/:projectId/files/:fileId/3d` turns one uploaded image into one
-component — a card, or a wooden piece cut to the image's own silhouette — and
-exports it as a `.glb`.
+component and exports it as a `.glb`. There are four kinds: a card, a wooden
+piece cut to the image's own silhouette, a box, and a board.
 
 **All of it runs in the browser.** `apps/api` has no image or geometry
 dependency; it recognises two more content types and stores a settings blob.
@@ -321,6 +322,21 @@ only this screen pays for.
   raster back would throw away the exact edge.
 - Textures are generated from seeded noise, never `Math.random()`: the same
   settings have to produce the same file twice.
+- **A box is wrapped in one flat net**, not six per-face uploads: the row's own
+  source image is unfolded by `boxNetRegions`, which the geometry's UVs and the
+  guide the studio draws both read, so the diagram cannot disagree with what is
+  sampled. Its six faces are six materials over that one texture, differing only
+  in name — identical materials collapse into one glTF slot, and a face nobody
+  can select is a face nobody can retouch in Blender. The net is the printer's
+  cross, and nothing measures the image handed to it: a wrap drawn to other
+  proportions exports without complaint, with every face sampling the rectangle
+  next to the one it wanted.
+- **A board's panels are separate meshes**, named in reading order and placed by
+  their node translation, so the crease between two neighbours is the midpoint
+  of their two positions — which is the hinge somebody folds it about by hand.
+  The fold gap is cut out of the board rather than added to it.
+- The box is closed. An open one needs a wall thickness to line, which is a
+  setting it has not got, so there is no interior colour to offer either.
 
 Settings live in `component_model`, one row per source image, and the bounds the
 API enforces are named once in `packages/shared/src/models3d.ts` so no input can
@@ -488,6 +504,149 @@ way to a deck: the local and central extra fields are deliberately different
 lengths, and the one non-ASCII entry name is UTF-8 with the flag left clear.
 Then it imports the same export twice, and the second pass must leave every card
 on the version it already had.
+
+# The Blender scene
+
+`/projects/:projectId/scene` exports a ZIP — `assets/*.glb` and one `scene.json`
+— that `tools/blender/import_scene.py` turns into a lit, keyframed Blender file.
+What comes out is where the trailer shot starts, not where it finishes; the
+whole feature exists so the manual half is arranging, not rebuilding.
+
+The screen is a picker and stops there: tick decks and images, add library
+pieces, choose a shot template and a renderer, export. Every arrangement control
+it could grow — a layout canvas, a timeline — is one Blender already has and
+does better, and a tool built to hand work over should not spend its surface
+area competing with what it hands to.
+
+**Nothing here added a dependency.** The archive is written by
+`apps/web/src/lib/scene/zip.ts`, the writing half of the reader
+`apps/web/src/lib/canva/zip.ts` already had to be — and deliberately not the
+same module as it, because a container format is the whole of what the two
+features have in common. Everything else this screen needs is the studio's own
+geometry, reached the way the studio reaches it — `apps/web/src/lib/scene/render.ts`
+is the only module here that touches `three`, and only `await import()` reaches
+that, so ticking a component costs nothing until Export is pressed.
+
+**Nothing about a scene is stored.** No table, no route, no migration, and
+nothing in `apps/api` that knows the word: the exported bundle is the record,
+and it is a pure function of what was ticked, the `component_model` settings
+each of those already has, and one shot template. Two exports of one selection
+differ in `generated_at` and in nothing else, which is what lets a test compare
+two archives byte for byte.
+
+Three languages hold three separate jobs, and keeping them separate is the
+design:
+
+- **`packages/shared/src/scenes.ts` owns the document's shape and its bounds**,
+  the way `models3d.ts` owns the studio's, so the exporter cannot write a shot
+  the importer would refuse. It owns no shot maths whatsoever.
+- **`tools/blender/shots.py` owns the maths**, and imports no `bpy`, so a shot
+  is iterated with one file and one `python3` command. `scene.py`, `lighting.py`
+  and `materials.py` are the only modules that touch Blender, and between them
+  they work nothing out.
+- **`apps/web/src/lib/scene/` owns the selection**: which `.glb` files there
+  are, what stands where, which template ran. It computes no keyframes either.
+
+`scripts/check-scene-contract.mjs` is what pins the first two together. Both
+ends carry their own copy of every bound, because a browser bundle and Blender's
+Python cannot share a file, and it reads both and fails on a disagreement — the
+alternative being a bundle the exporter believed in and Blender refuses, which
+surfaces two programs away from the edit that caused it.
+
+**Sparse keys, and Blender interpolates.** Two or three keyframes a move, each
+one a handle somebody can take hold of in the dope sheet. Bake a channel per
+frame and it is no longer editable by a person at all, which would cost this
+feature the half of the work it exists to make possible. `shots.py` has the
+rule, and names the one place it is allowed to sample instead.
+
+**One `.glb` per distinct component, instanced for every repeat.** A copy count,
+an image used twice in a deck, a token picked in two places — all of them name
+one file, and in Blender one mesh datablock. Two cards cut to one size with
+different artwork cannot share a file, because an instance names a path and
+nothing narrower.
+
+**A library piece has no file at all.** A die, a meeple, a cube, a disc and a
+cylinder are built by `pieces.py` from a name, a size and a colour, so they cost
+the bundle no bytes and stay editable as geometry rather than arriving as a
+mesh.
+
+**A template frames its own camera**, through `frameCamera` in
+`apps/web/src/lib/scene/layout.ts`, because only the template knows whether its
+shots are about to move it: an orbit has to circle at the distance the still was
+framed from, and a parade sweeps a line several times wider than the table it
+came from. Two things that function settles are worth knowing before touching
+it. It solves the distance against **both** halves of the frame — Blender fits
+its sensor to the longer side, and a component lying on a table is deepest along
+the axis a 16:9 render has least of, so fitting the horizontal alone crops every
+card. And it chooses the f-number: framing pins the distance over the focal
+length, which leaves the aperture as the only term in the depth of field, and
+the stop a portrait wants leaves two millimetres of a 63 mm card sharp.
+
+**Fanning, dealing and dropping are aimed at the decks.** All three collapse
+what they are aimed at onto one small arc or grid — a hand of cards for a deck,
+and a heap for a box and a board standing next to each other. `planScene` gives
+every group its kind alongside its own patch of table, so a template can pick
+the decks and size the arc to what it found.
+
+**The document counts in millimetres and degrees; Blender counts in metres and
+radians.** `scenedoc.MM` is the entire conversion, and like the studio's it is
+applied as each value is written and never afterwards as a scale on a parent — a
+factor sitting above an object is a second answer to how big that object is,
+free to disagree with the numbers in the file it came from.
+
+Two conventions the two ends have to agree on, and both are one constant each:
+
+- **`position_mm` is where the asset's own origin goes**, and that origin is not
+  the same point on both kinds. A `.glb` is built about its middle, so resting
+  one on the table is half its own height up; a library piece is built standing
+  on its origin and needs no lift. Only the end that builds the geometry knows
+  which, which is why the arithmetic is on that side.
+- **A `.glb` arrives standing up.** Every component is built in three's XY plane
+  and extruded along +Z, and Blender's glTF importer bakes the Y-up to Z-up
+  conversion into the vertex data — so a card lands on edge facing the camera,
+  and `FLAT_ROTATION_DEG` in `layout.ts` is the quarter turn that lays it down
+  with its top edge away. A box does not take it, and `restRotationDeg` is where
+  that is decided: the axis it is extruded along is the one the printer's cross
+  is folded about, so it exports standing on its base with its lid to the front.
+
+**A mesh's name crosses the boundary as data.** A folded board exports one mesh
+per panel, numbered in reading order and zero-padded to three digits by
+`apps/web/src/lib/model3d/geometry/board.ts`, and the importer carries those
+names onto the objects it builds: once the board is in Blender the numbering is
+the only thing left that says which two panels a crease runs between. Nothing
+downstream folds it — a person does, and this is what they take hold of.
+
+**The bpy API is discovered by running Blender, never recalled.** The importer
+targets 5.2 LTS, and three of the things a 4.x tutorial will confidently tell
+you raise instead of degrading: keys live in a slotted action now, so
+`Action.fcurves` is gone and a curve is reached through a layer's strip and the
+channelbag of the slot the object is bound to; `BLENDER_EEVEE_NEXT` has stopped
+being an engine name; and the Principled BSDF's Clearcoat, Specular, Subsurface
+and Transmission sockets were all renamed. Introspecting is not the answer
+either — the engine enum lists a single value on a build where `CYCLES` assigns
+perfectly well — so a question here is settled with `--background --python-expr`
+against the real binary, and the answer is written down beside the line that
+depends on it.
+
+`check:scene` is the only thing that reads a bundle whole. It exports one
+through the real screen, follows the archive's own central directory to unpack
+it, and opens every `.glb` inside — each unit test of that path hands the
+exporter a stub renderer, because jsdom has neither a canvas nor a WebGL
+context. Two claims are settled there and nowhere else: that a card asked for
+six times is one file in the archive, and that each file spans the millimetres
+its own settings asked for.
+
+`tools/blender/smoke.sh` is the only thing that runs both halves. It builds a
+fixture through Blender, renders a frame, and decodes the PNG rather than
+trusting that one exists — a render of an unlit scene is a file on disk and an
+exit code of zero. Its fixture is written in the conventions above deliberately:
+a fixture that lays its own cards out some other way would keep passing after
+the ones the exporter writes had drifted.
+
+It needs Blender, so it is in no `check:*` script and no workflow — `check:all`
+has to pass on a checkout with nothing else installed. `pnpm run blender:smoke`
+is the name it answers to; run it by hand after anything under `tools/blender/`.
+The half that is in the gate is `check:scene-shots`, which needs only `python3`.
 
 # Running things
 

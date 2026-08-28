@@ -5,4 +5,5 @@ export * from './imports.ts';
 export * from './models3d.ts';
 export * from './print.ts';
 export * from './roles.ts';
+export * from './scenes.ts';
 export * from './uploads.ts';

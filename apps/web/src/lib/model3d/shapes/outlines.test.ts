@@ -61,9 +61,14 @@ describe('ringsToOutlines', () => {
 
 describe('normalizeOutlines', () => {
   const outlines = [{ contour: square(100, 200, 50), holes: [] }];
+  // A 400 x 400 image with the silhouette sitting well inside it.
+  const frame = { minX: 0, minY: 0, maxX: 400, maxY: 400 };
 
   it('centres on the origin', () => {
-    const [normalized] = normalizeOutlines(outlines, { longestSideMm: 20, flipY: false });
+    const [normalized] = normalizeOutlines(outlines, frame, {
+      longestSideMm: 20,
+      flipY: false,
+    }).outlines;
     const bounds = boundsOf([normalized.contour]);
     expect(bounds.minX + bounds.maxX).toBeCloseTo(0, 10);
     expect(bounds.minY + bounds.maxY).toBeCloseTo(0, 10);
@@ -71,20 +76,44 @@ describe('normalizeOutlines', () => {
 
   // Millimetres in, metres out: glTF's unit, and the only conversion anywhere.
   it('scales the longer side to the requested size, in metres', () => {
-    const [normalized] = normalizeOutlines(outlines, { longestSideMm: 20, flipY: false });
+    const [normalized] = normalizeOutlines(outlines, frame, {
+      longestSideMm: 20,
+      flipY: false,
+    }).outlines;
     const bounds = boundsOf([normalized.contour]);
     expect(bounds.maxX - bounds.minX).toBeCloseTo(0.02, 10);
   });
 
   it('flips y, because the tracer and the parser both work downwards', () => {
-    const [flipped] = normalizeOutlines(outlines, { longestSideMm: 20, flipY: true });
-    const [upright] = normalizeOutlines(outlines, { longestSideMm: 20, flipY: false });
+    const [flipped] = normalizeOutlines(outlines, frame, {
+      longestSideMm: 20,
+      flipY: true,
+    }).outlines;
+    const [upright] = normalizeOutlines(outlines, frame, {
+      longestSideMm: 20,
+      flipY: false,
+    }).outlines;
     expect(flipped.contour[0].y).toBeCloseTo(-upright.contour[0].y, 10);
+  });
+
+  // The artwork is printed across the image, not across the silhouette: a
+  // cutout with a transparent margin is what makes the two different, and
+  // sampling the second is what puts the image's own border round the piece.
+  it('carries the artwork frame through the same move, larger than the outline', () => {
+    const placed = normalizeOutlines(outlines, frame, { longestSideMm: 20, flipY: true });
+    const bounds = boundsOf([placed.outlines[0].contour]);
+
+    expect(placed.frame.maxX - placed.frame.minX).toBeCloseTo(0.02 * (400 / 50), 10);
+    expect(placed.frame.minX).toBeLessThan(bounds.minX);
+    expect(placed.frame.maxY).toBeGreaterThan(bounds.maxY);
+    expect(placed.frame.minY).toBeLessThan(placed.frame.maxY);
   });
 
   it('hands back nothing for an outline with no area', () => {
     const degenerate = [{ contour: [{ x: 1, y: 1 }], holes: [] }];
-    expect(normalizeOutlines(degenerate, { longestSideMm: 20, flipY: true })).toEqual([]);
+    expect(
+      normalizeOutlines(degenerate, frame, { longestSideMm: 20, flipY: true }).outlines
+    ).toEqual([]);
   });
 });
 

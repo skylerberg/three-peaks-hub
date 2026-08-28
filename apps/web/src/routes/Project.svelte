@@ -66,6 +66,12 @@
         </a>
         <a
           class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{project.id}/scene"
+        >
+          Blender scene
+        </a>
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
           href="/projects/{project.id}/members"
         >
           Members

@@ -38,6 +38,13 @@ jobs:
             || { echo '::error::The generated client is stale. Run `pnpm run generate` and commit the result.'; exit 1; }
 
       - run: pnpm run check:comments
+      # The shot maths and the library geometry, which import no bpy on purpose,
+      # under the runner's own python3 with no Blender to install. The Blender
+      # half is tools/blender/smoke.sh, run by hand.
+      - run: pnpm run check:scene-shots
+      # The document's bounds are written once for the exporter and once for the
+      # importer, in two languages that cannot share a file. This reads both.
+      - run: pnpm run check:scene-contract
       # Fails if any check:* script is run by neither check:all nor a workflow.
       # This job is a hand-copy of check:all, so it is exactly the list that
       # drifts.
@@ -219,6 +226,10 @@ jobs:
       - run: pnpm run check:upload
       - run: pnpm run check:model3d
       - run: pnpm run check:print
+      # Unpacks the ZIP the export screen builds and reads the .glb files out of
+      # it. Every unit test of that path stubs the renderer out, because jsdom
+      # has neither a canvas nor WebGL.
+      - run: pnpm run check:scene
       - run: pnpm run check:canva-import
       - run: pnpm run check:a11y
 

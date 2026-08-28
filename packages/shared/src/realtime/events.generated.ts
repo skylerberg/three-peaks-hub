@@ -370,6 +370,27 @@ export interface components {
               trace_source: 'alpha' | 'luminance';
               trace_threshold: number;
               wood_color: string;
+            }
+          | {
+              corner_bevel_mm: number;
+              depth_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'box';
+              seed: number;
+              width_mm: number;
+            }
+          | {
+              edge_color: string;
+              /** @enum {unknown} */
+              fold: 'bifold' | 'none' | 'quadfold';
+              fold_gap_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'board';
+              seed: number;
+              thickness_mm: number;
+              width_mm: number;
             };
         source_file_id: string;
         updated_at: string;

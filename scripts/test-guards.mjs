@@ -933,4 +933,115 @@ export const guards = [
     testName: 'does not let a response older than what was applied overwrite it',
     runner: 'web',
   },
+  {
+    // The importer recomputes the range the same way and would refuse a
+    // document whose shots run past it, so a hand-supplied range is a bundle
+    // Blender never opens.
+    name: 'a scene ends on the last frame its shots reach',
+    package: 'api',
+    file: 'packages/shared/src/scenes.ts',
+    root: true,
+    find: '      frame_range: sceneFrameRange(draft.shots, draft.instances, render.fps),',
+    replace: '      frame_range: [1, 1],',
+    tests: ['src/scenes.test.ts'],
+    testName: 'stamps the format and derives the frame range from the shots',
+    runner: 'shared',
+  },
+  {
+    // Deduplicating on the settings alone is the tempting version, and it hands
+    // fifty-two cards one file: every card in a deck is cut to one size.
+    name: 'two cards printed with different artwork are two files',
+    package: 'web',
+    file: 'src/lib/scene/assets.ts',
+    find: '  return stableKey([settings, front.file_id, back?.file_id ?? null]);',
+    replace: '  return stableKey([settings]);',
+    tests: ['src/lib/scene/assets.test.ts'],
+    testName: 'separates two cards cut to one size but printed with different artwork',
+    runner: 'web',
+  },
+  {
+    // Exporting a deck is a minute of geometry, and a document the importer
+    // refuses is worth hearing about at the start of that minute.
+    name: 'a document the importer would refuse is refused before a file is built',
+    package: 'web',
+    file: 'src/lib/scene/bundle.ts',
+    find: '  if (issues.length > 0) throw new SceneExportError(describeIssues(issues), issues);',
+    replace: '  void issues;',
+    tests: ['src/lib/scene/bundle.test.ts'],
+    testName: 'refuses a document the importer would refuse, before it builds a single file',
+    runner: 'web',
+  },
+  {
+    // The quarter turn the glTF Y-up conversion makes necessary. Without it
+    // every card in the scene stands on its edge and no shot puts it down.
+    name: 'an imported component is laid flat, and a library piece is not',
+    package: 'web',
+    file: 'src/lib/scene/layout.ts',
+    find: 'const FLAT_ROTATION_DEG: Vec3 = [-90, 0, 0];',
+    replace: 'const FLAT_ROTATION_DEG: Vec3 = [0, 0, 0];',
+    tests: ['src/lib/scene/assets.test.ts'],
+    testName: 'lays an imported component flat, because the glTF conversion stands it up',
+    runner: 'web',
+  },
+  {
+    // The whole point of the boundary: the document is millimetres and Blender
+    // counts in metres, so every value crosses scenedoc.MM exactly once on the
+    // way out. The two location channels of a deal are written side by side and
+    // converted per value, which is what makes dropping it on one of them the
+    // plausible slip rather than a nonsense.
+    name: 'a dealt position crosses the millimetre boundary exactly once',
+    package: 'blender',
+    file: 'shots.py',
+    find:
+      '            _pair(LOCATION, 0, start_s, rest[0] * MM, end_s, slot[0] * MM, ' +
+      "('QUAD', 'EASE_OUT')),",
+    replace:
+      "            _pair(LOCATION, 0, start_s, rest[0], end_s, slot[0], ('QUAD', 'EASE_OUT')),",
+    tests: ['tests/test_shots.py'],
+    testName: 'test_a_card_sized_position_arrives_in_metres',
+    runner: 'python',
+  },
+  {
+    // Six faces over one wrap, so a region that overlaps its neighbour is two
+    // faces sampling one piece of artwork -- and the box still builds, still
+    // textures and still exports, wearing the front panel on its back.
+    name: 'no two faces of a box net share a piece of the wrap',
+    package: 'api',
+    file: 'packages/shared/src/models3d.ts',
+    root: true,
+    find: '    back: rect(2 * d + w, d, 2 * d + 2 * w, d + h),',
+    replace: '    back: rect(d, d, d + w, d + h),',
+    tests: ['src/models3d.test.ts'],
+    testName: 'never overlaps two faces',
+    runner: 'shared',
+  },
+  {
+    // The other direction from the assetKey guard, and the expensive one: with
+    // the registry handing out a new id per selection, a deck of fifty-two
+    // cards builds fifty-two geometries and the bundle carries every one.
+    name: 'one component is built once however many times it was picked',
+    package: 'web',
+    file: 'src/lib/scene/assets.ts',
+    find:
+      '    const key = assetKey(component.settings, component.front, component.back);\n' +
+      '    const existing = this.#ids.get(key);\n    if (existing) return existing;',
+    replace: '    const key = assetKey(component.settings, component.front, component.back);',
+    tests: ['src/lib/scene/assets.test.ts'],
+    testName: 'collapses a deck onto one asset per distinct card and one instance per copy',
+    runner: 'web',
+  },
+  {
+    // The one field in the central directory a reader cannot recompute. Every
+    // other number in the record repeats one the local header already carries,
+    // so a wrong offset is the single way to write an archive that looks
+    // complete, unzips without complaint, and hands back the wrong bytes.
+    name: 'the central directory points at the local header it names',
+    package: 'web',
+    file: 'src/lib/scene/zip.ts',
+    find: '    writer.u32(entry.localOffset);',
+    replace: '    writer.u32(0);',
+    tests: ['src/lib/scene/zip.test.ts'],
+    testName: 'keeps every offset straight across an archive of many entries',
+    runner: 'web',
+  },
 ];

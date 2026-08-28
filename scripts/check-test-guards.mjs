@@ -6,6 +6,7 @@
 //   CAUGHT       the tests failed -- the guard is doing its job
 //   STILL-PASSED the bug was applied and nothing noticed; the guard is dead
 //   NEVER-APPLIED the pattern never matched a module the tests loaded
+//   NO-TESTS-RAN the filter selected nothing, so nothing could have failed
 //   RUN-FAILED   the child died before it measured anything
 //
 // Usage:
@@ -16,10 +17,10 @@
 // A substring is how you write one: authoring a guard means running it until it
 // reports CAUGHT, and the whole set takes minutes and a database. Note the
 // missing `--` -- pnpm forwards it into argv, where it would read as the filter.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { guards } from './test-guards.mjs';
 
@@ -38,6 +39,11 @@ const RUNNERS = {
   api: { cwd: 'apps/api', env: ['--env-file=.env.test'] },
   web: { cwd: 'apps/web', env: [] },
   shared: { cwd: 'packages/shared', env: [] },
+  // The importer's own suite, under plain python3. There is no Vite here to
+  // transform a module on its way in, so the edit is made in a throwaway copy
+  // of the tree instead -- the same promise kept a different way, because what
+  // matters is that the working tree never holds the bug.
+  python: { cwd: 'tools/blender', python: true },
 };
 
 function resolve(guard) {
@@ -69,7 +75,57 @@ function verifyAnchors() {
   return problems;
 }
 
+// The python runner's half of runGuard. `tests` names one file rather than a
+// list, because unittest discovers by a single filename pattern -- and a guard
+// pointed at a whole suite would spend a minute proving one assertion.
+function runPythonGuard(guard) {
+  const { runner } = resolve(guard);
+  const work = mkdtempSync(join(tmpdir(), 'tph-guard-py-'));
+
+  try {
+    const tree = join(work, 'blender');
+    cpSync(join(root, runner.cwd), tree, {
+      recursive: true,
+      filter: (path) => !path.includes('__pycache__'),
+    });
+
+    const target = join(tree, guard.file);
+    const source = readFileSync(target, 'utf8');
+    if (!source.includes(guard.find)) {
+      return { guard, status: 'NEVER-APPLIED', output: `${guard.file} does not hold the pattern` };
+    }
+    writeFileSync(target, source.replaceAll(guard.find, guard.replace));
+
+    const child = spawnSync(
+      'python3',
+      [
+        '-m',
+        'unittest',
+        'discover',
+        '-s',
+        join(tree, 'tests'),
+        '-p',
+        basename(guard.tests[0]),
+        '-k',
+        guard.testName,
+      ],
+      { cwd: root, encoding: 'utf8', timeout: TIMEOUT_MS }
+    );
+
+    const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
+    // Nothing to fail is not the same as nothing failing, and unittest reports
+    // both with exit 0.
+    if (/^Ran 0 tests/m.test(output)) return { guard, status: 'NO-TESTS-RAN', output };
+    if (child.status !== 0) return { guard, status: 'CAUGHT', output };
+    return { guard, status: 'STILL-PASSED', output };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 function runGuard(guard) {
+  if (RUNNERS[guard.runner ?? 'api'].python) return Promise.resolve(runPythonGuard(guard));
+
   return new Promise((resolve_) => {
     const { runner, cwd, filePath } = resolve(guard);
     const markerDir = mkdtempSync(join(tmpdir(), 'tph-guard-'));

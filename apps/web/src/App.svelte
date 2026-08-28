@@ -19,6 +19,7 @@
   import Project from './routes/Project.svelte';
   import Projects from './routes/Projects.svelte';
   import ResetPassword from './routes/ResetPassword.svelte';
+  import SceneExport from './routes/SceneExport.svelte';
   import Signup from './routes/Signup.svelte';
   import { deckHistory } from './lib/deckHistory.svelte.ts';
   import { deckImports } from './lib/deckImports.svelte.ts';
@@ -128,6 +129,8 @@
       />
     {:else if route.name === 'print'}
       <Print projectId={route.params.projectId} deckId={route.params.deckId} />
+    {:else if route.name === 'scene'}
+      <SceneExport projectId={route.params.projectId} />
     {:else if route.name === 'model'}
       <Model3d projectId={route.params.projectId} fileId={route.params.fileId} />
     {:else if route.name === 'versions'}

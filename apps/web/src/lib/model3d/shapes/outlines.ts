@@ -84,33 +84,59 @@ export interface NormalizeOptions {
   flipY: boolean;
 }
 
+export interface Normalized {
+  outlines: Outline[];
+  // The producer's own frame, carried through the same move.
+  //
+  // It is the rectangle the artwork covers, and it is deliberately not the
+  // silhouette's own bounding box: a cutout with any transparent margin round
+  // it would then print zoomed, and every point where the silhouette reaches
+  // its own bounds would sample the very edge of the image -- which on a cutout
+  // is the transparent border, and comes back black through a canvas whatever
+  // colour it was drawn in.
+  frame: Bounds;
+}
+
 // Centres on the origin and scales so the longer side measures what was asked
 // for, in metres -- glTF's unit, and the only conversion in the pipeline.
 export function normalizeOutlines(
   outlines: readonly Outline[],
+  frame: Bounds,
   options: NormalizeOptions
-): Outline[] {
+): Normalized {
   const bounds = boundsOf(outlines.flatMap((outline) => [outline.contour, ...outline.holes]));
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
   const longest = Math.max(width, height);
-  if (!Number.isFinite(longest) || longest <= 0) return [];
+  if (!Number.isFinite(longest) || longest <= 0) {
+    return { outlines: [], frame: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
+  }
 
   const scale = options.longestSideMm / 1000 / longest;
   const centreX = (bounds.minX + bounds.maxX) / 2;
   const centreY = (bounds.minY + bounds.maxY) / 2;
   const ySign = options.flipY ? -1 : 1;
 
+  const placeX = (x: number) => (x - centreX) * scale;
+  const placeY = (y: number) => (y - centreY) * scale * ySign;
   const move = (ring: Ring): Ring =>
-    ring.map((point) => ({
-      x: (point.x - centreX) * scale,
-      y: (point.y - centreY) * scale * ySign,
-    }));
+    ring.map((point) => ({ x: placeX(point.x), y: placeY(point.y) }));
 
-  return outlines.map((outline) => ({
-    contour: move(outline.contour),
-    holes: outline.holes.map(move),
-  }));
+  const top = placeY(frame.minY);
+  const bottom = placeY(frame.maxY);
+
+  return {
+    outlines: outlines.map((outline) => ({
+      contour: move(outline.contour),
+      holes: outline.holes.map(move),
+    })),
+    frame: {
+      minX: placeX(frame.minX),
+      maxX: placeX(frame.maxX),
+      minY: Math.min(top, bottom),
+      maxY: Math.max(top, bottom),
+    },
+  };
 }
 
 export function outlinesToShapes(outlines: readonly Outline[]): Shape[] {
