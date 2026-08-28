@@ -1,12 +1,21 @@
 <script lang="ts">
-  import { MODEL_SOURCE_TYPES, isModelSource, type ModelSettings } from '@three-peaks/shared';
+  import {
+    MODEL_KINDS,
+    MODEL_SOURCE_TYPES,
+    isModelSource,
+    type ModelKind,
+    type ModelSettings,
+  } from '@three-peaks/shared';
   import type { components } from '@three-peaks/shared/api';
+  import BoardSettings from '../components/model3d/BoardSettings.svelte';
+  import BoxSettings from '../components/model3d/BoxSettings.svelte';
   import CardSettings from '../components/model3d/CardSettings.svelte';
   import ModelViewer from '../components/model3d/ModelViewer.svelte';
   import WoodSettings from '../components/model3d/WoodSettings.svelte';
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
+  import { saveBlob } from '../lib/download.ts';
   import { models } from '../lib/model3d.svelte.ts';
   import type { BuiltModel, SourceImage } from '../lib/model3d/index.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
@@ -22,6 +31,13 @@
   let { projectId, fileId }: Props = $props();
 
   type File = components['schemas']['File'];
+
+  const KIND_LABELS: Record<ModelKind, string> = {
+    card: 'Card',
+    wood: 'Wooden component',
+    box: 'Box',
+    board: 'Board',
+  };
 
   let project = $state<components['schemas']['Project'] | null>(null);
   let error = $state<string | null>(null);
@@ -183,12 +199,7 @@
 
   function download() {
     void withGlb((bytes, filename) => {
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' }));
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      saveBlob(new Blob([bytes], { type: 'model/gltf-binary' }), filename);
     });
   }
 
@@ -263,41 +274,36 @@
       <div class="flex flex-col gap-4 rounded-lg border border-edge bg-surface p-4">
         <fieldset class="flex flex-col gap-2">
           <legend class="text-sm font-medium">Component type</legend>
-          <div class="flex gap-2">
-            <Button
-              variant={settings.kind === 'card' ? 'primary' : 'secondary'}
-              disabled={!canEdit}
-              aria-pressed={settings.kind === 'card'}
-              onclick={() => {
-                models.setKind('card');
-                models.scheduleSave();
-              }}
-            >
-              Card
-            </Button>
-            <Button
-              variant={settings.kind === 'wood' ? 'primary' : 'secondary'}
-              disabled={!canEdit}
-              aria-pressed={settings.kind === 'wood'}
-              onclick={() => {
-                models.setKind('wood');
-                models.scheduleSave();
-              }}
-            >
-              Wooden component
-            </Button>
+          <div class="flex flex-wrap gap-2">
+            {#each MODEL_KINDS as kind (kind)}
+              <Button
+                variant={settings.kind === kind ? 'primary' : 'secondary'}
+                disabled={!canEdit}
+                aria-pressed={settings.kind === kind}
+                onclick={() => {
+                  models.setKind(kind);
+                  models.scheduleSave();
+                }}
+              >
+                {KIND_LABELS[kind]}
+              </Button>
+            {/each}
           </div>
         </fieldset>
 
         {#if settings.kind === 'card'}
           <CardSettings {settings} {backChoices} disabled={!canEdit} onchange={change} />
-        {:else}
+        {:else if settings.kind === 'wood'}
           <WoodSettings
             {settings}
             vector={file.content_type === 'image/svg+xml'}
             disabled={!canEdit}
             onchange={change}
           />
+        {:else if settings.kind === 'box'}
+          <BoxSettings {settings} disabled={!canEdit} onchange={change} />
+        {:else}
+          <BoardSettings {settings} disabled={!canEdit} onchange={change} />
         {/if}
       </div>
     </div>

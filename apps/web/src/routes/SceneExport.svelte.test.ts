@@ -1,0 +1,213 @@
+import { fetchMock, jsonResponse } from '../api/testUtils.ts';
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it } from 'vitest';
+import SceneExport from './SceneExport.svelte';
+import { decks } from '../lib/decks.svelte.ts';
+import { toasts } from '../lib/toasts.svelte.ts';
+
+const PROJECT_ID = '2f1c9e5a-8b3d-4f1e-9c2a-7d6b5e4f3a21';
+const FOLDER_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+const STAMP = '2026-01-01T00:00:00.000Z';
+
+function file(id: string, filename: string, deleted: string | null = null) {
+  return {
+    byte_size: 10,
+    content_type: 'image/png',
+    created_at: STAMP,
+    deleted_at: deleted,
+    filename,
+    folder_id: null,
+    id,
+    image_height: 400,
+    image_width: 300,
+    name_locked: false,
+    project_id: PROJECT_ID,
+    updated_at: STAMP,
+    uploaded_by: 'someone',
+  };
+}
+
+const DECK = {
+  back_file_id: null,
+  card_count: 2,
+  card_height_mm: 88,
+  card_width_mm: 63,
+  created_at: STAMP,
+  created_by: 'someone',
+  id: '3c7f1b2e-9a4d-4c6b-8e1f-2a3b4c5d6e7f',
+  name: 'Villagers',
+  project_id: PROJECT_ID,
+  total_copies: 5,
+  updated_at: STAMP,
+};
+
+const BAKER = file('11111111-1111-4111-8111-111111111111', 'baker.png');
+const SMITH = file('22222222-2222-4222-8222-222222222222', 'smith.png');
+const GONE = file('33333333-3333-4333-8333-333333333333', 'gone.png', STAMP);
+
+const CARDS = [
+  { file: BAKER, file_id: BAKER.id, position: 0, quantity: 3 },
+  { file: SMITH, file_id: SMITH.id, position: 1, quantity: 2 },
+  { file: GONE, file_id: GONE.id, position: 2, quantity: 4 },
+];
+
+const FOLDER = {
+  created_at: STAMP,
+  id: FOLDER_ID,
+  name: 'Tokens',
+  parent_id: null,
+  project_id: PROJECT_ID,
+  updated_at: STAMP,
+};
+
+function listing(folder: typeof FOLDER | null, rows: ReturnType<typeof file>[]) {
+  return {
+    breadcrumb: folder ? [folder] : [],
+    files: rows,
+    folder,
+    folders: folder ? [] : [FOLDER],
+    project_id: PROJECT_ID,
+    storage_quota_bytes: 1000,
+    storage_used_bytes: 10,
+  };
+}
+
+function serve(): void {
+  fetchMock.mockImplementation(async (input) => {
+    const url = new URL(typeof input === 'string' ? input : (input as Request).url);
+    if (url.pathname === `/api/projects/${PROJECT_ID}`) {
+      return jsonResponse(200, {
+        id: PROJECT_ID,
+        name: 'Colori',
+        description: null,
+        role: 'editor',
+        created_at: STAMP,
+        updated_at: STAMP,
+      });
+    }
+    if (url.pathname === '/api/decks') return jsonResponse(200, { decks: [DECK] });
+    if (url.pathname === `/api/decks/${DECK.id}`) {
+      return jsonResponse(200, { deck: DECK, cards: CARDS });
+    }
+    if (url.pathname === '/api/files/directory') {
+      return url.searchParams.get('folder_id') === FOLDER_ID
+        ? jsonResponse(
+            200,
+            listing(FOLDER, [file('44444444-4444-4444-8444-444444444444', 'token.png')])
+          )
+        : jsonResponse(
+            200,
+            listing(null, [file('55555555-5555-4555-8555-555555555555', 'board.png')])
+          );
+    }
+    if (url.pathname.startsWith('/api/models/')) {
+      return jsonResponse(500, { error: 'Settings are unreadable' });
+    }
+    return jsonResponse(404, { error: `unrouted ${url.pathname}` });
+  });
+}
+
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 20; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function readout(): string {
+  const text = screen.getByText(/on the table/, { selector: 'p' }).textContent ?? '';
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function asked(prefix: string): string[] {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === 'string' ? input : (input as Request).url).pathname)
+    .filter((path) => path.startsWith(prefix));
+}
+
+describe('Scene export screen', () => {
+  beforeEach(() => {
+    decks.reset();
+    toasts.clear();
+    fetchMock.mockReset();
+    serve();
+  });
+
+  it('has nothing to export until something is picked', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    expect(readout()).toMatch(/0 pieces on the table/);
+    expect(screen.getByRole('button', { name: 'Export bundle' })).toBeDisabled();
+  });
+
+  // A deck goes on the table as the stack it really is, and a card whose
+  // artwork is in the bin has no bytes to build from.
+  it('counts a deck by its copies, skipping a card with a deleted image', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    await fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    await settle();
+
+    expect(readout()).toMatch(/5 pieces on the table/);
+    expect(screen.getByRole('button', { name: 'Export bundle' })).toBeEnabled();
+  });
+
+  // The picker walks folders, so the listing a file was ticked in is gone by
+  // the time anyone presses Export.
+  it('keeps a file ticked after walking into another folder and back', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'board.png' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Tokens' }));
+    await settle();
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'token.png' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+    await settle();
+
+    expect(screen.getByRole('checkbox', { name: 'board.png' })).toBeChecked();
+    expect(readout()).toMatch(/2 pieces on the table/);
+  });
+
+  it('offers the templates the exporter itself knows about', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    const shot = screen.getByRole('combobox', { name: 'Shot' });
+    expect([...shot.querySelectorAll('option')].length).toBeGreaterThan(1);
+    expect(shot).toHaveValue('turntable');
+
+    await fireEvent.change(shot, { target: { value: 'orbit' } });
+    await settle();
+
+    expect(screen.getByText(/camera circles the table/)).toBeInTheDocument();
+  });
+
+  it('adds a library piece at its own default size', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Piece' }), {
+      target: { value: 'meeple' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add piece' }));
+    await settle();
+
+    expect(readout()).toMatch(/1 piece on the table/);
+    expect(screen.getByRole('spinbutton', { name: 'Meeple size in millimetres' })).toHaveValue(16);
+  });
+
+  // Every component is built from the dial-in the studio already holds, and the
+  // only place those are read is here.
+  it('reads each chosen image’s settings, and none for a card in the bin', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
+    await settle();
+
+    await fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Export bundle' }));
+    await settle();
+
+    expect(asked('/api/models/')).toEqual([`/api/models/${BAKER.id}`, `/api/models/${SMITH.id}`]);
+    expect(toasts.toasts[0].message).toBe('Settings are unreadable');
+  });
+});

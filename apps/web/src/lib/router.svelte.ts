@@ -14,6 +14,7 @@ export type Route =
   | { name: 'deck-run'; params: { projectId: string; deckId: string; runId: string } }
   | { name: 'deck-as-of'; params: { projectId: string; deckId: string; runId: string } }
   | { name: 'print'; params: { projectId: string; deckId: string | null } }
+  | { name: 'scene'; params: { projectId: string } }
   | { name: 'model'; params: { projectId: string; fileId: string } }
   | { name: 'versions'; params: { projectId: string; fileId: string } }
   | { name: 'account' }
@@ -91,6 +92,9 @@ export function matchRoute(path: string, search = ''): Route {
       params: { projectId: print[1], deckId: deckId && deckId.length > 0 ? deckId : null },
     };
   }
+
+  const scene = new RegExp(`^/projects/(${UUID})/scene$`).exec(clean);
+  if (scene) return { name: 'scene', params: { projectId: scene[1] } };
 
   const model = new RegExp(`^/projects/(${UUID})/files/(${UUID})/3d$`).exec(clean);
   if (model) return { name: 'model', params: { projectId: model[1], fileId: model[2] } };

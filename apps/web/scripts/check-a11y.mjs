@@ -48,6 +48,7 @@ const SCREENS = [
   { name: 'deck-run', authed: true, reach: reachDeckRun },
   { name: 'deck-as-of', authed: true, reach: reachDeckAsOf },
   { name: 'print', authed: true, reach: reachPrint },
+  { name: 'scene', authed: true, reach: reachScene },
 ];
 
 const SCHEMES = ['light', 'dark'];
@@ -233,6 +234,14 @@ async function reachPrint(browser, base, scheme) {
   // Every deck has to be read before the options render, and axe reading the
   // spinner instead would report a screen with nothing on it as clean.
   await browser.page.waitForSelector('button:has-text("Generate PDF")', { timeout: 30_000 });
+}
+
+async function reachScene(browser, base, scheme) {
+  await freshProject(browser, base, `scene-${scheme}`);
+  await browser.click('a:has-text("Blender scene")');
+  // The project's decks and its file tree both land before the pickers render;
+  // axe run against the spinner would call an empty screen clean.
+  await browser.page.waitForSelector('button:has-text("Export bundle")', { timeout: 30_000 });
 }
 
 async function reachDeleted(browser, base, scheme) {

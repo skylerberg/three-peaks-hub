@@ -16,6 +16,7 @@
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError } from '../api/client.ts';
   import { type Deck, type DeckCard, decks } from '../lib/decks.svelte.ts';
+  import { saveBlob } from '../lib/download.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
@@ -135,14 +136,7 @@
         progress = update;
       });
 
-      // A button and an object URL, never an <a href> to the API: see
-      // lib/download.ts for why a browser-initiated GET cannot carry the token.
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = 'print-sheets.pdf';
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
+      saveBlob(blob, 'print-sheets.pdf');
     } catch (caught) {
       toasts.error(caught instanceof Error ? caught.message : 'The sheets could not be built.');
     } finally {

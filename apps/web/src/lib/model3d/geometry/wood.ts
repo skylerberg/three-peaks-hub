@@ -3,7 +3,7 @@ import type { WoodModelSettings } from '@three-peaks/shared';
 import { MM } from '../units.ts';
 import type { Bounds } from '../shapes/types.ts';
 import { bevelledExtrusion } from './extrude.ts';
-import { assignFaceGroups, remapCapUVs } from './faceGroups.ts';
+import { assignFaceGroups, remapCapUVs, remapRimUVs } from './faceGroups.ts';
 
 const BEVEL_SEGMENTS = 2;
 
@@ -27,6 +27,7 @@ export function buildWoodGeometry(
   geometry.center();
   assignFaceGroups(geometry);
   remapCapUVs(geometry, bounds);
+  remapRimUVs(geometry);
 
   return geometry;
 }

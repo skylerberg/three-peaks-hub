@@ -120,6 +120,26 @@ function positionExtent(json) {
   );
 }
 
+// Default settings, so what each one measures is DEFAULT_BOX_SETTINGS and
+// DEFAULT_BOARD_SETTINGS read in metres: a 295 mm box, and one panel of a
+// bifold 500 mm board, which is 500 mm on its uncut side.
+const BUILT_KINDS = [
+  { button: 'Box', settles: 'Corner bevel', meshes: 1, materials: 6, across: 0.295 },
+  { button: 'Board', settles: 'Fold gap', meshes: 2, materials: 3, across: 0.5 },
+];
+
+// The studio hands the browser bytes it already holds, so this is the download
+// event and not a request anything could answer differently.
+async function downloadedGlb(browser) {
+  const [download] = await Promise.all([
+    browser.page.waitForEvent('download', { timeout: SAVE_TIMEOUT_MS }),
+    browser.click('button:has-text("Download .glb")'),
+  ]);
+  const chunks = [];
+  for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 async function run() {
   const api = await inspectApi(API);
   if (!api.ok) {
@@ -297,6 +317,39 @@ async function run() {
       extent !== null && Math.abs(extent - 0.03) < 0.0005,
       `${extent} m across, expected 0.03`
     );
+
+    // The two kinds the trailer scene added, and the ones the save path above
+    // does not reach: a box is one mesh over six material slots and a folded
+    // board is a mesh per panel, so both are shapes the exporter had never been
+    // handed. Read off the download rather than saved, because a second file of
+    // the same name is a different question from whether a box exports at all.
+    for (const kind of BUILT_KINDS) {
+      await browser.click(`button:has-text("${kind.button}")`);
+      await browser.page.waitForSelector(`text=${kind.settles}`, { timeout: 10_000 });
+      await browser.page.waitForSelector('text=Building the model', {
+        state: 'hidden',
+        timeout: 60_000,
+      });
+
+      const exported = inspectGlb(await downloadedGlb(browser));
+      check(`the ${kind.button.toLowerCase()} exports a glTF container`, exported.magic === 'glTF');
+      check(
+        `the ${kind.button.toLowerCase()} exports ${kind.meshes} mesh(es)`,
+        (exported.json?.meshes?.length ?? 0) === kind.meshes,
+        String(exported.json?.meshes?.length)
+      );
+      check(
+        `the ${kind.button.toLowerCase()} keeps one material per slot`,
+        (exported.json?.materials?.length ?? 0) === kind.materials,
+        String(exported.json?.materials?.length)
+      );
+      const span = positionExtent(exported.json);
+      check(
+        `the ${kind.button.toLowerCase()} measures its longest side in metres`,
+        span !== null && Math.abs(span - kind.across) < 0.0005,
+        `${span} m across, expected ${kind.across}`
+      );
+    }
 
     if (selftest) {
       // Sensitivity: the same assertions against something that is not a GLB

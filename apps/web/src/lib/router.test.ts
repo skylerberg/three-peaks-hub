@@ -145,6 +145,24 @@ describe('matchRoute', () => {
     });
   });
 
+  describe('the scene export screen', () => {
+    it('reads the project id', () => {
+      expect(matchRoute(`/projects/${UUID}/scene`)).toEqual({
+        name: 'scene',
+        params: { projectId: UUID },
+      });
+    });
+
+    it('does not match when the id is not a uuid', () => {
+      expect(matchRoute('/projects/nope/scene').name).toBe('not-found');
+    });
+
+    // The project route is a prefix of this one, and it is declared first.
+    it('does not fall through to the project screen', () => {
+      expect(matchRoute(`/projects/${UUID}/scene`).name).not.toBe('project');
+    });
+  });
+
   // The server builds every mailed link from these paths (see the API's
   // services/webLinks.ts). Pinning them here is what keeps a route rename from
   // quietly turning already-sent mail into a not-found page.

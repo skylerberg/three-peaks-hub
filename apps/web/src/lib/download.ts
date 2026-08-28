@@ -23,7 +23,13 @@ export async function downloadFile(
     throw new ApiError(response.status, body.error ?? `Download failed (${response.status})`);
   }
 
-  const url = URL.createObjectURL(await response.blob());
+  saveBlob(await response.blob(), filename);
+}
+
+// Bytes a screen already holds -- a PDF or a scene bundle it just built -- take
+// the second half of the same route, without the fetch.
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;

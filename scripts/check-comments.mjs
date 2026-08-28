@@ -15,15 +15,24 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const selftest = process.argv.includes('--selftest');
 
-const SCAN_DIRS = ['apps', 'packages', 'scripts', 'infra'];
+const SCAN_DIRS = ['apps', 'packages', 'scripts', 'infra', 'tools'];
 const DOC_FILES = [
   'CLAUDE.md',
   'README.md',
   'packages/shared/README.md',
   'infra/terraform/README.md',
+  'tools/blender/README.md',
 ];
-const SKIP = new Set(['node_modules', 'dist', 'coverage', '.git', 'data', '.terraform']);
-const CODE = /\.(ts|mjs|js|svelte|tf|ya?ml)$/;
+const SKIP = new Set([
+  'node_modules',
+  'dist',
+  'coverage',
+  '.git',
+  'data',
+  '.terraform',
+  '__pycache__',
+]);
+const CODE = /\.(ts|mjs|js|svelte|tf|ya?ml|py|sh)$/;
 // Generated files carry a header their generator wrote, so they duplicate it by
 // construction. They are output, not prose.
 const GENERATED = /\.generated\.ts$/;
@@ -65,12 +74,18 @@ function extractSentences(text) {
   );
 }
 
+const HASH_COMMENTED = /\.(tf|ya?ml|sh|py)$/;
+
 function commentsOf(source, path) {
-  if (path.endsWith('.tf') || path.endsWith('.yaml') || path.endsWith('.yml')) {
-    return source
-      .split('\n')
-      .filter((line) => /^\s*#/.test(line))
-      .join('\n');
+  if (HASH_COMMENTED.test(path)) {
+    const lines = source.split('\n').filter((line) => /^\s*#/.test(line));
+    // A Python module's rules are written in its docstrings rather than beside a
+    // hash, so reading only the hash lines would leave the half that explains
+    // the design unguarded.
+    const docstrings = path.endsWith('.py')
+      ? (source.match(/"""[\s\S]*?"""/g) ?? []).map((block) => block.slice(3, -3))
+      : [];
+    return [...docstrings, ...lines].join('\n');
   }
   const lines = source.split('\n').filter((line) => /^\s*(\/\/|\*|\/\*)/.test(line));
   return lines.join('\n');
@@ -110,7 +125,8 @@ for (const doc of DOC_FILES) {
 // --- references that no longer resolve --------------------------------------
 // Only paths that look like real repository paths, so ordinary prose is not
 // mistaken for a reference.
-const PATH_REFERENCE = /\b((?:apps|packages|infra|scripts)\/[A-Za-z0-9_./-]+\.[A-Za-z]{2,6})\b/g;
+const PATH_REFERENCE =
+  /\b((?:apps|packages|infra|scripts|tools)\/[A-Za-z0-9_./-]+\.[A-Za-z]{2,6})\b/g;
 const unresolved = [];
 
 // A path the repository deliberately does not contain is not a dangling

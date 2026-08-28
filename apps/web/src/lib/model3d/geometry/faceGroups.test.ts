@@ -4,7 +4,14 @@ import { DEFAULT_CARD_SETTINGS } from '@three-peaks/shared';
 import { roundedRectShape } from '../shapes/roundedRect.ts';
 import { MM } from '../units.ts';
 import { buildCardGeometry } from './card.ts';
-import { BACK_GROUP, FRONT_GROUP, RIM_GROUP, assignFaceGroups, remapCapUVs } from './faceGroups.ts';
+import {
+  BACK_GROUP,
+  FRONT_GROUP,
+  RIM_GROUP,
+  assignFaceGroups,
+  remapCapUVs,
+  remapRimUVs,
+} from './faceGroups.ts';
 
 const bounds = { minX: -2, minY: -3, maxX: 2, maxY: 3 };
 
@@ -143,5 +150,54 @@ describe('buildCardGeometry', () => {
   it('gives the card three material slots to fill', () => {
     const geometry = buildCardGeometry(DEFAULT_CARD_SETTINGS);
     expect(geometry.groups).toHaveLength(3);
+  });
+});
+
+describe('remapRimUVs', () => {
+  it('runs the grain through the thickness rather than along a sliver of it', () => {
+    const geometry = slab();
+    assignFaceGroups(geometry);
+    remapCapUVs(geometry, bounds);
+    remapRimUVs(geometry);
+
+    const position = geometry.getAttribute('position');
+    const normal = geometry.getAttribute('normal');
+    const uv = geometry.getAttribute('uv');
+
+    let low = Infinity;
+    let high = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < position.count; i += 1) {
+      minZ = Math.min(minZ, position.getZ(i));
+      maxZ = Math.max(maxZ, position.getZ(i));
+    }
+    for (let i = 0; i < uv.count; i += 1) {
+      if (Math.abs(normal.getZ(i)) >= 0.99) continue;
+      low = Math.min(low, uv.getY(i));
+      high = Math.max(high, uv.getY(i));
+      expect(uv.getY(i)).toBeCloseTo((position.getZ(i) - minZ) / (maxZ - minZ), 6);
+    }
+
+    // The whole texture across the cut edge, rather than the hundredth of it a
+    // thickness in metres covers -- which is one flat colour per wall.
+    expect(low).toBeCloseTo(0, 6);
+    expect(high).toBeCloseTo(1, 6);
+  });
+
+  it('leaves the caps to remapCapUVs', () => {
+    const geometry = slab();
+    assignFaceGroups(geometry);
+    remapCapUVs(geometry, bounds);
+    const before = Array.from(geometry.getAttribute('uv').array);
+    remapRimUVs(geometry);
+    const after = geometry.getAttribute('uv');
+    const normal = geometry.getAttribute('normal');
+
+    for (let i = 0; i < after.count; i += 1) {
+      if (Math.abs(normal.getZ(i)) < 0.99) continue;
+      expect(after.getX(i)).toBe(before[i * 2]);
+      expect(after.getY(i)).toBe(before[i * 2 + 1]);
+    }
   });
 });

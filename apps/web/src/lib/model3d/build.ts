@@ -1,7 +1,19 @@
 import { Group, Mesh, type BufferGeometry, type Material, type Shape } from 'three';
-import type { CardModelSettings, ModelSettings, WoodModelSettings } from '@three-peaks/shared';
+import {
+  BOX_FACES,
+  type BoardModelSettings,
+  type BoxModelSettings,
+  type CardModelSettings,
+  type ModelKind,
+  type ModelSettings,
+  type WoodModelSettings,
+} from '@three-peaks/shared';
+import { buildBoardPanels } from './geometry/board.ts';
+import { buildBoxGeometry } from './geometry/box.ts';
 import { buildCardGeometry } from './geometry/card.ts';
 import { buildWoodGeometry } from './geometry/wood.ts';
+import { boardMaterials } from './materials/board.ts';
+import { boxMaterials } from './materials/box.ts';
 import { cardMaterials } from './materials/cardStock.ts';
 import { woodMaterials } from './materials/wood.ts';
 import {
@@ -23,50 +35,125 @@ export class EmptyOutlineError extends Error {
   }
 }
 
-function woodOutlines(source: SourceImage, settings: WoodModelSettings): Outline[] {
+// What the exported node is called. A trailer scene holds several of these at
+// once, so the name is the only thing telling one apart in an outliner.
+const GROUP_NAMES: Record<ModelKind, string> = {
+  card: 'Card',
+  wood: 'Component',
+  box: 'Box',
+  board: 'Board',
+};
+
+// One kind may be several meshes -- a folded board is one per panel -- and they
+// share their materials, which is why the two lists are not the same length.
+interface BuiltParts {
+  meshes: Mesh[];
+  materials: Material[];
+}
+
+interface Cut {
+  outlines: Outline[];
+  // Where the artwork sits in the same space the outlines came out in.
+  frame: Bounds;
+}
+
+function woodOutlines(source: SourceImage, settings: WoodModelSettings): Cut {
   // A vector source already is an outline. Rasterising it only to trace the
   // raster back would throw away the exact edge and hand back a stepped one.
-  if (source.svgText !== null) return svgOutlines(source.svgText);
+  if (source.svgText !== null) {
+    // Its artwork is rasterised across the whole viewport, which nothing here
+    // reads back; the paths' own bounds are the closest frame available.
+    const outlines = svgOutlines(source.svgText);
+    return { outlines, frame: outlineBounds(outlines) };
+  }
 
   const rings = traceRings(source.pixels, {
     source: settings.trace_source,
     threshold: settings.trace_threshold,
   }).map((ring) => simplifyRing(ring, settings.simplify_tolerance));
 
-  return ringsToOutlines(rings.filter((ring) => ring.length >= 3));
+  return {
+    outlines: ringsToOutlines(rings.filter((ring) => ring.length >= 3)),
+    frame: { minX: 0, minY: 0, maxX: source.pixels.width, maxY: source.pixels.height },
+  };
 }
 
-function buildCard(settings: CardModelSettings, front: SourceImage, back: SourceImage | null) {
+function buildCard(
+  settings: CardModelSettings,
+  front: SourceImage,
+  back: SourceImage | null
+): BuiltParts {
   const geometry = buildCardGeometry(settings);
   const materials = cardMaterials(
     settings,
     sourceTexture(front),
     back ? sourceTexture(back) : null
   );
-  return { geometry, materials: [materials.front, materials.back, materials.rim] };
+  const slots = [materials.front, materials.back, materials.rim];
+  return { meshes: [new Mesh(geometry, slots)], materials: slots };
 }
 
-function buildWood(settings: WoodModelSettings, source: SourceImage) {
-  const outlines = normalizeOutlines(woodOutlines(source, settings), {
+function buildWood(settings: WoodModelSettings, source: SourceImage): BuiltParts {
+  const cut = woodOutlines(source, settings);
+  const placed = normalizeOutlines(cut.outlines, cut.frame, {
     longestSideMm: settings.longest_side_mm,
     flipY: true,
   });
-  if (outlines.length === 0) throw new EmptyOutlineError();
+  if (placed.outlines.length === 0) throw new EmptyOutlineError();
 
-  const shapes: Shape[] = outlinesToShapes(outlines);
-  const bounds: Bounds = outlineBounds(outlines);
-  const geometry = buildWoodGeometry(shapes, bounds, settings);
+  const shapes: Shape[] = outlinesToShapes(placed.outlines);
+  const geometry = buildWoodGeometry(shapes, placed.frame, settings);
 
   // Printed pieces carry the artwork on both faces and bare wood on the cut
   // edge; unprinted ones are wood all the way round.
   const materials = woodMaterials(settings, settings.printed ? sourceTexture(source) : null);
-  return { geometry, materials: [materials.face, materials.face, materials.edge] };
+  const slots = [materials.face, materials.face, materials.edge];
+  return { meshes: [new Mesh(geometry, slots)], materials: slots };
+}
+
+function buildBox(settings: BoxModelSettings, source: SourceImage): BuiltParts {
+  const geometry = buildBoxGeometry(settings);
+  const materials = boxMaterials(settings, sourceTexture(source));
+  // buildBoxGeometry numbers its groups by each face's place in BOX_FACES, so
+  // reading the slots off the same list is what keeps the two in step.
+  const slots = BOX_FACES.map((face) => materials.faces[face]);
+  return { meshes: [new Mesh(geometry, slots)], materials: slots };
+}
+
+function buildBoard(settings: BoardModelSettings, source: SourceImage): BuiltParts {
+  const materials = boardMaterials(settings, sourceTexture(source));
+  const slots = [materials.face, materials.back, materials.edge];
+  const meshes = buildBoardPanels(settings).map((panel) => {
+    const mesh = new Mesh(panel.geometry, slots);
+    mesh.name = panel.name;
+    mesh.position.set(...panel.center);
+    return mesh;
+  });
+
+  return { meshes, materials: slots };
 }
 
 export interface BuiltModel {
   group: Group;
-  geometry: BufferGeometry;
+  geometries: BufferGeometry[];
   materials: Material[];
+}
+
+function partsFor(
+  settings: ModelSettings,
+  source: SourceImage,
+  back: SourceImage | null
+): BuiltParts {
+  switch (settings.kind) {
+    case 'card':
+      return buildCard(settings, source, back);
+    case 'wood':
+      return buildWood(settings, source);
+    case 'box':
+      return buildBox(settings, source);
+    case 'board':
+      return buildBoard(settings, source);
+  }
 }
 
 export function buildModel(
@@ -74,21 +161,24 @@ export function buildModel(
   source: SourceImage,
   back: SourceImage | null
 ): BuiltModel {
-  const built =
-    settings.kind === 'card' ? buildCard(settings, source, back) : buildWood(settings, source);
+  const built = partsFor(settings, source, back);
 
   const group = new Group();
-  group.name = settings.kind === 'card' ? 'Card' : 'Component';
-  group.add(new Mesh(built.geometry, built.materials));
+  group.name = GROUP_NAMES[settings.kind];
+  for (const mesh of built.meshes) group.add(mesh);
 
-  return { group, geometry: built.geometry, materials: built.materials };
+  return {
+    group,
+    geometries: built.meshes.map((mesh) => mesh.geometry),
+    materials: built.materials,
+  };
 }
 
 // A rebuild happens on every slider move, and neither geometry nor a texture is
 // released by dropping the reference to it -- both hold GPU memory until they
 // are told to let go.
 export function disposeModel(model: BuiltModel): void {
-  model.geometry.dispose();
+  for (const geometry of model.geometries) geometry.dispose();
 
   // A Set because the same material sits at two slots on a printed piece, and
   // the same texture at two slots on a material.

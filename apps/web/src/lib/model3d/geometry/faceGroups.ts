@@ -84,3 +84,40 @@ export function remapCapUVs(geometry: BufferGeometry, bounds: Bounds): void {
 
   uv.needsUpdate = true;
 }
+
+// How much cut edge one pass of the grain texture covers. A physical length
+// rather than a fraction of the piece, so a 20 mm token and a 500 mm board show
+// end grain at the same size.
+const EDGE_REPEAT_M = 0.02;
+
+/**
+ * The other half of the same bug remapCapUVs fixes, on the other set of faces.
+ *
+ * ExtrudeGeometry's side UVs are world coordinates in metres too, and the
+ * thickness of a piece is the small one: a 3 mm token's rim spans three
+ * thousandths of the texture, so every wall samples a single value out of the
+ * grain field and comes out one flat colour -- dark on one edge and light on the
+ * next, for no reason a person can see. v is remade across the thickness, which
+ * is what a cut edge wants: end grain runs through the stock, not along it.
+ */
+export function remapRimUVs(geometry: BufferGeometry): void {
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  const uv = geometry.getAttribute('uv');
+
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < position.count; i += 1) {
+    minZ = Math.min(minZ, position.getZ(i));
+    maxZ = Math.max(maxZ, position.getZ(i));
+  }
+  const thickness = maxZ - minZ;
+  if (!(thickness > 0)) return;
+
+  for (let i = 0; i < position.count; i += 1) {
+    if (Math.abs(normal.getZ(i)) >= CAP_NORMAL_MIN) continue;
+    uv.setXY(i, uv.getX(i) / EDGE_REPEAT_M, (position.getZ(i) - minZ) / thickness);
+  }
+
+  uv.needsUpdate = true;
+}
