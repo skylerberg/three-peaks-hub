@@ -6,7 +6,7 @@
 
 import { PANDA_CORNER_RADIUS_MM, cardPreset } from './cards.ts';
 
-export const MODEL_KINDS = ['card', 'wood', 'box', 'board'] as const;
+export const MODEL_KINDS = ['card', 'wood', 'box', 'board', 'punchboard'] as const;
 export type ModelKind = (typeof MODEL_KINDS)[number];
 
 export interface CardModelSettings {
@@ -74,8 +74,40 @@ export interface BoardModelSettings {
   seed: number;
 }
 
+export const PUNCHBOARD_SHEET_STATES = ['intact', 'punched'] as const;
+export type PunchboardSheetState = (typeof PUNCHBOARD_SHEET_STATES)[number];
+
+// A punchboard is one printed sheet plus an SVG cut sheet, and the cut sheet is
+// the token layout: each closed path in it is one token. There is no file id
+// here because ownership already says which file is which -- the component's
+// `cut` file is the die line, and its `artwork` file is what gets printed.
+//
+// The sheet's own size is given rather than measured, and the cut file's
+// viewBox is mapped onto it. That is what makes a token's size and the part of
+// the artwork it samples the same arithmetic, the way boxNetRegions does for a
+// box: a die line drawn to other proportions cuts the wrong rectangles rather
+// than failing, and nothing here can disagree with the guide the studio draws.
+export interface PunchboardModelSettings {
+  kind: 'punchboard';
+  width_mm: number;
+  height_mm: number;
+  thickness_mm: number;
+  // Whether the sheet mesh still holds its tokens, or has had them pushed out
+  // and is the frame that is left.
+  sheet_state: PunchboardSheetState;
+  // Unprinted board: the reverse of every token and the sheet, and the edges
+  // the die cut leaves.
+  back_color: string;
+  edge_color: string;
+  seed: number;
+}
+
 export type ModelSettings =
-  CardModelSettings | WoodModelSettings | BoxModelSettings | BoardModelSettings;
+  | CardModelSettings
+  | WoodModelSettings
+  | BoxModelSettings
+  | BoardModelSettings
+  | PunchboardModelSettings;
 
 export interface WoodPreset {
   id: string;
@@ -142,12 +174,26 @@ export const DEFAULT_BOARD_SETTINGS: BoardModelSettings = {
   seed: 1,
 };
 
+// A retail punchboard: the sheet a sprue of tokens is die-cut from, at the
+// 2 mm greyboard most of them are made of.
+export const DEFAULT_PUNCHBOARD_SETTINGS: PunchboardModelSettings = {
+  kind: 'punchboard',
+  width_mm: 280,
+  height_mm: 210,
+  thickness_mm: 2,
+  sheet_state: 'intact',
+  back_color: '#b9ac93',
+  edge_color: '#8d8069',
+  seed: 1,
+};
+
 // Overloaded so a literal kind narrows: the caller that knows it asked for a
 // card should not have to re-narrow the union it gets back.
 export function defaultSettingsFor(kind: 'card'): CardModelSettings;
 export function defaultSettingsFor(kind: 'wood'): WoodModelSettings;
 export function defaultSettingsFor(kind: 'box'): BoxModelSettings;
 export function defaultSettingsFor(kind: 'board'): BoardModelSettings;
+export function defaultSettingsFor(kind: 'punchboard'): PunchboardModelSettings;
 export function defaultSettingsFor(kind: ModelKind): ModelSettings;
 export function defaultSettingsFor(kind: ModelKind): ModelSettings {
   switch (kind) {
@@ -159,6 +205,8 @@ export function defaultSettingsFor(kind: ModelKind): ModelSettings {
       return { ...DEFAULT_BOX_SETTINGS };
     case 'board':
       return { ...DEFAULT_BOARD_SETTINGS };
+    case 'punchboard':
+      return { ...DEFAULT_PUNCHBOARD_SETTINGS };
   }
 }
 
@@ -191,6 +239,11 @@ export const MODEL_LIMITS = {
     height_mm: [50, 1200],
     thickness_mm: [0.5, 12],
     fold_gap_mm: [0, 20],
+  },
+  punchboard: {
+    width_mm: [50, 700],
+    height_mm: [50, 700],
+    thickness_mm: [0.5, 6],
   },
 } as const satisfies Record<ModelKind, Record<string, readonly [number, number]>>;
 

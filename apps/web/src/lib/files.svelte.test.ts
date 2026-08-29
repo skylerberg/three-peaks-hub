@@ -130,7 +130,9 @@ describe('FileStore.upload', () => {
 
   it('refuses a file over the limit without sending it', async () => {
     const oversized = fileOf('export.zip', MAX_UPLOAD_BYTES * 2);
-    const caught = await files.upload(PROJECT, null, oversized).catch((error: unknown) => error);
+    const caught = await files
+      .upload(PROJECT, { folder_id: null }, oversized)
+      .catch((error: unknown) => error);
 
     expect(apiMessage(caught)).toBe(
       `That file is ${formatBytes(MAX_UPLOAD_BYTES * 2)}, over the ` +
@@ -149,7 +151,7 @@ describe('FileStore.upload', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(413, { error: 'Project storage quota exceeded' }));
 
     const caught = await files
-      .upload(PROJECT, null, fileOf('card.png', 8))
+      .upload(PROJECT, { folder_id: null }, fileOf('card.png', 8))
       .catch((error: unknown) => error);
 
     expect(apiMessage(caught)).toBe('Project storage quota exceeded');
@@ -165,6 +167,9 @@ describe('FileStore.apply', () => {
       id,
       project_id: PROJECT,
       folder_id: folderId,
+      deck_id: null,
+      component_id: null,
+      component_role: null,
       filename,
       content_type: 'text/plain',
       byte_size: 10,

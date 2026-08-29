@@ -1,5 +1,4 @@
 <script lang="ts">
-  import FolderPicker from '../components/decks/FolderPicker.svelte';
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
@@ -7,7 +6,6 @@
   import { decks } from '../lib/decks.svelte.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
-  import { toasts } from '../lib/toasts.svelte.ts';
 
   interface Props {
     projectId: string;
@@ -17,7 +15,6 @@
 
   let error = $state<string | null>(null);
   let canEdit = $state(false);
-  let choosingFolder = $state(false);
   let resuming = $state(false);
   let dropActive = $state(false);
   let openRunProgress = $state<{
@@ -125,15 +122,6 @@
     return Number.isNaN(when.getTime()) ? 'earlier' : when.toLocaleString();
   }
 
-  async function chooseFolder(folder: { id: string; name: string }): Promise<void> {
-    choosingFolder = false;
-    try {
-      await deckImports.bind(projectId, deckId, folder.id);
-    } catch (caught) {
-      toasts.error(apiMessage(caught));
-    }
-  }
-
   async function readAndPlan(file: File | null | undefined): Promise<void> {
     // Guarded as well as hidden: a drop landing in the same tick as the render
     // that took the zone away would otherwise abandon the run in progress.
@@ -231,52 +219,7 @@
         </section>
       {/if}
 
-      <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
-        <h2 class="text-lg font-semibold">1. Artwork folder</h2>
-        {#if deckImports.loadingBinding && !binding}
-          <Spinner label="Loading the import" />
-        {:else if binding?.folder_id}
-          {#if deckImports.folderName}
-            <p class="text-sm">Artwork lands in <strong>{deckImports.folderName}</strong>.</p>
-          {:else}
-            <p class="text-sm text-danger">
-              The folder this deck imported into has been deleted. Choose another one, or restore
-              it, before importing again.
-            </p>
-          {/if}
-        {:else}
-          <p class="text-sm text-muted">
-            Not set up yet. Choose where the imported artwork should live.
-          </p>
-        {/if}
-
-        {#if openRunId}
-          <p class="text-sm text-muted">
-            The folder cannot change while an import is open. Finish or discard it first.
-          </p>
-        {:else}
-          <div>
-            <Button variant="secondary" onclick={() => (choosingFolder = !choosingFolder)}>
-              {binding?.folder_id ? 'Change folder' : 'Choose a folder'}
-            </Button>
-          </div>
-          {#if choosingFolder}
-            {#if binding?.folder_id}
-              <p class="text-sm text-muted">
-                Every card this deck has already imported has to be in the new folder first. Move
-                them there, otherwise choosing another folder is refused.
-              </p>
-            {/if}
-            <FolderPicker
-              {projectId}
-              onpick={chooseFolder}
-              oncancel={() => (choosingFolder = false)}
-            />
-          {/if}
-        {/if}
-      </section>
-
-      {#if binding?.folder_id && !openRunId && !busy}
+      {#if !openRunId && !busy}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <section
           class="flex flex-col gap-3 rounded-md border-2 border-dashed p-4 transition-colors

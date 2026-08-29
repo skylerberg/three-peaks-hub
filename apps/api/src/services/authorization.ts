@@ -112,6 +112,24 @@ export async function assertFileAccess(
     : await assertProjectAccess(c, row.project_id);
 }
 
+export async function assertComponentAccess(
+  c: Pick<AppContext, 'get'>,
+  componentId: string,
+  mode: 'read' | 'write' = 'read'
+): Promise<ProjectAccess> {
+  const db = c.get('db');
+  const row = await db
+    .selectFrom('component')
+    .select(['component.project_id as project_id'])
+    .where('component.id', '=', componentId)
+    .executeTakeFirst();
+
+  if (!row) throw new AppError(404, 'Component not found');
+  return mode === 'write'
+    ? await assertProjectWrite(c, row.project_id)
+    : await assertProjectAccess(c, row.project_id);
+}
+
 export async function assertDeckAccess(
   c: Pick<AppContext, 'get'>,
   deckId: string,
@@ -133,15 +151,14 @@ export async function assertDeckAccess(
 export interface ImportAccess extends ProjectAccess {
   deckId: string;
   importId: string;
-  folderId: string | null;
 }
 
 export interface ImportRunAccess extends ImportAccess {
   runId: string;
 }
 
-// The whole chain in one query, so the deck's absence and the binding's are
-// told apart without either being read by somebody not allowed to.
+// The whole chain in one query, so the deck's absence and the import's are told
+// apart without either being read by somebody not allowed to.
 export async function assertImportAccess(
   c: Pick<AppContext, 'get'>,
   deckId: string,
@@ -151,11 +168,7 @@ export async function assertImportAccess(
     .get('db')
     .selectFrom('deck')
     .leftJoin('deck_import', 'deck_import.deck_id', 'deck.id')
-    .select([
-      'deck.project_id as project_id',
-      'deck_import.id as import_id',
-      'deck_import.folder_id as folder_id',
-    ])
+    .select(['deck.project_id as project_id', 'deck_import.id as import_id'])
     .where('deck.id', '=', deckId)
     .executeTakeFirst();
 
@@ -165,9 +178,10 @@ export async function assertImportAccess(
       ? await assertProjectWrite(c, row.project_id)
       : await assertProjectAccess(c, row.project_id);
 
-  // Asserted first: a stranger must not learn whether this deck is bound.
+  // Asserted first: a stranger must not learn whether this deck has ever been
+  // imported into.
   if (row.import_id === null) throw new AppError(404, 'This deck has no import');
-  return { ...access, deckId, importId: row.import_id, folderId: row.folder_id };
+  return { ...access, deckId, importId: row.import_id };
 }
 
 export async function assertImportRunAccess(
@@ -180,12 +194,7 @@ export async function assertImportRunAccess(
     .selectFrom('import_run')
     .innerJoin('deck_import', 'deck_import.id', 'import_run.import_id')
     .innerJoin('deck', 'deck.id', 'deck_import.deck_id')
-    .select([
-      'deck.project_id as project_id',
-      'deck.id as deck_id',
-      'deck_import.id as import_id',
-      'deck_import.folder_id as folder_id',
-    ])
+    .select(['deck.project_id as project_id', 'deck.id as deck_id', 'deck_import.id as import_id'])
     .where('import_run.id', '=', runId)
     .executeTakeFirst();
 
@@ -195,13 +204,7 @@ export async function assertImportRunAccess(
       ? await assertProjectWrite(c, row.project_id)
       : await assertProjectAccess(c, row.project_id);
 
-  return {
-    ...access,
-    runId,
-    deckId: row.deck_id,
-    importId: row.import_id,
-    folderId: row.folder_id,
-  };
+  return { ...access, runId, deckId: row.deck_id, importId: row.import_id };
 }
 
 /**

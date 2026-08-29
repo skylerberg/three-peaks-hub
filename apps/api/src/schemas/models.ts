@@ -2,7 +2,7 @@ import { type } from 'arktype';
 import { MAX_MODEL_SEED, MODEL_LIMITS } from '@three-peaks/shared';
 import { numberRange as range } from './common.ts';
 
-const { board, box, card, wood } = MODEL_LIMITS;
+const { board, box, card, punchboard, wood } = MODEL_LIMITS;
 
 // Bounds come from packages/shared so the web app's inputs cannot offer a value
 // this rejects, and a number without them is how a thickness of 1e9 reaches the
@@ -68,12 +68,27 @@ export const boardModelSettingsSchema = type({
   seed,
 });
 
+// The sheet is sized here and the cut file's viewBox is mapped onto it, so the
+// die line carries no lengths of its own. `sheet_state` is spelled out for the
+// same reason `fold` above is, and walked by the same test.
+export const punchboardModelSettingsSchema = type({
+  kind: "'punchboard'",
+  width_mm: range(punchboard.width_mm),
+  height_mm: range(punchboard.height_mm),
+  thickness_mm: range(punchboard.thickness_mm),
+  sheet_state: "'intact' | 'punched'",
+  back_color: hexColor,
+  edge_color: hexColor,
+  seed,
+});
+
 // Discriminated on `kind`, so a card field on a wooden component is a
 // validation error rather than a value the builder silently ignores.
 export const modelSettingsSchema = cardModelSettingsSchema
   .or(woodModelSettingsSchema)
   .or(boxModelSettingsSchema)
-  .or(boardModelSettingsSchema);
+  .or(boardModelSettingsSchema)
+  .or(punchboardModelSettingsSchema);
 
 export const componentModelSchema = type({
   source_file_id: 'string',

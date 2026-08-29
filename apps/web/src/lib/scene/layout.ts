@@ -10,7 +10,7 @@ import {
   type Vec3,
 } from '@three-peaks/shared';
 
-// A card, a wooden token and a board are each built in three's own XY plane and
+// A card, a wooden token, a board and a punchboard are each built in three's own XY plane and
 // extruded along +Z, centred on the origin. The glTF importer maps +Y onto
 // Blender's +Z and +Z onto -Y, which lands the piece standing on edge with its
 // face toward the camera; a quarter turn back about X lays it on the table, top
@@ -23,7 +23,12 @@ const UPRIGHT_DEG: Vec3 = [0, 0, 0];
 // is three's +Y, which is what folds the printer's cross the right way round,
 // so it arrives already standing -- and laying it down would leave its lid on
 // top with four of its five other panels reading sideways or upside down.
-const LAID_FLAT: ReadonlySet<ModelKind> = new Set<ModelKind>(['card', 'wood', 'board']);
+const LAID_FLAT: ReadonlySet<ModelKind> = new Set<ModelKind>([
+  'card',
+  'wood',
+  'board',
+  'punchboard',
+]);
 
 // `null` is a library piece, which the importer builds in Blender's own axes.
 export function restRotationDeg(component: ModelKind | null): Vec3 {

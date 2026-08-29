@@ -2,8 +2,8 @@ import { type } from 'arktype';
 import type { Type } from 'arktype';
 import {
   componentModelSchema,
+  componentSchema,
   deckCardSchema,
-  deckImportSchema,
   deckSchema,
   fileSchema,
   fileVersionSchema,
@@ -79,26 +79,30 @@ export const REALTIME_PAYLOAD_SCHEMAS = withActor({
   // columns it just moved.
   file_version_created: type({ version: fileVersionSchema, file: fileSchema }).merge(withUsage),
 
+  // A move changes no bytes, so no total rides along. The row carries its new
+  // home and a listing that no longer holds it drops it by id -- which is why
+  // the home it left is not here either.
+  file_moved: fileSchema,
+
   model_updated: componentModelSchema,
+
+  component_created: componentSchema,
+  component_updated: componentSchema,
+  // The row as it was, and `purged` separating the tombstone from the erasure,
+  // exactly as folder_deleted does.
+  component_deleted: componentSchema.merge({ purged: 'boolean' }),
 
   deck_created: deckSchema,
   // Always both, even where the edit was to the deck's own row: one fixed shape
   // is worth the read, and a client that has to test which half arrived is back
   // to not knowing what changed.
   deck_updated: type({ deck: deckSchema, cards: deckCardSchema.array() }),
-  deck_deleted: type({ id: 'string' }),
+  // A deck owns its artwork now, so deleting one is soft and the row survives
+  // it. Restoring is a deck_updated: the row carries its own tombstone, so one
+  // shape says both. `purged` is the erasure, after which a client holding the
+  // deck has to drop it rather than grey it out.
+  deck_deleted: deckSchema.merge({ purged: 'boolean' }),
 
-  // Binding a deck to a folder moves neither the deck nor its cards, so it is
-  // not a deck_updated -- one published for it would carry a payload saying
-  // nothing changed, which is the shape of event this whole table exists to
-  // stop. Null is the deck being unbound.
-  deck_import_binding_changed: type({
-    deck_id: 'string',
-    binding: deckImportSchema.or('null'),
-    // The name the screen prints. The binding names the folder by id only, and
-    // resolving it is the one request applying this would otherwise still cost.
-    folder_name: 'string | null',
-  }),
   deck_import_started: type({ deck_id: 'string', run: importRunSchema }),
   deck_import_finished: type({ deck_id: 'string', run: importRunSchema }),
 } satisfies Record<RealtimeEventType, unknown>);

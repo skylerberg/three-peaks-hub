@@ -1,10 +1,15 @@
+import { type ComponentKind, isComponentKind } from '@three-peaks/shared';
+
 // A hand-rolled History router. The whole app is a handful of screens, and a
 // discriminated-union Route means App.svelte switches exhaustively -- a new
 // route that nothing renders is a compile error rather than a blank page.
 
 export type Route =
   | { name: 'projects' }
-  | { name: 'project'; params: { projectId: string; folderId: string | null } }
+  | { name: 'project'; params: { projectId: string } }
+  | { name: 'assets'; params: { projectId: string; folderId: string | null } }
+  | { name: 'components'; params: { projectId: string; kind: ComponentKind } }
+  | { name: 'component'; params: { projectId: string; componentId: string } }
   | { name: 'members'; params: { projectId: string } }
   | { name: 'deleted'; params: { projectId: string } }
   | { name: 'decks'; params: { projectId: string } }
@@ -96,6 +101,19 @@ export function matchRoute(path: string, search = ''): Route {
   const scene = new RegExp(`^/projects/(${UUID})/scene$`).exec(clean);
   if (scene) return { name: 'scene', params: { projectId: scene[1] } };
 
+  // A uuid is one component and a word is a section. Nothing else could be
+  // either, so the two live under one path rather than under a `/kind/` segment
+  // that would only exist to tell them apart.
+  const component = new RegExp(`^/projects/(${UUID})/components/(${UUID})$`).exec(clean);
+  if (component) {
+    return { name: 'component', params: { projectId: component[1], componentId: component[2] } };
+  }
+
+  const section = new RegExp(`^/projects/(${UUID})/components/([a-z]+)$`).exec(clean);
+  if (section && isComponentKind(section[2])) {
+    return { name: 'components', params: { projectId: section[1], kind: section[2] } };
+  }
+
   const model = new RegExp(`^/projects/(${UUID})/files/(${UUID})/3d$`).exec(clean);
   if (model) return { name: 'model', params: { projectId: model[1], fileId: model[2] } };
 
@@ -103,16 +121,28 @@ export function matchRoute(path: string, search = ''): Route {
   if (versions)
     return { name: 'versions', params: { projectId: versions[1], fileId: versions[2] } };
 
-  const project = new RegExp(`^/projects/(${UUID})$`).exec(clean);
-  if (project) {
+  const assets = new RegExp(`^/projects/(${UUID})/assets$`).exec(clean);
+  if (assets) {
     const folderId = params.get('folder');
     return {
-      name: 'project',
+      name: 'assets',
       params: {
-        projectId: project[1],
+        projectId: assets[1],
         folderId: folderId && folderId.length > 0 ? folderId : null,
       },
     };
+  }
+
+  const project = new RegExp(`^/projects/(${UUID})$`).exec(clean);
+  if (project) {
+    // `?folder=` is how the explorer used to be addressed, and a bookmark or a
+    // link in somebody's notes still says so. Reading it as Assets keeps those
+    // working without a redirect hop.
+    const folderId = params.get('folder');
+    if (folderId && folderId.length > 0) {
+      return { name: 'assets', params: { projectId: project[1], folderId } };
+    }
+    return { name: 'project', params: { projectId: project[1] } };
   }
 
   return { name: 'not-found' };

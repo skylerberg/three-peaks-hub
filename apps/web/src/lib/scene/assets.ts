@@ -41,8 +41,18 @@ export interface SceneComponentSelection {
   label: string;
   front: SceneImageRef;
   back: SceneImageRef | null;
+  // A punchboard's die line. Null for every other kind, which is built from
+  // one image.
+  cut: SceneImageRef | null;
   settings: ModelSettings;
   copies: number;
+  // One mesh of a component that has several -- a punchboard's sheet, or one of
+  // its tokens. Null is the whole thing, which every other kind is.
+  part: string | null;
+  // What that part measures. Absent for a component sized by its own settings;
+  // a punchboard's token is cut by a die line, and reading one would put three
+  // in this module -- which is the one thing kept out of the planner.
+  footprint?: Footprint & { height_mm: number };
 }
 
 export interface SceneDeckCardSelection {
@@ -84,6 +94,8 @@ export interface AssetBuild {
   settings: ModelSettings;
   front: SceneImageRef;
   back: SceneImageRef | null;
+  cut: SceneImageRef | null;
+  part: string | null;
 }
 
 // A shot aims at a group, so a template that wants to deal one onto its own
@@ -152,12 +164,14 @@ function stableKey(value: unknown): string {
  * image used twice in a deck, the same token in two selections -- which is
  * where a deck's bytes actually go.
  */
-export function assetKey(
-  settings: ModelSettings,
-  front: SceneImageRef,
-  back: SceneImageRef | null
-): string {
-  return stableKey([settings, front.file_id, back?.file_id ?? null]);
+export function assetKey(component: PlannedAsset): string {
+  return stableKey([
+    component.settings,
+    component.front.file_id,
+    component.back?.file_id ?? null,
+    component.cut?.file_id ?? null,
+    component.part,
+  ]);
 }
 
 /**
@@ -193,7 +207,22 @@ export function componentFootprint(settings: ModelSettings): Footprint & { heigh
         depth_mm: settings.height_mm,
         height_mm: settings.thickness_mm,
       };
+    case 'punchboard':
+      // The sheet. A token is smaller and the die line says by how much, which
+      // is why a token carries its own measurement instead.
+      return {
+        width_mm: settings.width_mm,
+        depth_mm: settings.height_mm,
+        height_mm: settings.thickness_mm,
+      };
   }
+}
+
+// What a selection takes up: what it says, or what its settings imply.
+function selectionFootprint(
+  selection: Pick<SceneComponentSelection, 'settings' | 'footprint'>
+): Footprint & { height_mm: number } {
+  return selection.footprint ?? componentFootprint(selection.settings);
 }
 
 // A card nobody has opened in the studio still has a size: the deck's. One that
@@ -243,7 +272,7 @@ class AssetRegistry {
   }
 
   glb(component: PlannedAsset): string {
-    const key = assetKey(component.settings, component.front, component.back);
+    const key = assetKey(component);
     const existing = this.#ids.get(key);
     if (existing) return existing;
 
@@ -264,6 +293,8 @@ class AssetRegistry {
       settings: component.settings,
       front: component.front,
       back: component.back,
+      cut: component.cut,
+      part: component.part,
     });
     return id;
   }
@@ -329,6 +360,8 @@ function deckBlock(
       label: card.label,
       front: card.front,
       back: deck.back,
+      cut: null,
+      part: null,
       settings,
     });
     for (const label of labelledCopies(card.label, copies(card.copies))) {
@@ -364,7 +397,7 @@ function filesBlock(
   let spacing: Footprint = { width_mm: 0, depth_mm: 0 };
 
   for (const file of files) {
-    const size = componentFootprint(file.settings);
+    const size = selectionFootprint(file);
     spacing = {
       width_mm: Math.max(spacing.width_mm, size.width_mm + PIECE_GAP_MM),
       depth_mm: Math.max(spacing.depth_mm, size.depth_mm + PIECE_GAP_MM),

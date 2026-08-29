@@ -5,9 +5,6 @@ import { optionalText, stringWithLength, uuid } from './common.ts';
 export const deckImportSchema = type({
   id: 'string',
   deck_id: 'string',
-  // Null is a binding with no folder: unbound by hand, or purged out from
-  // under it. The cards and the runs are still here either way.
-  folder_id: 'string | null',
   source_kind: 'string',
   source_label: 'string | null',
   open_run_id: 'string | null',
@@ -107,12 +104,6 @@ export const importPageResultSchema = type({
   file_id: 'string | null',
   file_version_number: 'number | null',
   name: 'string',
-});
-
-export const putDeckImportRequestSchema = type({
-  folder_id: uuid,
-  'source_kind?': "'zip'",
-  'source_label?': optionalText(IMPORT_TITLE_MAX_LENGTH),
 });
 
 // One rule for a page title, held by the manifest and by the upload that

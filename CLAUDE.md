@@ -150,9 +150,9 @@ Three rules keep it working, and all three were learned by getting it wrong:
   same generator over it as over the API spec.
 - **A payload carries what the screen draws, not only the row.** A file event
   carries `storage_used_bytes` because a row cannot move the explorer's meter; a
-  binding event carries `folder_name` because the binding names its folder by id.
-  A payload that leaves one of those out sends the client back for it, which is
-  the reload again wearing a smaller hat.
+  component event carries the files it holds because the section draws a
+  thumbnail per row. A payload that leaves one of those out sends the client
+  back for it, which is the reload again wearing a smaller hat.
 - **A screen that cannot place an event says so.** `files.apply` returns false
   and its caller reloads. The deleted listing is the standing example: an entry
   there carries a `path` and a `blocked_by` computed from the tombstoned tree
@@ -211,6 +211,40 @@ The 3D studio deliberately follows the current version. `component_model` is one
 row per file, so a card that gains new artwork keeps the dial-in someone already
 gave it.
 
+## Where a file lives
+
+**Every file has exactly one home**, and it is one of three: a deck, which owns
+its cards and its back; a `component`, which owns its own source images; or the
+folder tree, which is what belongs to neither. `file.deck_id`,
+`file.component_id` and `file.folder_id` are the three columns, and a CHECK
+holds at most one owner. Assets is the owner-less case and is defined by it —
+`unowned` in `apps/api/src/services/fileHome.ts` is the whole filter, and it is
+why a three-hundred-card deck is no longer three hundred rows of the explorer.
+
+`fileHome.ts` owns the dispatch, because every rule that used to be about a
+folder is now about a home: what a name has to be unique within, what a tombstone
+above it hides, which listing shows it. `resolveHome` is the one place a request
+names a destination, and it answers 404 for one the caller cannot see.
+
+**A component is an owner; `component_model` is a property.** The `component`
+table is the thing a person creates and names — a wooden piece, a box, a board, a
+punchboard — and its settings live on it, because a punchboard's describe two
+files and so cannot be keyed on one. `component_model` keeps one job and only
+that job: the 3D dial-in for one image, which after this means a deck card.
+`file.component_role` says which slot a file fills (`artwork` or `cut`), with a
+partial unique index so a component holds at most one of each.
+
+**A deck's cards are exactly its own live images**, bar a back that is not itself
+a card. `assertCardFiles` refuses both halves: a file the deck does not own would
+be a card Assets still lists, and a file left out would be artwork in the deck
+with no place in it — a third state this arrangement has none of. That is also
+why an upload into a deck writes its `deck_card` row, and why an imported page
+joins the deck as its bytes land rather than at finish.
+
+Moving is `POST /api/files/:id/move`, and it is the only way a home changes. The
+name is re-deduplicated against wherever it arrives with `freeFilename`, because
+a move must not fail on a clash nobody looking at either screen can see.
+
 ## Soft delete
 
 `DELETE` is soft: it stamps `deleted_at` and keeps every stored object.
@@ -228,11 +262,14 @@ its name, its folder, or a new version. Purge and restore are writes of their
 own, and so is `PUT /api/models/:fileId`, which stays allowed on one — a
 component's settings are not the file.
 
-**A folder's tombstone is never copied onto its contents.** Visibility is derived
-instead: a row is reachable only while its own `deleted_at` is null _and_ no
-folder above it is deleted. That is what makes restoring a folder exactly
-symmetric with deleting it, rather than resurrecting rows somebody deleted one by
-one beforehand. Two things follow, and both are load-bearing: a write target is
+**An owner's tombstone is never copied onto what it holds** — a folder's, a
+deck's or a component's. Visibility is derived instead: a row is reachable only
+while its own `deleted_at` is null _and_ nothing above it is deleted. That is
+what makes restoring one exactly symmetric with deleting it, rather than
+resurrecting rows somebody deleted one by one beforehand. A folder is a chain and
+is walked; a deck and a component are one row each, because neither nests.
+
+Two things follow from the walk, and both are load-bearing: a write target is
 validated by walking that chain rather than by testing one column, because a live
 folder inside a deleted one is ordinary and a row planted there would be visible
 in no listing and recoverable by no route; and a walk that hits the depth bound
@@ -293,9 +330,16 @@ router library.
 
 # The 3D studio
 
-`/projects/:projectId/files/:fileId/3d` turns one uploaded image into one
-component and exports it as a `.glb`. There are four kinds: a card, a wooden
-piece cut to the image's own silhouette, a box, and a board.
+Two screens, one studio. `/projects/:projectId/components/:componentId` dials in
+a component someone has created and named; `/projects/:projectId/files/:fileId/3d`
+dials in one card of one deck. `components/model3d/Studio.svelte` is the half
+they share — the viewer, the export buttons, and the panel for the kind.
+
+**The kind is not a choice.** A card is a member of a deck; a wooden piece, a
+box, a board and a punchboard are components, each with a section of its own and
+a kind fixed when it was created. The studio used to offer a picker that could
+turn a card into a box, which is why it had to remember a settings object per
+kind; nothing remembers anything now.
 
 **All of it runs in the browser.** `apps/api` has no image or geometry
 dependency; it recognises two more content types and stores a settings blob.
@@ -335,6 +379,19 @@ only this screen pays for.
   their node translation, so the crease between two neighbours is the midpoint
   of their two positions — which is the hinge somebody folds it about by hand.
   The fold gap is cut out of the board rather than added to it.
+- **A punchboard is two files: a printed sheet and an SVG cut sheet**, and the
+  cut sheet _is_ the token layout — every closed path in it is one token, read
+  by the `svgOutlines` the wooden pieces already use. Nothing is traced, because
+  a die line is an outline already. The document's viewBox is stretched over the
+  sheet's own millimetres, and that one mapping decides both a token's size and
+  the rectangle of artwork it samples, so the two cannot disagree — the property
+  `boxNetRegions` has for a wrap. `sheet_state` decides whether the sheet beside
+  the tokens still holds them or is the frame left after punching; the tokens are
+  exported either way.
+- **`punchboardLayout` builds no geometry**, and `buildPunchboardPiece` builds
+  one piece. The scene exports the sheet and each token as a file of its own, and
+  extruding all of them once per file would be quadratic in the tokens on a
+  sheet.
 - The box is closed. An open one needs a wall thickness to line, which is a
   setting it has not got, so there is no interior colour to offer either.
 
@@ -360,11 +417,12 @@ A deck stores its size as **millimetres and nothing else**. The named size is
 derived on read by matching those two numbers, for the same reason `file_version`
 has no pointer column.
 
-**Deleting a deck is not soft.** Everything soft delete protects is stored bytes,
-and a deck holds none — so there is no tombstone, no purge, and the confirm
-dialog says as much. Its images are untouched. A card whose image is merely
-deleted keeps its row and its place in the deck; only a purge takes it out,
-through the foreign key.
+**Deleting a deck is soft**, because a deck owns its artwork and so owns bytes.
+It is tombstoned like a folder, `?purge=true` is the only path that reclaims, and
+its cards are never marked — restoring the deck brings back exactly what was
+there, and a card somebody deleted beforehand stays deleted. A card whose image
+is merely deleted keeps its row and its place in the deck; only a purge takes it
+out, through the foreign key.
 
 ## Sheets
 
@@ -438,9 +496,15 @@ freshly published package anyway.
   re-import, and the confirmation step is the only place it can be seen coming.
   Do not work that list out in the browser by diffing the deck against the plan:
   the server's matching includes a tie-break nothing here can see.
+- **There is nothing to bind.** The deck owns its cards, so the deck is where an
+  export lands and no folder is chosen first. `deck_import` survives for the
+  resume check — the export's name and its page count — and `ensureImport`
+  writes it on the first run rather than a person setting it up. A card that
+  leaves the deck detaches its mapping row, which is what `detachMovedCards`
+  now asks: not whether the file left a folder, but whether it left the deck.
 - **One store drives every deck's import, so every value in it carries the deck
   it is for.** `runDeckId` scopes the run, the plan and the summary;
-  `bindingDeckId` scopes the binding and its folder name. The route block is not
+  `bindingDeckId` scopes the import row. The route block is not
   keyed, so moving between two decks' screens swaps the props on the screen
   already mounted: nothing unmounts and nothing resets. A plan nobody has
   confirmed deliberately outlives the screen that made it — a run in flight has
@@ -455,8 +519,11 @@ freshly published package anyway.
   `normalizeSourceLabel` in `packages/shared/src/imports.ts`, because the label
   was stored through the trim-and-truncate every text field gets and a raw
   `File.name` is what the server never saw.
-- **`GET /api/decks/:deckId/import` answers 404 for an unbound deck.** On that
-  one route a 404 is an invitation to pick a folder, not an error worth showing.
+- **`GET /api/decks/:deckId/import` answers 404 for a deck nothing has been
+  imported into.** It means "no history yet" rather than "set something up
+  first", and the timeline beside it answers 200 with an empty list for the same
+  deck — there is nowhere else the artwork could go, so having none is not a
+  state anybody has to fix.
 - **Pages go up one at a time.** Each request asserts the storage quota, so a
   parallel burst can have every one of them pass a check the set of them fails.
 - Nothing is uploaded until someone has read the plan and pressed Import.
@@ -512,8 +579,11 @@ on the version it already had.
 What comes out is where the trailer shot starts, not where it finishes; the
 whole feature exists so the manual half is arranging, not rebuilding.
 
-The screen is a picker and stops there: tick decks and images, add library
-pieces, choose a shot template and a renderer, export. Every arrangement control
+The screen is a picker and stops there: tick decks and components, add library
+pieces, choose a shot template and a renderer, export. Components are picked by
+name out of their sections rather than by browsing to the file underneath one,
+and a component still waiting for its artwork is not offered — a tick that
+cannot be built is only a failure deferred to Export. Every arrangement control
 it could grow — a layout canvas, a timeline — is one Blender already has and
 does better, and a tool built to hand work over should not spend its surface
 area competing with what it hands to.
@@ -529,8 +599,8 @@ that, so ticking a component costs nothing until Export is pressed.
 
 **Nothing about a scene is stored.** No table, no route, no migration, and
 nothing in `apps/api` that knows the word: the exported bundle is the record,
-and it is a pure function of what was ticked, the `component_model` settings
-each of those already has, and one shot template. Two exports of one selection
+and it is a pure function of what was ticked, the settings each of those already
+has, and one shot template. Two exports of one selection
 differ in `generated_at` and in nothing else, which is what lets a test compare
 two archives byte for byte.
 
@@ -563,7 +633,15 @@ rule, and names the one place it is allowed to sample instead.
 an image used twice in a deck, a token picked in two places — all of them name
 one file, and in Blender one mesh datablock. Two cards cut to one size with
 different artwork cannot share a file, because an instance names a path and
-nothing narrower.
+nothing narrower. A punchboard is the one component that is several files: its
+sheet and one per token, told apart by `part` on the selection, which is why
+`assetKey` reads that as well as the images.
+
+**A token's size comes from the die line, and the planner may not read one.**
+Parsing an SVG needs three, and `assets.ts` is deliberately the half of this that
+does not touch it — so the screen reads the layout behind its own `await import()`
+and hands each part its `footprint` as data. `componentFootprint` sizes everything
+else from its settings alone.
 
 **A library piece has no file at all.** A die, a meeple, a cube, a disc and a
 cylinder are built by `pieces.py` from a name, a size and a colour, so they cost

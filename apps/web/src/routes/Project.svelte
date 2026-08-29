@@ -1,5 +1,5 @@
 <script lang="ts">
-  import FileExplorer from '../components/FileExplorer.svelte';
+  import { COMPONENT_KINDS, COMPONENT_KIND_INFO } from '@three-peaks/shared';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
   import type { Project } from '../lib/projects.svelte.ts';
@@ -7,11 +7,14 @@
   import { link } from '../lib/router.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
 
+  // The project's front door, and a list of the places things are. Everything
+  // in a project is one of these: a deck, a component of some kind, or a loose
+  // asset -- so the way in is by what a thing is rather than by which folder
+  // somebody happened to put it in.
   interface Props {
     projectId: string;
-    folderId: string | null;
   }
-  let { projectId, folderId }: Props = $props();
+  let { projectId }: Props = $props();
 
   let project = $state<Project | null>(null);
   let error = $state<string | null>(null);
@@ -35,6 +38,29 @@
         toasts.error(error);
       });
   });
+
+  const sections = $derived.by(() => {
+    const open = project;
+    return open
+      ? [
+          {
+            href: `/projects/${open.id}/decks`,
+            title: 'Decks',
+            blurb: 'Cards, their order and copy counts, and the artwork each deck holds.',
+          },
+          ...COMPONENT_KINDS.map((kind) => ({
+            href: `/projects/${open.id}/components/${kind}`,
+            title: COMPONENT_KIND_INFO[kind].section,
+            blurb: `Every ${COMPONENT_KIND_INFO[kind].singular} in the project, with its own artwork and its 3D dial-in.`,
+          })),
+          {
+            href: `/projects/${open.id}/assets`,
+            title: 'Assets',
+            blurb: 'Files that belong to no deck and no component, in folders of your own.',
+          },
+        ]
+      : [];
+  });
 </script>
 
 <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8" use:link>
@@ -54,12 +80,6 @@
       <div class="flex items-center gap-1">
         <a
           class="focus-ring rounded px-3 py-2 text-sm underline"
-          href="/projects/{project.id}/decks"
-        >
-          Decks
-        </a>
-        <a
-          class="focus-ring rounded px-3 py-2 text-sm underline"
           href="/projects/{project.id}/print"
         >
           Print
@@ -76,9 +96,27 @@
         >
           Members
         </a>
+        <a
+          class="focus-ring rounded px-3 py-2 text-sm underline"
+          href="/projects/{project.id}/deleted"
+        >
+          Deleted
+        </a>
       </div>
     </div>
 
-    <FileExplorer projectId={project.id} {folderId} canEdit={project.role === 'editor'} />
+    <ul class="grid gap-3 sm:grid-cols-2">
+      {#each sections as section (section.href)}
+        <li>
+          <a
+            class="focus-ring flex min-h-11 flex-col gap-1 rounded-lg border border-edge bg-surface p-4 hover:bg-accent-soft"
+            href={section.href}
+          >
+            <span class="font-medium">{section.title}</span>
+            <span class="text-sm text-muted">{section.blurb}</span>
+          </a>
+        </li>
+      {/each}
+    </ul>
   {/if}
 </div>

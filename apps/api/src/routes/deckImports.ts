@@ -8,7 +8,7 @@ import {
 } from '../services/authorization.ts';
 import {
   abandonRun,
-  bindImport,
+  ensureImport,
   finishRun,
   importPage,
   readBinding,
@@ -16,9 +16,7 @@ import {
   readRunDetail,
   readTimeline,
   startRun,
-  unbindImport,
 } from '../services/deckImport.ts';
-import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError } from '../utils/errors.ts';
 import {
@@ -38,30 +36,13 @@ import {
   importRunDetailSchema,
   importRunListSchema,
   importRunSchema,
-  putDeckImportRequestSchema,
   startImportRunRequestSchema,
   startedImportRunSchema,
 } from '../schemas/imports.ts';
-import type { AppContext, AppHono } from '../types/index.ts';
+import type { AppHono } from '../types/index.ts';
 
 // Its own router rather than more of routes/decks.ts: that file is the deck a
 // person edits by hand, and this one is what an export does to it.
-// The folder's name, so the event carries what the screen prints rather than
-// leaving every client to resolve the id it was given.
-async function bindingFolderName(
-  c: Pick<AppContext, 'get'>,
-  folderId: string | null
-): Promise<string | null> {
-  if (!folderId) return null;
-  const row = await c
-    .get('db')
-    .selectFrom('folder')
-    .select(['folder.name as name'])
-    .where('folder.id', '=', folderId)
-    .executeTakeFirst();
-  return row?.name ?? null;
-}
-
 export const deckImportsRouter: AppHono = new Hono();
 
 const standardErrors = {
@@ -76,61 +57,13 @@ const writeErrors = {
   ...standardErrors,
 };
 
-deckImportsRouter.put(
-  '/:deckId/import',
-  describeRoute({
-    tags: ['Deck imports'],
-    summary: 'Bind a deck to a folder of imported artwork',
-    description:
-      'Idempotent: re-binding to the same folder only updates the label. Re-binding to a different one while the import still has cards in the old folder is refused.',
-    security: [{ bearerAuth: [] }],
-    responses: {
-      200: {
-        description: 'The binding, as it now stands',
-        content: { 'application/json': { schema: resolver(deckImportSchema) } },
-      },
-      201: {
-        description: 'Bound',
-        content: { 'application/json': { schema: resolver(deckImportSchema) } },
-      },
-      ...validationErrorResponse,
-      ...writeErrors,
-    },
-  }),
-  jsonValidator(putDeckImportRequestSchema),
-  async (c) => {
-    const deckId = c.req.param('deckId');
-    const access = await assertDeckAccess(c, deckId, 'write');
-    const body = c.req.valid('json') as {
-      folder_id: string;
-      source_kind?: 'zip';
-      source_label?: string | null;
-    };
-
-    const { binding, created } = await bindImport(c, deckId, access.projectId, {
-      folderId: body.folder_id,
-      sourceKind: body.source_kind ?? 'zip',
-      sourceLabel: body.source_label ?? null,
-    });
-
-    publishAfterCommit(
-      c.get('postCommitHooks'),
-      c.get('user').id,
-      'deck_import_binding_changed',
-      access.projectId,
-      { deck_id: deckId, binding, folder_name: await bindingFolderName(c, binding.folder_id) }
-    );
-    return created ? c.json(binding, 201) : c.json(binding);
-  }
-);
-
 deckImportsRouter.get(
   '/:deckId/import',
   describeRoute({
     tags: ['Deck imports'],
-    summary: "Read a deck's import binding",
+    summary: "Read a deck's import history marker",
     description:
-      'A null folder is a binding with nowhere to put images — unbound by hand, or purged out from under it. The cards and the run history are still there either way.',
+      'What this deck was last imported from, and whether a run is open. 404 means it has never been imported into — the artwork goes into the deck itself, so there is nothing to set up first.',
     security: [{ bearerAuth: [] }],
     responses: {
       200: {
@@ -144,35 +77,6 @@ deckImportsRouter.get(
     const deckId = c.req.param('deckId');
     await assertImportAccess(c, deckId, 'read');
     return c.json(await readBinding(c, deckId));
-  }
-);
-
-deckImportsRouter.delete(
-  '/:deckId/import',
-  describeRoute({
-    tags: ['Deck imports'],
-    summary: 'Stop syncing a deck with its export',
-    description:
-      'The images, the cards and the run history all stay. Re-binding the same folder resumes where this left off.',
-    security: [{ bearerAuth: [] }],
-    responses: {
-      204: { description: 'Unbound' },
-      ...writeErrors,
-    },
-  }),
-  async (c) => {
-    const deckId = c.req.param('deckId');
-    const access = await assertImportAccess(c, deckId, 'write');
-    await unbindImport(c, access);
-
-    publishAfterCommit(
-      c.get('postCommitHooks'),
-      c.get('user').id,
-      'deck_import_binding_changed',
-      access.projectId,
-      { deck_id: deckId, binding: null, folder_name: null }
-    );
-    return c.body(null, 204);
   }
 );
 
@@ -196,21 +100,29 @@ deckImportsRouter.post(
   jsonValidator(startImportRunRequestSchema),
   async (c) => {
     const deckId = c.req.param('deckId');
-    const access = await assertImportAccess(c, deckId, 'write');
+    const access = await assertDeckAccess(c, deckId, 'write');
     const body = c.req.valid('json') as {
       id?: string;
       source_label?: string | null;
       pages: { page_number: number; title?: string }[];
     };
 
-    const run = await startRun(c, access, {
-      id: body.id,
-      sourceLabel: body.source_label ?? null,
-      pages: body.pages.map((page) => ({
-        pageNumber: page.page_number,
-        title: page.title ?? null,
-      })),
-    });
+    // Created on the first run rather than set up beforehand: the deck is the
+    // destination, so there is nothing for a person to choose.
+    const { importId } = await ensureImport(c, deckId);
+
+    const run = await startRun(
+      c,
+      { ...access, deckId, importId },
+      {
+        id: body.id,
+        sourceLabel: body.source_label ?? null,
+        pages: body.pages.map((page) => ({
+          pageNumber: page.page_number,
+          title: page.title ?? null,
+        })),
+      }
+    );
     return c.json(run, 201);
   }
 );
@@ -220,7 +132,8 @@ deckImportsRouter.get(
   describeRoute({
     tags: ['Deck imports'],
     summary: "Read a deck's import history",
-    description: 'Newest first. Counts are derived from each run’s own rows rather than cached.',
+    description:
+      'Newest first, and empty for a deck that has never been imported into — there is nothing to set up first, so having no history is not an error. Counts are derived from each run’s own rows rather than cached.',
     security: [{ bearerAuth: [] }],
     responses: {
       200: {
@@ -232,8 +145,15 @@ deckImportsRouter.get(
   }),
   async (c) => {
     const deckId = c.req.param('deckId');
-    const access = await assertImportAccess(c, deckId, 'read');
-    return c.json({ runs: await readTimeline(c, access.importId) });
+    await assertDeckAccess(c, deckId, 'read');
+    const row = await c
+      .get('db')
+      .selectFrom('deck_import')
+      .select(['deck_import.id as id'])
+      .where('deck_import.deck_id', '=', deckId)
+      .executeTakeFirst();
+    if (!row) return c.json({ runs: [] });
+    return c.json({ runs: await readTimeline(c, row.id) });
   }
 );
 

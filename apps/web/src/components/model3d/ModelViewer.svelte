@@ -1,18 +1,20 @@
 <script lang="ts">
   import type { ModelSettings } from '@three-peaks/shared';
-  import type { BuiltModel, ModelViewer as Viewer, SourceImage } from '../../lib/model3d/index.ts';
+  import type { BuiltModel, ModelSources, ModelViewer as Viewer } from '../../lib/model3d/index.ts';
   import Spinner from '../ui/Spinner.svelte';
 
   interface Props {
     settings: ModelSettings;
-    source: SourceImage | null;
-    back: SourceImage | null;
+    // Null until the artwork has been read. The second image, where a kind
+    // takes one, rides along in here rather than as a prop of its own -- what
+    // it is depends on the kind, and the builder is where that is decided.
+    sources: ModelSources | null;
     // Handed up so the screen can export exactly what is on screen rather than
     // rebuilding a second model that might differ.
     onbuild: (model: BuiltModel | null) => void;
   }
 
-  let { settings, source, back, onbuild }: Props = $props();
+  let { settings, sources, onbuild }: Props = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let error = $state<string | null>(null);
@@ -55,14 +57,13 @@
   // reference does not release.
   $effect(() => {
     const snapshot = $state.snapshot(settings) as ModelSettings;
-    const front = source;
-    const reverse = back;
-    if (!viewer || !library || !front) return;
+    const images = sources;
+    if (!viewer || !library || !images) return;
 
     building = true;
     error = null;
     try {
-      const built = library.buildModel(snapshot, front, reverse);
+      const built = library.buildModel(snapshot, images);
       viewer.setContent(built.group);
       if (current) library.disposeModel(current);
       current = built;
@@ -89,7 +90,7 @@
     aria-label="Three-dimensional preview. Drag to turn the model, scroll to zoom."
   ></canvas>
 
-  {#if building || !source}
+  {#if building || !sources}
     <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
       <Spinner label="Building the model" />
     </div>

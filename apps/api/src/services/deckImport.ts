@@ -27,14 +27,20 @@ import {
   type StoredUpload,
 } from './files.ts';
 import { readDeck, readDeckCards } from './decks.ts';
-import { blockedMessage, deletedAncestor } from './folderTree.ts';
+import { type FileHome, homeColumns } from './fileHome.ts';
+import { blockedMessage } from './folderTree.ts';
 import { publishAfterCommit } from './realtime/index.ts';
 import { deleteStoredObjectsAfterCommit, reclaim } from './storage/index.ts';
 import type { AppContext, Connection } from '../types/index.ts';
 
-// Keeping a deck's artwork in step with an export, in three moving parts: a
-// binding that says where the images live, a run that carries one export from
-// the first page to the last, and a mapping row per card that survives both.
+// Keeping a deck's artwork in step with an export, in three moving parts: an
+// import row that remembers which export a deck was last given, a run that
+// carries one of them from the first page to the last, and a mapping row per
+// card that survives both.
+//
+// Where the artwork lands is not one of them any more. The deck owns its cards,
+// so the deck is the destination, and the row below exists for the resume check
+// rather than to say where anything goes.
 //
 // The rule the rest of this file is arranged around: which page becomes which
 // card is decided once, at run start, before any bytes exist. Starting a run
@@ -49,7 +55,6 @@ type Ctx = Pick<AppContext, 'get'>;
 export interface SerializedImport {
   id: string;
   deck_id: string;
-  folder_id: string | null;
   source_kind: string;
   source_label: string | null;
   open_run_id: string | null;
@@ -110,23 +115,30 @@ export interface ImportPageOutcome {
   created: boolean;
 }
 
-const NOT_BOUND = 'This deck is not bound to an import folder';
+// Every file this import writes lands in the deck, so the home is the deck's
+// and nothing else here has to decide it.
+function deckHome(deckId: string): FileHome {
+  return { kind: 'deck', deckId };
+}
 
 function assertOpenRun(status: string): void {
   if (status !== 'open') throw new AppError(409, 'That import run is closed');
 }
 
-function assertBoundFolder(folderId: string | null): string {
-  if (folderId === null) throw new AppError(409, NOT_BOUND);
-  return folderId;
+// Importing writes to the deck's contents, and a tombstone refuses those.
+async function assertDeckLive(db: Connection, deckId: string): Promise<void> {
+  const row = await db
+    .selectFrom('deck')
+    .select(['deck.id as id', 'deck.name as name', 'deck.deleted_at as deleted_at'])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirst();
+  if (!row) throw new AppError(404, 'Deck not found');
+  if (row.deleted_at !== null) {
+    throw new AppError(409, blockedMessage({ id: row.id, name: row.name }, 'This import'));
+  }
 }
 
-async function assertFolderVisible(db: Connection, folderId: string): Promise<void> {
-  const blocked = await deletedAncestor(db, folderId);
-  if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'This import'));
-}
-
-// --- the binding ------------------------------------------------------------
+// --- the import row ---------------------------------------------------------
 
 export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImport> {
   const row = await c
@@ -135,7 +147,6 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
     .select((eb) => [
       'deck_import.id as id',
       'deck_import.deck_id as deck_id',
-      'deck_import.folder_id as folder_id',
       'deck_import.source_kind as source_kind',
       'deck_import.source_label as source_label',
       'deck_import.created_at as created_at',
@@ -153,7 +164,6 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
   return {
     id: row.id,
     deck_id: row.deck_id,
-    folder_id: row.folder_id,
     source_kind: row.source_kind,
     source_label: row.source_label,
     open_run_id: row.open_run_id ?? null,
@@ -162,104 +172,52 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
   };
 }
 
-export interface BindImportInput {
-  folderId: string;
-  sourceKind: string;
-  sourceLabel: string | null;
-}
-
-export async function bindImport(
+/**
+ * The import row for a deck, created on first use.
+ *
+ * There is nothing to bind any more: a deck owns its cards, so where the
+ * artwork lands is the deck itself. What survives is the row that remembers
+ * which export this deck was last given, because resuming a run compares the
+ * name and the page count against it before a page goes up.
+ *
+ * A row with no runs is indistinguishable from one that has never existed,
+ * which is what makes this safe to call on every start.
+ */
+export async function ensureImport(
   c: Ctx,
   deckId: string,
-  projectId: string,
-  input: BindImportInput
-): Promise<{ binding: SerializedImport; created: boolean }> {
+  sourceKind = 'zip'
+): Promise<{ importId: string }> {
   const db = c.get('db');
-
-  const folder = await db
-    .selectFrom('folder')
-    .select(['folder.id as id'])
-    .where('folder.id', '=', input.folderId)
-    .where('folder.project_id', '=', projectId)
-    .executeTakeFirst();
-  // Indistinguishable from a folder in somebody else's project, deliberately.
-  if (!folder) throw new AppError(404, 'Folder not found');
-  if ((await deletedAncestor(db, input.folderId)) !== null) {
-    throw new AppError(404, 'Folder not found');
-  }
 
   const existing = await db
     .selectFrom('deck_import')
-    .select(['deck_import.id as id', 'deck_import.folder_id as folder_id'])
+    .select(['deck_import.id as id'])
     .where('deck_import.deck_id', '=', deckId)
     .forUpdate()
     .executeTakeFirst();
+  if (existing) return { importId: existing.id };
 
-  if (!existing) {
-    try {
-      await db
-        .insertInto('deck_import')
-        .values({
-          id: newId(),
-          deck_id: deckId,
-          folder_id: input.folderId,
-          source_kind: input.sourceKind,
-          source_label: input.sourceLabel,
-        })
-        .execute();
-    } catch (error) {
-      // Two binds of one deck at once; the unique on deck_id refuses the second.
-      if (isUniqueViolation(error)) {
-        throw new AppError(409, 'This deck is already bound to a folder');
-      }
-      throw error;
+  const id = newId();
+  try {
+    await db
+      .insertInto('deck_import')
+      .values({ id, deck_id: deckId, source_kind: sourceKind })
+      .execute();
+  } catch (error) {
+    // Two first imports of one deck at once; the unique on deck_id refuses the
+    // second, and the row the first wrote is the one both then use.
+    if (isUniqueViolation(error)) {
+      const row = await db
+        .selectFrom('deck_import')
+        .select(['deck_import.id as id'])
+        .where('deck_import.deck_id', '=', deckId)
+        .executeTakeFirstOrThrow();
+      return { importId: row.id };
     }
-    return { binding: await readBinding(c, deckId), created: true };
+    throw error;
   }
-
-  // Asked about the cards rather than about the old folder id, so re-binding
-  // the folder an unbind left behind resumes instead of being refused.
-  const stray = await db
-    .selectFrom('deck_import_card')
-    .innerJoin('file', 'file.id', 'deck_import_card.file_id')
-    .select(['deck_import_card.id as id'])
-    .where('deck_import_card.import_id', '=', existing.id)
-    .where('deck_import_card.detached_at', 'is', null)
-    .where(sql<boolean>`file.folder_id is distinct from ${input.folderId}::uuid`)
-    .limit(1)
-    .executeTakeFirst();
-  if (stray) {
-    throw new AppError(
-      409,
-      'This deck has imported cards in another folder. Move them there first, or unbind'
-    );
-  }
-
-  await db
-    .updateTable('deck_import')
-    .set({
-      folder_id: input.folderId,
-      source_kind: input.sourceKind,
-      source_label: input.sourceLabel,
-      updated_at: new Date(),
-    })
-    .where('deck_import.id', '=', existing.id)
-    .execute();
-
-  return { binding: await readBinding(c, deckId), created: false };
-}
-
-export async function unbindImport(c: Ctx, access: ImportAccess): Promise<void> {
-  const db = c.get('db');
-  await assertNoOpenRun(db, access.importId);
-
-  // A row with no folder rather than no row: deleting it would cascade the
-  // mapping and every run away, and re-binding would then see each card as new.
-  await db
-    .updateTable('deck_import')
-    .set({ folder_id: null, updated_at: new Date() })
-    .where('deck_import.id', '=', access.importId)
-    .execute();
+  return { importId: id };
 }
 
 async function assertNoOpenRun(db: Connection, importId: string): Promise<void> {
@@ -605,7 +563,7 @@ function orderedManifest(pages: StartRunPage[]): StartRunPage[] {
 async function readLiveMapping(
   db: Connection,
   importId: string,
-  folderId: string
+  deckId: string
 ): Promise<MappingRow[]> {
   return await db
     .selectFrom('deck_import_card')
@@ -621,7 +579,7 @@ async function readLiveMapping(
     ])
     .where('deck_import_card.import_id', '=', importId)
     .where('deck_import_card.detached_at', 'is', null)
-    .where('file.folder_id', '=', folderId)
+    .where('file.deck_id', '=', deckId)
     // The order the page-number probe reads its candidates in, and every part
     // of it is total: a live card before a tombstoned one, because restoring a
     // tombstone while a live card still sits at that number is the worse
@@ -793,18 +751,17 @@ export async function startRun(
   input: StartRunInput
 ): Promise<StartedRun> {
   const db = c.get('db');
-  const folderId = assertBoundFolder(access.folderId);
-  await assertFolderVisible(db, folderId);
+  await assertDeckLive(db, access.deckId);
   await assertNoOpenRun(db, access.importId);
 
   const pages = orderedManifest(input.pages);
   await lockImportFiles(db, access.importId);
   // Before the mapping is read, so what the plan sees and what the partial
   // unique index constrains cannot disagree: a row whose file has left the
-  // folder is invisible to matching while it still holds its key.
-  await detachMovedCards(db, access.importId, folderId);
+  // deck is invisible to matching while it still holds its key.
+  await detachMovedCards(db, access.importId, access.deckId);
 
-  const mapping = await readLiveMapping(db, access.importId, folderId);
+  const mapping = await readLiveMapping(db, access.importId, access.deckId);
   const planned = planPages(pages, mapping);
   await assertPlanWithinCap(db, access.deckId, mapping, planned);
 
@@ -907,13 +864,11 @@ interface OpenRun {
   importId: string;
   deckId: string;
   projectId: string;
-  folderId: string;
 }
 
 interface CardFile {
   id: string;
   project_id: string;
-  folder_id: string | null;
   filename: string;
   name_locked: boolean;
   deleted_at: Date | string | null;
@@ -922,11 +877,59 @@ interface CardFile {
 const CARD_FILE_COLUMNS = [
   'file.id as id',
   'file.project_id as project_id',
-  'file.folder_id as folder_id',
   'file.filename as filename',
   'file.name_locked as name_locked',
   'file.deleted_at as deleted_at',
 ] as const;
+
+// Idempotent in both halves: a page re-imported onto a card the deck already
+// holds must not add a second row, and a card restored after a finish took it
+// out needs its place back.
+async function placeCardInDeck(
+  db: Connection,
+  deckId: string,
+  cardId: string,
+  fileId: string
+): Promise<void> {
+  const existing = await db
+    .selectFrom('deck_card')
+    .select(['deck_card.id as id'])
+    .where('deck_card.deck_id', '=', deckId)
+    .where('deck_card.file_id', '=', fileId)
+    .executeTakeFirst();
+
+  if (!existing) {
+    // Checked here as well as at run start, because a hand edit can take the
+    // last free place while the run is open. The page is the right thing to
+    // refuse: a deck past the cap is one the deck editor can never save again,
+    // and finding that out at finish costs the whole upload.
+    const held = await countDeckCards(db, deckId);
+    if (held + 1 > MAX_DECK_CARDS) throw cardCapError(held + 1);
+
+    const top = await db
+      .selectFrom('deck_card')
+      .select((eb) => eb.fn.max('deck_card.position').as('position'))
+      .where('deck_card.deck_id', '=', deckId)
+      .executeTakeFirst();
+    await db
+      .insertInto('deck_card')
+      .values({
+        id: newId(),
+        deck_id: deckId,
+        file_id: fileId,
+        quantity: 1,
+        position: (top?.position ?? -1) + 1,
+      })
+      .execute();
+  }
+
+  await db
+    .updateTable('deck_import_card')
+    .set({ added_to_deck_at: new Date() })
+    .where('deck_import_card.id', '=', cardId)
+    .where('deck_import_card.added_to_deck_at', 'is', null)
+    .execute();
+}
 
 // A name a person typed is not this import's to overwrite.
 function nameForCard(file: CardFile, derived: string): string {
@@ -1033,12 +1036,8 @@ export async function importPage(
   input: ImportPageInput
 ): Promise<ImportPageOutcome> {
   const db = c.get('db');
-  const folderId = assertBoundFolder(access.folderId);
 
-  // Every refusal that can be made before a byte moves is made here. The full
-  // ancestor walk is not among them: it is up to 64 queries, it runs at the
-  // start of the run and again at finish, and per page it would be the cost of
-  // the import.
+  // Every refusal that can be made before a byte moves is made here.
   const declared = await db
     .selectFrom('import_run')
     .select(['import_run.status as status', 'import_run.page_count as page_count'])
@@ -1057,15 +1056,7 @@ export async function importPage(
     );
   }
 
-  const folder = await db
-    .selectFrom('folder')
-    .select(['folder.name as name', 'folder.deleted_at as deleted_at'])
-    .where('folder.id', '=', folderId)
-    .executeTakeFirst();
-  if (!folder) throw new AppError(409, NOT_BOUND);
-  if (folder.deleted_at !== null) {
-    throw new AppError(409, blockedMessage({ id: folderId, name: folder.name }, 'This import'));
-  }
+  await assertDeckLive(db, access.deckId);
 
   assertUploadSize(input.declaredLength);
   if (input.declaredLength > 0) await assertQuota(c, access.projectId, input.declaredLength);
@@ -1076,7 +1067,6 @@ export async function importPage(
     importId: access.importId,
     deckId: access.deckId,
     projectId: access.projectId,
-    folderId,
   };
 
   try {
@@ -1151,7 +1141,7 @@ async function landPage(
   let restored = false;
   if (file.deleted_at !== null) {
     const wanted = nameForCard(file, derivedName);
-    const filename = await freeFilename(db, run.projectId, file.folder_id, wanted);
+    const filename = await freeFilename(db, run.projectId, deckHome(run.deckId), wanted);
     await restoreFile(c, file.id, { filename, lockName: false, notify: false });
     file = { ...file, filename, deleted_at: null };
     restored = true;
@@ -1163,6 +1153,12 @@ async function landPage(
     byteSize: stored.byteSize,
     checksum: stored.checksum,
   });
+
+  // The moment its bytes land, not at finish. The file is in the deck either
+  // way now, and artwork a deck holds with no place in its arrangement is the
+  // one state owning it is meant not to have -- which an abandoned run would
+  // otherwise leave behind for every page that got through.
+  await placeCardInDeck(db, run.deckId, planned.card_id, file.id);
 
   const previousName = file.filename;
   const finalName = createdFile
@@ -1294,7 +1290,7 @@ async function resolveInsertKey(
 
 async function createCard(c: Ctx, run: OpenRun, card: NewCard): Promise<CardFile> {
   const db = c.get('db');
-  const filename = await freeFilename(db, run.projectId, run.folderId, card.derivedName);
+  const filename = await freeFilename(db, run.projectId, deckHome(run.deckId), card.derivedName);
   const identityKey = await resolveInsertKey(db, run.importId, card.identityKey, card.cardId);
 
   let file: CardFile;
@@ -1304,7 +1300,7 @@ async function createCard(c: Ctx, run: OpenRun, card: NewCard): Promise<CardFile
       .values({
         id: newId(),
         project_id: run.projectId,
-        folder_id: run.folderId,
+        ...homeColumns(deckHome(run.deckId)),
         filename,
         // The key appendFileVersion is about to be handed, so it recognises the
         // row as one just inserted rather than adopting a mirror as version 1.
@@ -1358,7 +1354,7 @@ async function renamedTo(
   if (title === null || title.trim().length === 0) return file.filename;
   const wanted = nameForCard(file, derivedName);
   if (wanted === file.filename) return file.filename;
-  const free = await freeFilename(db, run.projectId, file.folder_id, wanted);
+  const free = await freeFilename(db, run.projectId, deckHome(run.deckId), wanted);
   return free === wanted ? wanted : file.filename;
 }
 
@@ -1376,11 +1372,7 @@ export async function finishRun(c: Ctx, access: ImportRunAccess): Promise<RunDet
   const run = await lockRun(db, access.runId);
   assertOpenRun(run.status);
 
-  const folderId = assertBoundFolder(access.folderId);
-  // The whole walk here, unlike per page: this is the step that deletes things,
-  // and reporting a clean import into a folder nobody can see is worse than
-  // refusing to do it.
-  await assertFolderVisible(db, folderId);
+  await assertDeckLive(db, access.deckId);
 
   const imported = await countImportedPages(db, access.runId);
   if (imported !== run.page_count) {
@@ -1394,7 +1386,7 @@ export async function finishRun(c: Ctx, access: ImportRunAccess): Promise<RunDet
   // why it is a step of its own.
   await lockImportFiles(db, access.importId);
   // Again here, for a move made while the run was open.
-  await detachMovedCards(db, access.importId, folderId);
+  await detachMovedCards(db, access.importId, access.deckId);
   await applyPlannedIdentities(db, access.runId);
   const removed = await tombstoneUnmatched(c, access);
   await syncDeckMembership(c, access, removed);
@@ -1450,7 +1442,7 @@ async function countImportedPages(db: Connection, runId: string): Promise<number
 // made by a pod on the previous release. Runs both when a run starts and when
 // it finishes, and before the re-key below either way, so a detached row has
 // already left the partial unique index.
-async function detachMovedCards(db: Connection, importId: string, folderId: string): Promise<void> {
+async function detachMovedCards(db: Connection, importId: string, deckId: string): Promise<void> {
   await db
     .updateTable('deck_import_card')
     .from('file')
@@ -1458,7 +1450,7 @@ async function detachMovedCards(db: Connection, importId: string, folderId: stri
     .whereRef('file.id', '=', 'deck_import_card.file_id')
     .where('deck_import_card.import_id', '=', importId)
     .where('deck_import_card.detached_at', 'is', null)
-    .where(sql<boolean>`file.folder_id is distinct from ${folderId}::uuid`)
+    .where(sql<boolean>`file.deck_id is distinct from ${deckId}::uuid`)
     .execute();
 }
 

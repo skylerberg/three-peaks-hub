@@ -2,16 +2,24 @@ import { Hono } from 'hono';
 import { describeRoute, resolver } from 'hono-openapi';
 import {
   assertDeckAccess,
-  assertFilesInProject,
   assertProjectAccess,
   assertProjectWrite,
 } from '../services/authorization.ts';
-import { readDeck, readDeckCards, serializeDeck, withCounts } from '../services/decks.ts';
+import {
+  assertCardFiles,
+  readDeck,
+  readDeckCards,
+  serializeDeck,
+  withCounts,
+} from '../services/decks.ts';
+import { ownedStorageKeys } from '../services/files.ts';
+import { deleteStoredObjectsAfterCommit } from '../services/storage/index.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
 import { projectQuerySchema } from '../schemas/common.ts';
+import { purgeQuerySchema } from '../schemas/files.ts';
 import {
   createDeckRequestSchema,
   deckListSchema,
@@ -61,6 +69,7 @@ decksRouter.get(
 
     const rows = await withCounts(c.get('db'))
       .where('deck.project_id', '=', projectId)
+      .where('deck.deleted_at', 'is', null)
       .orderBy('deck.name', 'asc')
       .execute();
 
@@ -98,9 +107,13 @@ decksRouter.post(
     };
     await assertProjectWrite(c, body.project_id);
 
-    const backFileId = body.back_file_id ?? null;
-    if (backFileId !== null) {
-      await assertFilesInProject(c, [backFileId], body.project_id, 'The card back');
+    // A deck's back is one of its own images, and it has none yet: the deck is
+    // created, the artwork is uploaded into it, and the back is chosen then.
+    if (body.back_file_id !== undefined && body.back_file_id !== null) {
+      throw new AppError(
+        422,
+        'A new deck has no images yet. Create it, upload the back into it, then set it'
+      );
     }
 
     const id = body.id ?? newId();
@@ -114,7 +127,7 @@ decksRouter.post(
           name: body.name,
           card_width_mm: body.card_width_mm,
           card_height_mm: body.card_height_mm,
-          back_file_id: backFileId,
+          back_file_id: null,
           created_by: c.get('user').id,
         })
         .execute();
@@ -193,7 +206,23 @@ decksRouter.patch(
     };
 
     if (body.back_file_id !== undefined && body.back_file_id !== null) {
-      await assertFilesInProject(c, [body.back_file_id], access.projectId, 'The card back');
+      // The deck's own, not the project's: a back living in Assets would be
+      // deck artwork the explorer still lists, which is the duplication owning
+      // artwork exists to remove.
+      const own = await c
+        .get('db')
+        .selectFrom('file')
+        .select(['file.id as id'])
+        .where('file.id', '=', body.back_file_id)
+        .where('file.deck_id', '=', deckId)
+        .where('file.deleted_at', 'is', null)
+        .executeTakeFirst();
+      if (!own) {
+        throw new AppError(
+          422,
+          'The card back has to be an image this deck holds. Upload it here, or move it in from Assets.'
+        );
+      }
     }
 
     const patch = {
@@ -236,10 +265,78 @@ decksRouter.delete(
     tags: ['Decks'],
     summary: 'Delete a deck',
     description:
-      'Editors only, and unlike a file this is not recoverable — a deck stores no bytes, so there is nothing for a tombstone to protect and no purge to reclaim. The images it named are untouched.',
+      'Soft by default: the deck is tombstoned and its artwork keeps every byte, so a restore is exact. `purge=true` is the irreversible one \u2014 it takes the cards with it and reclaims every stored object. Only the literal word is accepted.',
     security: [{ bearerAuth: [] }],
     responses: {
       204: { description: 'Deleted' },
+      ...forbiddenErrorResponse,
+      ...standardErrors,
+    },
+  }),
+  queryValidator(purgeQuerySchema),
+  async (c) => {
+    const deckId = c.req.param('deckId');
+    const access = await assertDeckAccess(c, deckId, 'write');
+    const db = c.get('db');
+
+    if ((c.req.valid('query') as { purge?: string }).purge !== 'true') {
+      // Only this row. Its cards are never marked: visibility is derived from
+      // the deck above them, so a restore is symmetric with the delete rather
+      // than resurrecting artwork somebody took out one card at a time.
+      const marked = await db
+        .updateTable('deck')
+        .set({ deleted_at: new Date(), deleted_by: c.get('user').id })
+        // A repeat delete leaves the first one's record intact.
+        .where('deck.id', '=', deckId)
+        .where('deck.deleted_at', 'is', null)
+        .returning(['deck.id as id'])
+        .executeTakeFirst();
+
+      if (marked) {
+        publishAfterCommit(
+          c.get('postCommitHooks'),
+          c.get('user').id,
+          'deck_deleted',
+          access.projectId,
+          { ...(await readDeck(c, deckId)), purged: false }
+        );
+      }
+      return c.body(null, 204);
+    }
+
+    // Before the delete: the cascade takes every card's file row with the deck,
+    // and nothing else names the objects those rows point at.
+    const keys = await ownedStorageKeys(db, { deckId });
+    const doomed = await readDeck(c, deckId);
+
+    await db.deleteFrom('deck').where('deck.id', '=', deckId).execute();
+
+    deleteStoredObjectsAfterCommit(c.get('postCommitHooks'), keys);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'deck_deleted',
+      access.projectId,
+      { ...doomed, purged: true }
+    );
+    return c.body(null, 204);
+  }
+);
+
+decksRouter.post(
+  '/:deckId/restore',
+  describeRoute({
+    tags: ['Decks'],
+    summary: 'Restore a deleted deck',
+    description:
+      'Brings the deck back with whatever cards it still has. A card deleted on its own stays deleted \u2014 a tombstone above a row is not a tombstone on it. Restoring a live deck answers 200 and changes nothing.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Restored',
+        content: { 'application/json': { schema: resolver(deckWithCardsSchema) } },
+      },
+      ...conflictErrorResponse,
       ...forbiddenErrorResponse,
       ...standardErrors,
     },
@@ -248,18 +345,30 @@ decksRouter.delete(
     const deckId = c.req.param('deckId');
     const access = await assertDeckAccess(c, deckId, 'write');
 
-    await c.get('db').deleteFrom('deck').where('deck.id', '=', deckId).execute();
+    try {
+      await c
+        .get('db')
+        .updateTable('deck')
+        .set({ deleted_at: null, deleted_by: null, updated_at: new Date() })
+        .where('deck.id', '=', deckId)
+        .execute();
+    } catch (error) {
+      // The name it had may have been taken while it was gone.
+      if (isUniqueViolation(error)) {
+        throw new AppError(409, 'A deck with that name already exists in this project');
+      }
+      throw error;
+    }
 
+    const [deck, cards] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
     publishAfterCommit(
       c.get('postCommitHooks'),
       c.get('user').id,
-      'deck_deleted',
+      'deck_updated',
       access.projectId,
-      {
-        id: deckId,
-      }
+      { deck, cards }
     );
-    return c.body(null, 204);
+    return c.json({ deck, cards });
   }
 );
 
@@ -294,7 +403,7 @@ decksRouter.put(
     if (new Set(fileIds).size !== fileIds.length) {
       throw new AppError(422, 'A card can only appear in a deck once — raise its quantity instead');
     }
-    await assertFilesInProject(c, fileIds, access.projectId, 'Every card');
+    await assertCardFiles(c, deckId, fileIds);
 
     const db = c.get('db');
     await db.deleteFrom('deck_card').where('deck_card.deck_id', '=', deckId).execute();

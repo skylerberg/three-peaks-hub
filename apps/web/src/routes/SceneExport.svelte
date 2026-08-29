@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    DEFAULT_CARD_SETTINGS,
     DEFAULT_LIBRARY_COLOR,
     DEFAULT_LIBRARY_SIZE_MM,
     DEFAULT_SCENE_RENDER,
@@ -8,21 +7,29 @@
     SCENE_TEXT_LIMITS,
     type LibraryPiece,
     type ModelSettings,
+    type PunchboardModelSettings,
     type RenderEngine,
   } from '@three-peaks/shared';
   import type { components } from '@three-peaks/shared/api';
-  import FileChoices from '../components/scene/FileChoices.svelte';
+  import ComponentChoices from '../components/scene/ComponentChoices.svelte';
   import LibraryPieces from '../components/scene/LibraryPieces.svelte';
   import RenderSettings from '../components/scene/RenderSettings.svelte';
   import ShotTemplate from '../components/scene/ShotTemplate.svelte';
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
+  import type { ProjectComponent } from '../lib/components.svelte.ts';
   import { type Deck, type DeckCard, decks } from '../lib/decks.svelte.ts';
   import { saveBlob } from '../lib/download.ts';
   import { newId } from '../lib/ids.ts';
   import { link } from '../lib/router.svelte.ts';
-  import type { SceneBundleProgress, SceneImageRef, SceneSelection } from '../lib/scene/index.ts';
+  import type {
+    Footprint,
+    SceneBundleProgress,
+    SceneComponentSelection,
+    SceneImageRef,
+    SceneSelection,
+  } from '../lib/scene/index.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
 
@@ -50,9 +57,9 @@
   let loading = $state(true);
   let loaded = $state<{ deck: Deck; cards: DeckCard[] }[]>([]);
   let selectedDecks = $state<Record<string, boolean>>({});
-  // The whole row rather than a tick. The picker walks folders, so the listing
-  // a file was chosen from is long gone by the time Export is pressed.
-  let selectedFiles = $state<Record<string, FileRow | undefined>>({});
+  // The whole row rather than a tick: the picker's listing is long gone by the
+  // time Export is pressed, and a component carries the files it is built from.
+  let selectedComponents = $state<Record<string, ProjectComponent | undefined>>({});
   let pieces = $state<PieceRow[]>([]);
   let templates = $state<{ id: string; name: string; description: string }[]>([]);
   let templateId = $state('');
@@ -125,8 +132,8 @@
       .filter((entry) => entry.cards.length > 0)
   );
 
-  const chosenFiles = $derived(
-    Object.values(selectedFiles).filter((row): row is FileRow => row !== undefined)
+  const chosenComponents = $derived(
+    Object.values(selectedComponents).filter((row): row is ProjectComponent => row !== undefined)
   );
 
   const pieceCount = $derived(pieces.reduce((total, row) => total + row.count, 0));
@@ -136,12 +143,39 @@
       0
     )
   );
-  const instanceCount = $derived(cardCount + chosenFiles.length + pieceCount);
+  // A punchboard puts its sheet and every token on the table, and how many
+  // tokens that is only the die line knows. One apiece here is the floor, and
+  // the real count is checked against the bound when the plan is built.
+  const instanceCount = $derived(cardCount + chosenComponents.length + pieceCount);
   const tooBig = $derived(instanceCount > SCENE_LIMITS.instances[1]);
 
-  function toggleFile(file: FileRow, on: boolean): void {
-    if (on) selectedFiles[file.id] = file;
-    else delete selectedFiles[file.id];
+  function toggleComponent(component: ProjectComponent, on: boolean): void {
+    if (on) selectedComponents[component.id] = component;
+    else delete selectedComponents[component.id];
+  }
+
+  function roleFile(component: ProjectComponent, role: 'artwork' | 'cut'): FileRow | null {
+    return component.files.find((entry) => entry.role === role)?.file ?? null;
+  }
+
+  // A punchboard is a sheet and a token each, and the die line is what says how
+  // many. Read here rather than in the planner: parsing an SVG needs three, and
+  // the planner is deliberately the half of this that does not touch it.
+  async function punchboardParts(
+    component: ProjectComponent,
+    cut: FileRow
+  ): Promise<{ part: string; label: string; footprint: Footprint }[]> {
+    const { MM, loadSource, punchboardLayout } = await import('../lib/model3d/index.ts');
+    const source = await loadSource(cut.id, cut.content_type);
+    if (source.svgText === null) throw new Error(`${cut.filename} is not an SVG cut sheet.`);
+
+    const settings = component.settings as PunchboardModelSettings;
+    const layout = punchboardLayout(settings, source.svgText);
+    return layout.pieces.map((piece, index) => ({
+      part: piece.name,
+      label: index === 0 ? component.name : `${component.name} ${piece.name}`,
+      footprint: { width_mm: piece.size.width / MM, depth_mm: piece.size.height / MM },
+    }));
   }
 
   function addPiece(piece: LibraryPiece): void {
@@ -185,13 +219,12 @@
     }
   }
 
-  // What each component is built from: its dial-in, and the row of whatever it
-  // is backed with. Only the ids are on screen, so both are read here rather
-  // than kept in step with every tick.
+  // What each component is built from. A component carries its own files and
+  // its own dial-in, so the only thing still to read is a deck card's -- and,
+  // for a punchboard, the die line that says how many tokens there are.
   async function resolveSelection(): Promise<SceneSelection> {
     // eslint-disable-next-line svelte/prefer-svelte-reactivity -- filled and read inside this one call; nothing renders from it
     const rows = new Map<string, FileRow>();
-    for (const row of chosenFiles) rows.set(row.id, row);
     for (const entry of chosenDecks)
       for (const card of entry.cards) rows.set(card.file.id, card.file);
 
@@ -200,13 +233,9 @@
     );
 
     const backs: string[] = [];
-    const want = (fileId: string | null) => {
+    for (const entry of chosenDecks) {
+      const fileId = entry.deck.back_file_id;
       if (fileId && !rows.has(fileId) && !backs.includes(fileId)) backs.push(fileId);
-    };
-    for (const entry of chosenDecks) want(entry.deck.back_file_id);
-    for (const row of chosenFiles) {
-      const settings = dialled.get(row.id) ?? null;
-      want(settings?.kind === 'card' ? settings.back_file_id : null);
     }
     for (const row of await inBatches(backs, (id) =>
       api.GET('/api/files/{id}', { params: { path: { id } } }).then(assertOk)
@@ -219,17 +248,44 @@
       return row ? { file_id: row.id, content_type: row.content_type } : null;
     };
 
-    return {
-      files: chosenFiles.map((row) => {
-        const settings = dialled.get(row.id) ?? null;
-        return {
-          label: label(row.filename),
-          front: { file_id: row.id, content_type: row.content_type },
-          back: ref(settings?.kind === 'card' ? settings.back_file_id : null),
-          settings: settings ?? { ...DEFAULT_CARD_SETTINGS },
+    const components: SceneComponentSelection[] = [];
+    for (const component of chosenComponents) {
+      const artwork = roleFile(component, 'artwork');
+      if (!artwork) continue;
+      const front = { file_id: artwork.id, content_type: artwork.content_type };
+      const settings = component.settings as ModelSettings;
+      const cutRow = roleFile(component, 'cut');
+      const cut = cutRow ? { file_id: cutRow.id, content_type: cutRow.content_type } : null;
+
+      if (settings.kind !== 'punchboard' || !cutRow) {
+        components.push({
+          label: label(component.name),
+          front,
+          back: null,
+          cut,
+          settings,
           copies: 1,
-        };
-      }),
+          part: null,
+        });
+        continue;
+      }
+
+      for (const piece of await punchboardParts(component, cutRow)) {
+        components.push({
+          label: label(piece.label),
+          front,
+          back: null,
+          cut,
+          settings,
+          copies: 1,
+          part: piece.part,
+          footprint: { ...piece.footprint, height_mm: settings.thickness_mm },
+        });
+      }
+    }
+
+    return {
+      files: components,
       decks: chosenDecks.map((entry) => ({
         deck_id: entry.deck.id,
         name: entry.deck.name,
@@ -348,15 +404,19 @@
 
       <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 class="text-lg font-semibold">Other images</h2>
-          {#if chosenFiles.length > 0}
+          <h2 class="text-lg font-semibold">Components</h2>
+          {#if chosenComponents.length > 0}
             <div class="flex items-center gap-2">
-              <span class="text-sm text-muted">{chosenFiles.length} picked</span>
-              <Button variant="ghost" onclick={() => (selectedFiles = {})}>Clear</Button>
+              <span class="text-sm text-muted">{chosenComponents.length} picked</span>
+              <Button variant="ghost" onclick={() => (selectedComponents = {})}>Clear</Button>
             </div>
           {/if}
         </div>
-        <FileChoices {projectId} selected={selectedFiles} ontoggle={toggleFile} />
+        <ComponentChoices
+          {projectId}
+          selected={Object.fromEntries(chosenComponents.map((row) => [row.id, true]))}
+          ontoggle={toggleComponent}
+        />
       </section>
 
       <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">

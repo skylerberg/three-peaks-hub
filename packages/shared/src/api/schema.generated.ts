@@ -494,6 +494,26 @@ export interface paths {
     patch: operations['patchApiFilesById'];
     trace?: never;
   };
+  '/api/files/{id}/move': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Move a file to another home
+     * @description Between Assets, a deck and a component, in either direction. The name is re-deduplicated against the destination, so a move never fails on a name the file cannot see. Arriving in a deck makes the file a card in it, or its back; leaving one takes it out of the arrangement.
+     */
+    post: operations['postApiFilesByIdMove'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/files/{id}/restore': {
     parameters: {
       query?: never;
@@ -508,6 +528,78 @@ export interface paths {
      * @description Takes an optional `filename`, because the old one may have been taken while the file was gone. Renaming first would leave a window in which the tombstone still held it. Restoring a file that is not deleted answers 200 and changes nothing.
      */
     post: operations['postApiFilesByIdRestore'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/components': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List a project’s components
+     * @description Optionally narrowed to one kind, which is what a section screen asks for. Each row carries its own files, so a section draws its thumbnails without a request per component.
+     */
+    get: operations['getApiComponents'];
+    put?: never;
+    /**
+     * Create a component
+     * @description Starts with no artwork: a component is named first and its images are uploaded into it afterwards, which is what `missing_roles` on the response reports. Settings default to the studio’s own defaults for the kind.
+     */
+    post: operations['postApiComponents'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/components/{componentId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get one component
+     * @description Including a tombstoned one: its settings and its artwork are what somebody deciding whether to restore it reads first.
+     */
+    get: operations['getApiComponentsByComponentId'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a component
+     * @description Soft by default: the component is tombstoned and its artwork keeps every byte, so restoring it is exact. `purge=true` is the irreversible one — it takes the artwork with it and reclaims every stored object. Only the literal word is accepted.
+     */
+    delete: operations['deleteApiComponentsByComponentId'];
+    options?: never;
+    head?: never;
+    /**
+     * Rename a component or save its settings
+     * @description Editors only. Both fields are optional; an absent one is left alone. Allowed on a tombstoned component, the way a deleted file’s 3D settings are — a component’s dial-in is not its contents.
+     */
+    patch: operations['patchApiComponentsByComponentId'];
+    trace?: never;
+  };
+  '/api/components/{componentId}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted component
+     * @description Brings the component back with whatever artwork it still has. Artwork deleted on its own stays deleted — a tombstone above a row is not a tombstone on it. Restoring a live component answers 200 and changes nothing.
+     */
+    post: operations['postApiComponentsByComponentIdRestore'];
     delete?: never;
     options?: never;
     head?: never;
@@ -578,7 +670,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a deck
-     * @description Editors only, and unlike a file this is not recoverable — a deck stores no bytes, so there is nothing for a tombstone to protect and no purge to reclaim. The images it named are untouched.
+     * @description Soft by default: the deck is tombstoned and its artwork keeps every byte, so a restore is exact. `purge=true` is the irreversible one — it takes the cards with it and reclaims every stored object. Only the literal word is accepted.
      */
     delete: operations['deleteApiDecksByDeckId'];
     options?: never;
@@ -588,6 +680,26 @@ export interface paths {
      * @description Editors only. Every field is optional; an absent one is left alone.
      */
     patch: operations['patchApiDecksByDeckId'];
+    trace?: never;
+  };
+  '/api/decks/{deckId}/restore': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore a deleted deck
+     * @description Brings the deck back with whatever cards it still has. A card deleted on its own stays deleted — a tombstone above a row is not a tombstone on it. Restoring a live deck answers 200 and changes nothing.
+     */
+    post: operations['postApiDecksByDeckIdRestore'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/decks/{deckId}/cards': {
@@ -618,21 +730,13 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Read a deck's import binding
-     * @description A null folder is a binding with nowhere to put images — unbound by hand, or purged out from under it. The cards and the run history are still there either way.
+     * Read a deck's import history marker
+     * @description What this deck was last imported from, and whether a run is open. 404 means it has never been imported into — the artwork goes into the deck itself, so there is nothing to set up first.
      */
     get: operations['getApiDecksByDeckIdImport'];
-    /**
-     * Bind a deck to a folder of imported artwork
-     * @description Idempotent: re-binding to the same folder only updates the label. Re-binding to a different one while the import still has cards in the old folder is refused.
-     */
-    put: operations['putApiDecksByDeckIdImport'];
+    put?: never;
     post?: never;
-    /**
-     * Stop syncing a deck with its export
-     * @description The images, the cards and the run history all stay. Re-binding the same folder resumes where this left off.
-     */
-    delete: operations['deleteApiDecksByDeckIdImport'];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -647,7 +751,7 @@ export interface paths {
     };
     /**
      * Read a deck's import history
-     * @description Newest first. Counts are derived from each run’s own rows rather than cached.
+     * @description Newest first, and empty for a deck that has never been imported into — there is nothing to set up first, so having no history is not an error. Counts are derived from each run’s own rows rather than cached.
      */
     get: operations['getApiDecksByDeckIdImportRuns'];
     put?: never;
@@ -796,6 +900,174 @@ export interface components {
         name: string;
       };
     };
+    Component: {
+      created_at: string;
+      created_by: string;
+      deleted_at: string | null;
+      files: {
+        file: {
+          byte_size: number;
+          component_id: string | null;
+          component_role: string | null;
+          content_type: string;
+          created_at: string;
+          deck_id: string | null;
+          deleted_at: string | null;
+          filename: string;
+          folder_id: string | null;
+          id: string;
+          image_height: number | null;
+          image_width: number | null;
+          name_locked: boolean;
+          project_id: string;
+          updated_at: string;
+          uploaded_by: string;
+        };
+        /** @enum {unknown} */
+        role: 'artwork' | 'cut';
+      }[];
+      id: string;
+      kind: string;
+      missing_roles: ('artwork' | 'cut')[];
+      name: string;
+      project_id: string;
+      settings:
+        | {
+            back_color: string;
+            edge_color: string;
+            height_mm: number;
+            /** @constant */
+            kind: 'punchboard';
+            seed: number;
+            /** @enum {unknown} */
+            sheet_state: 'intact' | 'punched';
+            thickness_mm: number;
+            width_mm: number;
+          }
+        | {
+            bevel_mm: number;
+            grain_color: string;
+            grain_scale: number;
+            /** @constant */
+            kind: 'wood';
+            longest_side_mm: number;
+            printed: boolean;
+            seed: number;
+            simplify_tolerance: number;
+            thickness_mm: number;
+            /** @enum {unknown} */
+            trace_source: 'alpha' | 'luminance';
+            trace_threshold: number;
+            wood_color: string;
+          }
+        | {
+            corner_bevel_mm: number;
+            depth_mm: number;
+            height_mm: number;
+            /** @constant */
+            kind: 'box';
+            seed: number;
+            width_mm: number;
+          }
+        | {
+            edge_color: string;
+            /** @enum {unknown} */
+            fold: 'bifold' | 'none' | 'quadfold';
+            fold_gap_mm: number;
+            height_mm: number;
+            /** @constant */
+            kind: 'board';
+            seed: number;
+            thickness_mm: number;
+            width_mm: number;
+          };
+      updated_at: string;
+    };
+    ComponentList: {
+      components: {
+        created_at: string;
+        created_by: string;
+        deleted_at: string | null;
+        files: {
+          file: {
+            byte_size: number;
+            component_id: string | null;
+            component_role: string | null;
+            content_type: string;
+            created_at: string;
+            deck_id: string | null;
+            deleted_at: string | null;
+            filename: string;
+            folder_id: string | null;
+            id: string;
+            image_height: number | null;
+            image_width: number | null;
+            name_locked: boolean;
+            project_id: string;
+            updated_at: string;
+            uploaded_by: string;
+          };
+          /** @enum {unknown} */
+          role: 'artwork' | 'cut';
+        }[];
+        id: string;
+        kind: string;
+        missing_roles: ('artwork' | 'cut')[];
+        name: string;
+        project_id: string;
+        settings:
+          | {
+              back_color: string;
+              edge_color: string;
+              height_mm: number;
+              /** @constant */
+              kind: 'punchboard';
+              seed: number;
+              /** @enum {unknown} */
+              sheet_state: 'intact' | 'punched';
+              thickness_mm: number;
+              width_mm: number;
+            }
+          | {
+              bevel_mm: number;
+              grain_color: string;
+              grain_scale: number;
+              /** @constant */
+              kind: 'wood';
+              longest_side_mm: number;
+              printed: boolean;
+              seed: number;
+              simplify_tolerance: number;
+              thickness_mm: number;
+              /** @enum {unknown} */
+              trace_source: 'alpha' | 'luminance';
+              trace_threshold: number;
+              wood_color: string;
+            }
+          | {
+              corner_bevel_mm: number;
+              depth_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'box';
+              seed: number;
+              width_mm: number;
+            }
+          | {
+              edge_color: string;
+              /** @enum {unknown} */
+              fold: 'bifold' | 'none' | 'quadfold';
+              fold_gap_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'board';
+              seed: number;
+              thickness_mm: number;
+              width_mm: number;
+            };
+        updated_at: string;
+      }[];
+    };
     ComponentModel: {
       created_at: string;
       project_id: string;
@@ -814,6 +1086,18 @@ export interface components {
             kind: 'card';
             seed: number;
             stock_color: string;
+            thickness_mm: number;
+            width_mm: number;
+          }
+        | {
+            back_color: string;
+            edge_color: string;
+            height_mm: number;
+            /** @constant */
+            kind: 'punchboard';
+            seed: number;
+            /** @enum {unknown} */
+            sheet_state: 'intact' | 'punched';
             thickness_mm: number;
             width_mm: number;
           }
@@ -865,6 +1149,7 @@ export interface components {
       card_width_mm: number;
       created_at: string;
       created_by: string;
+      deleted_at: string | null;
       id: string;
       name: string;
       project_id: string;
@@ -874,7 +1159,6 @@ export interface components {
     DeckImport: {
       created_at: string;
       deck_id: string;
-      folder_id: string | null;
       id: string;
       open_run_id: string | null;
       source_kind: string;
@@ -889,6 +1173,7 @@ export interface components {
         card_width_mm: number;
         created_at: string;
         created_by: string;
+        deleted_at: string | null;
         id: string;
         name: string;
         project_id: string;
@@ -900,8 +1185,11 @@ export interface components {
       cards: {
         file: {
           byte_size: number;
+          component_id: string | null;
+          component_role: string | null;
           content_type: string;
           created_at: string;
+          deck_id: string | null;
           deleted_at: string | null;
           filename: string;
           folder_id: string | null;
@@ -924,6 +1212,7 @@ export interface components {
         card_width_mm: number;
         created_at: string;
         created_by: string;
+        deleted_at: string | null;
         id: string;
         name: string;
         project_id: string;
@@ -938,9 +1227,11 @@ export interface components {
         content_type: string | null;
         deleted_at: string;
         deleted_by: string | null;
+        /** @enum {unknown} */
+        home_kind: 'component' | 'deck' | 'folder';
         id: string;
         /** @enum {unknown} */
-        kind: 'file' | 'folder';
+        kind: 'component' | 'deck' | 'file' | 'folder';
         name: string;
         path: string;
         project_id: string;
@@ -957,8 +1248,11 @@ export interface components {
       }[];
       files: {
         byte_size: number;
+        component_id: string | null;
+        component_role: string | null;
         content_type: string;
         created_at: string;
+        deck_id: string | null;
         deleted_at: string | null;
         filename: string;
         folder_id: string | null;
@@ -993,8 +1287,11 @@ export interface components {
     Email: string;
     File: {
       byte_size: number;
+      component_id: string | null;
+      component_role: string | null;
       content_type: string;
       created_at: string;
+      deck_id: string | null;
       deleted_at: string | null;
       filename: string;
       folder_id: string | null;
@@ -2781,11 +3078,18 @@ export interface operations {
         project_id:
           string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
         /** @description a UUID */
+        component_id?:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+        /** @description a UUID */
+        deck_id?:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+        /** @description a UUID */
         folder_id?:
           string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
         /** @description a UUID */
         id?:
           string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+        role?: 'artwork' | 'back' | 'card' | 'cut';
       };
       header?: never;
       path?: never;
@@ -3415,6 +3719,120 @@ export interface operations {
       };
     };
   };
+  postApiFilesByIdMove: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          component_id?:
+            | string
+            | '00000000-0000-0000-0000-000000000000'
+            | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+            | null;
+          deck_id?:
+            | string
+            | '00000000-0000-0000-0000-000000000000'
+            | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+            | null;
+          folder_id?:
+            | string
+            | '00000000-0000-0000-0000-000000000000'
+            | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+            | null;
+          /** @enum {unknown} */
+          role?: 'artwork' | 'back' | 'card' | 'cut';
+        };
+      };
+    };
+    responses: {
+      /** @description Moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['File'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   postApiFilesByIdRestore: {
     parameters: {
       query?: {
@@ -3435,6 +3853,560 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['File'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiComponents: {
+    parameters: {
+      query: {
+        /** @description a UUID */
+        project_id:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+        kind?: 'board' | 'box' | 'punchboard' | 'wood';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Components */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComponentList'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiComponents: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {unknown} */
+          kind: 'board' | 'box' | 'punchboard' | 'wood';
+          name: string;
+          project_id: components['schemas']['Uuid'];
+          id?: components['schemas']['Uuid'];
+          settings?:
+            | {
+                back_color: string;
+                edge_color: string;
+                height_mm: number;
+                /** @constant */
+                kind: 'punchboard';
+                seed: number;
+                /** @enum {unknown} */
+                sheet_state: 'intact' | 'punched';
+                thickness_mm: number;
+                width_mm: number;
+              }
+            | {
+                bevel_mm: number;
+                grain_color: string;
+                grain_scale: number;
+                /** @constant */
+                kind: 'wood';
+                longest_side_mm: number;
+                printed: boolean;
+                seed: number;
+                simplify_tolerance: number;
+                thickness_mm: number;
+                /** @enum {unknown} */
+                trace_source: 'alpha' | 'luminance';
+                trace_threshold: number;
+                wood_color: string;
+              }
+            | {
+                corner_bevel_mm: number;
+                depth_mm: number;
+                height_mm: number;
+                /** @constant */
+                kind: 'box';
+                seed: number;
+                width_mm: number;
+              }
+            | {
+                edge_color: string;
+                /** @enum {unknown} */
+                fold: 'bifold' | 'none' | 'quadfold';
+                fold_gap_mm: number;
+                height_mm: number;
+                /** @constant */
+                kind: 'board';
+                seed: number;
+                thickness_mm: number;
+                width_mm: number;
+              };
+        };
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Component'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiComponentsByComponentId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        componentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The component */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Component'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiComponentsByComponentId: {
+    parameters: {
+      query?: {
+        purge?: 'true';
+      };
+      header?: never;
+      path: {
+        componentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  patchApiComponentsByComponentId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        componentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          name?: string;
+          settings?:
+            | {
+                back_color: string;
+                edge_color: string;
+                height_mm: number;
+                /** @constant */
+                kind: 'punchboard';
+                seed: number;
+                /** @enum {unknown} */
+                sheet_state: 'intact' | 'punched';
+                thickness_mm: number;
+                width_mm: number;
+              }
+            | {
+                bevel_mm: number;
+                grain_color: string;
+                grain_scale: number;
+                /** @constant */
+                kind: 'wood';
+                longest_side_mm: number;
+                printed: boolean;
+                seed: number;
+                simplify_tolerance: number;
+                thickness_mm: number;
+                /** @enum {unknown} */
+                trace_source: 'alpha' | 'luminance';
+                trace_threshold: number;
+                wood_color: string;
+              }
+            | {
+                corner_bevel_mm: number;
+                depth_mm: number;
+                height_mm: number;
+                /** @constant */
+                kind: 'box';
+                seed: number;
+                width_mm: number;
+              }
+            | {
+                edge_color: string;
+                /** @enum {unknown} */
+                fold: 'bifold' | 'none' | 'quadfold';
+                fold_gap_mm: number;
+                height_mm: number;
+                /** @constant */
+                kind: 'board';
+                seed: number;
+                thickness_mm: number;
+                width_mm: number;
+              };
+        };
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Component'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiComponentsByComponentIdRestore: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        componentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Restored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Component'];
         };
       };
       /** @description Unauthorized */
@@ -3576,6 +4548,18 @@ export interface operations {
                 kind: 'card';
                 seed: number;
                 stock_color: string;
+                thickness_mm: number;
+                width_mm: number;
+              }
+            | {
+                back_color: string;
+                edge_color: string;
+                height_mm: number;
+                /** @constant */
+                kind: 'punchboard';
+                seed: number;
+                /** @enum {unknown} */
+                sheet_state: 'intact' | 'punched';
                 thickness_mm: number;
                 width_mm: number;
               }
@@ -3909,7 +4893,9 @@ export interface operations {
   };
   deleteApiDecksByDeckId: {
     parameters: {
-      query?: never;
+      query?: {
+        purge?: 'true';
+      };
       header?: never;
       path: {
         deckId: string;
@@ -4076,6 +5062,83 @@ export interface operations {
       };
     };
   };
+  postApiDecksByDeckIdRestore: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deckId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Restored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeckWithCards'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
   putApiDecksByDeckIdCards: {
     parameters: {
       query?: never;
@@ -4199,191 +5262,6 @@ export interface operations {
       };
       /** @description Not found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Internal server error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-    };
-  };
-  putApiDecksByDeckIdImport: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        deckId: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': {
-          folder_id: components['schemas']['Uuid'];
-          /** @constant */
-          source_kind?: 'zip';
-          source_label?: string | unknown | null;
-        };
-      };
-    };
-    responses: {
-      /** @description The binding, as it now stands */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['DeckImport'];
-        };
-      };
-      /** @description Bound */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['DeckImport'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Validation failed */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            details: {
-              message: string;
-              path: string;
-            }[];
-            error: string;
-          };
-        };
-      };
-      /** @description Internal server error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-    };
-  };
-  deleteApiDecksByDeckIdImport: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        deckId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Unbound */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            error: string;
-          };
-        };
-      };
-      /** @description Conflict */
-      409: {
         headers: {
           [name: string]: unknown;
         };

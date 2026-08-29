@@ -34,7 +34,7 @@ SCENE_ASSET_DIR = 'assets'
 
 SCENE_ASSET_KINDS = ('glb', 'library')
 LIBRARY_PIECES = ('d6', 'meeple', 'cube', 'disc', 'cylinder')
-MODEL_KINDS = ('card', 'wood', 'box', 'board')
+MODEL_KINDS = ('card', 'wood', 'box', 'board', 'punchboard')
 
 SHOT_KINDS = ('turntable', 'fan', 'flip', 'deal', 'stack', 'parade', 'orbit', 'reveal')
 CAMERA_SHOT_KINDS = ('orbit', 'reveal')

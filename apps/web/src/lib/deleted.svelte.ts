@@ -73,6 +73,37 @@ class DeletedStore {
     );
   }
 
+  // A deck and a component take no new name: neither is renamed on the way
+  // back, because a name clash on one is refused rather than worked around --
+  // there is no second name a person could be offered that means the same deck.
+  async restoreDeck(id: string): Promise<void> {
+    assertOk(await api.POST('/api/decks/{deckId}/restore', { params: { path: { deckId: id } } }));
+  }
+
+  async restoreComponent(id: string): Promise<void> {
+    assertOk(
+      await api.POST('/api/components/{componentId}/restore', {
+        params: { path: { componentId: id } },
+      })
+    );
+  }
+
+  async purgeDeck(id: string): Promise<void> {
+    assertOk(
+      await api.DELETE('/api/decks/{deckId}', {
+        params: { path: { deckId: id }, query: { purge: 'true' } },
+      })
+    );
+  }
+
+  async purgeComponent(id: string): Promise<void> {
+    assertOk(
+      await api.DELETE('/api/components/{componentId}', {
+        params: { path: { componentId: id }, query: { purge: 'true' } },
+      })
+    );
+  }
+
   async purgeFile(id: string): Promise<void> {
     assertOk(
       await api.DELETE('/api/files/{id}', {

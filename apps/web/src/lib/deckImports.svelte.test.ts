@@ -153,7 +153,6 @@ describe('DeckImportStore', () => {
     await stale;
 
     expect(deckImports.binding?.source_label).toBe('fresh');
-    expect(deckImports.folderName).toBe('Fresh folder');
   });
 
   it('posts the pages one at a time, in page order', async () => {
@@ -415,7 +414,6 @@ describe('DeckImportStore', () => {
 
     const next = deckImports.loadBinding(PROJECT, OTHER_DECK);
     expect(deckImports.binding).toBeNull();
-    expect(deckImports.folderName).toBeNull();
     expect(deckImports.bindingDeckId).toBeNull();
 
     release!();

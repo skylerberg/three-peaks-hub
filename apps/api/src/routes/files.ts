@@ -15,6 +15,7 @@ import {
   assertQuota,
   assertUploadSize,
   fileWithUsage,
+  freeFilename,
   projectStorageUsed,
   serializeVersion,
   restoreFile,
@@ -32,6 +33,16 @@ import {
   type DeletedAncestor,
   type FolderRow,
 } from '../services/folderTree.ts';
+import {
+  type DeckFileRole,
+  deletedOwner,
+  homeColumns,
+  parseHome,
+  resolveHome,
+  sameHome,
+  unowned,
+} from '../services/fileHome.ts';
+import { readDeck, readDeckCards } from '../services/decks.ts';
 import { deleteStoredObjectsAfterCommit, reclaim, storage } from '../services/storage/index.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
@@ -40,6 +51,7 @@ import { newId } from '../utils/uuid.ts';
 import { projectQuerySchema } from '../schemas/common.ts';
 import {
   createFolderRequestSchema,
+  deletedEntrySchema,
   deletedListingSchema,
   directoryListingSchema,
   directoryQuerySchema,
@@ -47,6 +59,7 @@ import {
   fileVersionListSchema,
   fileVersionResultSchema,
   folderSchema,
+  moveFileRequestSchema,
   purgeQuerySchema,
   restoreFileQuerySchema,
   restoreFolderQuerySchema,
@@ -199,6 +212,77 @@ async function lookupVersion(
 
 // Its own function rather than an inline test, so the single line deciding
 // between keeping the bytes and reclaiming them has one site.
+// A deck owns its artwork and its arrangement names every piece of it, so
+// arriving and leaving are two halves of one rule and both live here.
+async function placeInDeck(
+  c: AppContext,
+  deckId: string,
+  fileId: string,
+  role: DeckFileRole
+): Promise<void> {
+  const db = c.get('db');
+  if (role === 'back') {
+    await db
+      .updateTable('deck')
+      .set({ back_file_id: fileId, updated_at: new Date() })
+      .where('deck.id', '=', deckId)
+      .execute();
+    return;
+  }
+
+  const top = await db
+    .selectFrom('deck_card')
+    .select((eb) => eb.fn.max('deck_card.position').as('position'))
+    .where('deck_card.deck_id', '=', deckId)
+    .executeTakeFirst();
+
+  await db
+    .insertInto('deck_card')
+    .values({
+      id: newId(),
+      deck_id: deckId,
+      file_id: fileId,
+      quantity: 1,
+      position: (top?.position ?? -1) + 1,
+    })
+    .execute();
+  await db
+    .updateTable('deck')
+    .set({ updated_at: new Date() })
+    .where('deck.id', '=', deckId)
+    .execute();
+}
+
+async function removeFromDeck(c: AppContext, deckId: string, fileId: string): Promise<void> {
+  const db = c.get('db');
+  await db
+    .deleteFrom('deck_card')
+    .where('deck_card.deck_id', '=', deckId)
+    .where('deck_card.file_id', '=', fileId)
+    .execute();
+  // Set null rather than left dangling: the pointer would name a file the deck
+  // no longer holds, and every later read would have to allow for that.
+  await db
+    .updateTable('deck')
+    .set({ back_file_id: null })
+    .where('deck.id', '=', deckId)
+    .where('deck.back_file_id', '=', fileId)
+    .execute();
+  await db
+    .updateTable('deck')
+    .set({ updated_at: new Date() })
+    .where('deck.id', '=', deckId)
+    .execute();
+}
+
+async function publishDeck(c: AppContext, projectId: string, deckId: string): Promise<void> {
+  const [deck, cards] = await Promise.all([readDeck(c, deckId), readDeckCards(c, deckId)]);
+  publishAfterCommit(c.get('postCommitHooks'), c.get('user').id, 'deck_updated', projectId, {
+    deck,
+    cards,
+  });
+}
+
 function purgeRequested(query: { purge?: string }): boolean {
   return query.purge === 'true';
 }
@@ -251,11 +335,15 @@ filesRouter.get(
         .$if(folderId !== null, (qb) => qb.where('folder.parent_id', '=', folderId))
         .orderBy('folder.name', 'asc')
         .execute(),
+      // Assets is what belongs to no deck and no component. A card sits in its
+      // deck's own screen, and listing it here as well is the duplication this
+      // whole arrangement exists to remove.
       db
         .selectFrom('file')
         .select(FILE_COLUMNS)
         .where('file.project_id', '=', projectId)
         .where('file.deleted_at', 'is', null)
+        .where(unowned)
         .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
         .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
         .orderBy('file.filename', 'asc')
@@ -339,12 +427,14 @@ filesRouter.get(
     await assertProjectAccess(c, projectId);
     const db = c.get('db');
 
-    const [files, folders, everyFolder] = await Promise.all([
+    const [files, folders, everyFolder, owners, ownerBytes] = await Promise.all([
       db
         .selectFrom('file')
         .select((eb) => [
           'file.id as id',
           'file.folder_id as folder_id',
+          'file.deck_id as deck_id',
+          'file.component_id as component_id',
           'file.filename as filename',
           'file.content_type as content_type',
           // Every version, because the screen offers this number as what a
@@ -391,18 +481,97 @@ filesRouter.get(
         ])
         .where('folder.project_id', '=', projectId)
         .execute(),
+      // The decks and components a deleted file may belong to, in one round
+      // trip each. Unfiltered like the folders above: an owner that is itself
+      // tombstoned is exactly the one an entry has to name as in the way.
+      Promise.all([
+        db
+          .selectFrom('deck')
+          .select(['deck.id as id', 'deck.name as name', 'deck.deleted_at as deleted_at'])
+          .where('deck.project_id', '=', projectId)
+          .execute(),
+        db
+          .selectFrom('component')
+          .select([
+            'component.id as id',
+            'component.name as name',
+            'component.deleted_at as deleted_at',
+          ])
+          .where('component.project_id', '=', projectId)
+          .execute(),
+      ]),
+      // What purging one owner gives back: every version of every file it
+      // holds, summed the way the quota is. One query per owner kind rather
+      // than one per deleted row.
+      Promise.all([
+        db
+          .selectFrom('file')
+          .innerJoin('file_version', 'file_version.file_id', 'file.id')
+          .select((eb) => [
+            'file.deck_id as id',
+            eb.fn.coalesce(eb.fn.sum<string>('file_version.byte_size'), eb.lit(0)).as('total'),
+          ])
+          .where('file.project_id', '=', projectId)
+          .where('file.deck_id', 'is not', null)
+          .groupBy('file.deck_id')
+          .execute(),
+        db
+          .selectFrom('file')
+          .innerJoin('file_version', 'file_version.file_id', 'file.id')
+          .select((eb) => [
+            'file.component_id as id',
+            eb.fn.coalesce(eb.fn.sum<string>('file_version.byte_size'), eb.lit(0)).as('total'),
+          ])
+          .where('file.project_id', '=', projectId)
+          .where('file.component_id', 'is not', null)
+          .groupBy('file.component_id')
+          .execute(),
+      ]),
     ]);
 
     const byId = new Map<string, FolderNode>(everyFolder.map((row) => [row.id, row]));
+    const [deckRows, componentRows] = owners;
+    const bytesByOwner = new Map(
+      [...ownerBytes[0], ...ownerBytes[1]].map((row) => [row.id ?? '', Number(row.total)] as const)
+    );
+    const ownerById = new Map([...deckRows, ...componentRows].map((row) => [row.id, row] as const));
 
-    const entries = [
-      ...files.map((row) => {
+    // Where a deleted file came from, said the way the screen it is listed on
+    // says it: a folder trail for an asset, and the owner's own name otherwise.
+    // A deck or a component is one row rather than a chain, because neither
+    // nests -- which is the whole of why this is not the folder walk.
+    function fileHome(row: {
+      folder_id: string | null;
+      deck_id: string | null;
+      component_id: string | null;
+    }) {
+      const ownerId = row.deck_id ?? row.component_id;
+      if (ownerId === null) {
         const { path, blockedBy } = ancestry(byId, row.folder_id);
+        return { kind: 'folder' as const, path, blockedBy };
+      }
+      const owner = ownerById.get(ownerId);
+      const kind = row.deck_id === null ? ('component' as const) : ('deck' as const);
+      if (!owner) return { kind, path: '', blockedBy: UNKNOWN_ANCESTOR };
+      return {
+        kind,
+        path: owner.name,
+        blockedBy: owner.deleted_at === null ? null : { id: owner.id, name: owner.name },
+      };
+    }
+
+    // Typed from the schema rather than inferred: a deck entry and a file entry
+    // are different shapes, and an inferred array would narrow `kind` to the
+    // first two and refuse the rest.
+    const entries: (typeof deletedEntrySchema.infer)[] = [
+      ...files.map((row) => {
+        const { kind: homeKind, path, blockedBy } = fileHome(row);
         return {
           kind: 'file' as const,
           id: row.id,
           project_id: projectId,
           name: row.filename,
+          home_kind: homeKind,
           path,
           content_type: row.content_type,
           byte_size: Number(row.byte_size),
@@ -420,6 +589,7 @@ filesRouter.get(
           id: row.id,
           project_id: projectId,
           name: row.name,
+          home_kind: 'folder' as const,
           path,
           content_type: null,
           byte_size: null,
@@ -429,6 +599,31 @@ filesRouter.get(
         };
       }),
     ];
+
+    // A deleted deck and a deleted component are entries of their own, not a
+    // path above something else: neither is inside anything, and what a person
+    // restores is the whole of it.
+    for (const [kind, rows] of [
+      ['deck', deckRows],
+      ['component', componentRows],
+    ] as const) {
+      for (const row of rows) {
+        if (row.deleted_at === null) continue;
+        entries.push({
+          kind,
+          id: row.id,
+          project_id: projectId,
+          name: row.name,
+          home_kind: kind,
+          path: '',
+          content_type: null,
+          byte_size: bytesByOwner.get(row.id) ?? 0,
+          deleted_at: new Date(row.deleted_at).toISOString(),
+          deleted_by: null,
+          blocked_by: null,
+        });
+      }
+    }
 
     entries.sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
 
@@ -819,28 +1014,21 @@ filesRouter.post(
       project_id: string;
       filename: string;
       folder_id?: string;
+      deck_id?: string;
+      component_id?: string;
+      role?: string;
       id?: string;
     };
     const projectId = query.project_id;
     const filename = query.filename;
-    const folderId = query.folder_id ?? null;
     const id = query.id ?? newId();
 
     await assertProjectWrite(c, projectId);
     const db = c.get('db');
 
-    if (folderId) {
-      const folder = await db
-        .selectFrom('folder')
-        .select(['folder.id as id'])
-        .where('folder.id', '=', folderId)
-        .where('folder.project_id', '=', projectId)
-        .executeTakeFirst();
-      if (!folder) throw new AppError(404, 'Folder not found');
-      if ((await deletedAncestor(db, folderId)) !== null) {
-        throw new AppError(404, 'Folder not found');
-      }
-    }
+    // Naming no destination is the Assets root, which is what a client on the
+    // previous release sends and what it has always meant.
+    const { home, deckRole } = await resolveHome(db, projectId, query);
 
     // Checked before the transfer on what the client claims, and again below on
     // what actually arrived — the header is a hint, not a guarantee.
@@ -871,7 +1059,7 @@ filesRouter.post(
         .values({
           id,
           project_id: projectId,
-          folder_id: folderId,
+          ...homeColumns(home),
           filename,
           storage_key: stored.storageKey,
           content_type: stored.contentType,
@@ -903,6 +1091,13 @@ filesRouter.post(
       throw error;
     }
 
+    // Artwork uploaded into a deck is a card in it. Leaving the deck_card row
+    // to a later save would put the image in the deck and in none of its lists,
+    // which is the one state a deck owning its artwork is meant not to have.
+    if (home.kind === 'deck') {
+      await placeInDeck(c, home.deckId, row.id, deckRole);
+    }
+
     publishAfterCommit(
       c.get('postCommitHooks'),
       c.get('user').id,
@@ -910,6 +1105,7 @@ filesRouter.post(
       projectId,
       await fileWithUsage(c, projectId, row.id)
     );
+    if (home.kind === 'deck') await publishDeck(c, projectId, home.deckId);
     return c.json(serializeFile(row), 201);
   }
 );
@@ -1240,16 +1436,29 @@ filesRouter.patch(
     };
     const db = c.get('db');
 
-    if (body.folder_id !== undefined && body.folder_id !== null) {
-      const folder = await db
-        .selectFrom('folder')
-        .select(['folder.id as id'])
-        .where('folder.id', '=', body.folder_id)
-        .where('folder.project_id', '=', access.projectId)
-        .executeTakeFirst();
-      if (!folder) throw new AppError(404, 'Folder not found');
-      if ((await deletedAncestor(db, body.folder_id)) !== null) {
-        throw new AppError(404, 'Folder not found');
+    if (body.folder_id !== undefined) {
+      const owner = await db
+        .selectFrom('file')
+        .select(['file.deck_id as deck_id', 'file.component_id as component_id'])
+        .where('file.id', '=', id)
+        .executeTakeFirstOrThrow();
+      // This route moves a file between folders and nothing else. A file a deck
+      // or a component holds has a home rather than a folder, and giving it one
+      // here would leave it in two places at once.
+      if (owner.deck_id !== null || owner.component_id !== null) {
+        throw new AppError(422, 'That file belongs to a deck or a component. Move it instead');
+      }
+      if (body.folder_id !== null) {
+        const folder = await db
+          .selectFrom('folder')
+          .select(['folder.id as id'])
+          .where('folder.id', '=', body.folder_id)
+          .where('folder.project_id', '=', access.projectId)
+          .executeTakeFirst();
+        if (!folder) throw new AppError(404, 'Folder not found');
+        if ((await deletedAncestor(db, body.folder_id)) !== null) {
+          throw new AppError(404, 'Folder not found');
+        }
       }
     }
 
@@ -1291,6 +1500,98 @@ filesRouter.patch(
       }
       throw error;
     }
+  }
+);
+
+filesRouter.post(
+  '/:id/move',
+  describeRoute({
+    tags: ['Files'],
+    summary: 'Move a file to another home',
+    description:
+      'Between Assets, a deck and a component, in either direction. The name is re-deduplicated against the destination, so a move never fails on a name the file cannot see. Arriving in a deck makes the file a card in it, or its back; leaving one takes it out of the arrangement.',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Moved',
+        content: { 'application/json': { schema: resolver(fileSchema) } },
+      },
+      ...conflictErrorResponse,
+      ...forbiddenErrorResponse,
+      ...validationErrorResponse,
+      ...standardErrors,
+    },
+  }),
+  jsonValidator(moveFileRequestSchema),
+  async (c) => {
+    const id = c.req.param('id');
+    const access = await assertFileAccess(c, id, 'write');
+    const body = c.req.valid('json') as {
+      folder_id?: string | null;
+      deck_id?: string | null;
+      component_id?: string | null;
+      role?: string;
+    };
+    const db = c.get('db');
+
+    const file = await db
+      .selectFrom('file')
+      .select(FILE_COLUMNS)
+      .where('file.id', '=', id)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    // A tombstone's place is frozen, the way its name is: moving one would make
+    // the home the deleted listing reports a lie.
+    if (file.deleted_at !== null) throw new AppError(409, 'That file is deleted. Restore it first');
+
+    const from = parseHome(file);
+    // Leaving is a write to the contents of whatever holds it, and a tombstone
+    // refuses those. Restoring the owner is the way to get the file out.
+    const blocked = await deletedOwner(db, from);
+    if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That file'));
+
+    const { home: to, deckRole } = await resolveHome(db, access.projectId, body);
+    if (sameHome(from, to)) return c.json(serializeFile(file));
+
+    // Against the destination, which is a set of names this file has never been
+    // compared with. Renaming on arrival beats refusing the move over a clash
+    // nobody looking at either screen can see.
+    const filename = await freeFilename(db, access.projectId, to, file.filename);
+
+    if (from.kind === 'deck') await removeFromDeck(c, from.deckId, id);
+
+    let row;
+    try {
+      row = await db
+        .updateTable('file')
+        .set({ ...homeColumns(to), filename, updated_at: new Date() })
+        .where('file.id', '=', id)
+        .returning(FILE_COLUMNS)
+        .executeTakeFirstOrThrow();
+    } catch (error) {
+      // The role index, not the name one: freeFilename settled the name above,
+      // and a component holds at most one artwork and one cut sheet.
+      if (isUniqueViolation(error)) {
+        throw new AppError(409, 'That component already has one of those. Replace it instead');
+      }
+      throw error;
+    }
+
+    if (to.kind === 'deck') await placeInDeck(c, to.deckId, id, deckRole);
+
+    const moved = serializeFile(row);
+    publishAfterCommit(
+      c.get('postCommitHooks'),
+      c.get('user').id,
+      'file_moved',
+      access.projectId,
+      moved
+    );
+    // One per deck involved, and both when a card moves between two: each one's
+    // arrangement changed, and neither screen can work the other's out.
+    if (from.kind === 'deck') await publishDeck(c, access.projectId, from.deckId);
+    if (to.kind === 'deck') await publishDeck(c, access.projectId, to.deckId);
+    return c.json(moved);
   }
 );
 

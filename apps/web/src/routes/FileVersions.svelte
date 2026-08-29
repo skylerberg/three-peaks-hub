@@ -37,6 +37,23 @@
   // as a tombstone.
   const tombstoned = $derived(Boolean(file?.deleted_at));
 
+  // Back to whatever holds the file, which is one of three places now. A deck
+  // card's history belongs beside its deck rather than in Assets, where the
+  // card is not.
+  const backHref = $derived.by(() => {
+    if (file?.deck_id) return `/projects/${projectId}/decks/${file.deck_id}`;
+    if (file?.component_id) return `/projects/${projectId}/components/${file.component_id}`;
+    const assets = `/projects/${projectId}/assets`;
+    return file?.folder_id ? `${assets}?folder=${file.folder_id}` : assets;
+  });
+  const backLabel = $derived(
+    file?.deck_id
+      ? 'Back to the deck'
+      : file?.component_id
+        ? 'Back to the component'
+        : 'Back to Assets'
+  );
+
   $effect(() => {
     const id = fileId;
     error = null;
@@ -196,12 +213,7 @@
           back.
         </p>
       </div>
-      <a
-        class="focus-ring rounded px-3 py-2 text-sm underline"
-        href="/projects/{projectId}{file.folder_id ? `?folder=${file.folder_id}` : ''}"
-      >
-        Back to files
-      </a>
+      <a class="focus-ring rounded px-3 py-2 text-sm underline" href={backHref}>{backLabel}</a>
     </div>
 
     {#if tombstoned}

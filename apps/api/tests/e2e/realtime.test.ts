@@ -77,8 +77,8 @@ describe('realtime over a websocket', () => {
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
   ]);
 
-  async function upload(filename: string): Promise<string> {
-    const query = new URLSearchParams({ project_id: projectId, filename });
+  async function upload(filename: string, into: Record<string, string> = {}): Promise<string> {
+    const query = new URLSearchParams({ project_id: projectId, filename, ...into });
     const response = await owner.api.postBytes(
       `/api/files/upload?${query}`,
       PNG as unknown as BodyInit,
@@ -245,7 +245,9 @@ describe('realtime over a websocket', () => {
       })
     ).json();
 
-    const fileId = await upload('card.png');
+    // Into the deck: uploading it there is what makes it a card, and the event
+    // has to carry the arrangement that upload changed.
+    const fileId = await upload('card.png', { deck_id: deck.id });
     await owner.api.put(`/api/decks/${deck.id}/cards`, {
       cards: [{ file_id: fileId, quantity: 2 }],
     });

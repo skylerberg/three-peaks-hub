@@ -1,29 +1,21 @@
 <script lang="ts">
-  import {
-    MODEL_KINDS,
-    MODEL_SOURCE_TYPES,
-    isModelSource,
-    type ModelKind,
-    type ModelSettings,
-  } from '@three-peaks/shared';
+  import { MODEL_SOURCE_TYPES, isModelSource, type ModelSettings } from '@three-peaks/shared';
   import type { components } from '@three-peaks/shared/api';
-  import BoardSettings from '../components/model3d/BoardSettings.svelte';
-  import BoxSettings from '../components/model3d/BoxSettings.svelte';
-  import CardSettings from '../components/model3d/CardSettings.svelte';
-  import ModelViewer from '../components/model3d/ModelViewer.svelte';
-  import WoodSettings from '../components/model3d/WoodSettings.svelte';
-  import Button from '../components/ui/Button.svelte';
+  import Studio from '../components/model3d/Studio.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk, authHeader } from '../api/client.ts';
-  import { saveBlob } from '../lib/download.ts';
   import { models } from '../lib/model3d.svelte.ts';
-  import type { BuiltModel, SourceImage } from '../lib/model3d/index.ts';
+  import type { ModelSources } from '../lib/model3d/index.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import { assertUploadSize, readUploadResponse } from '../lib/upload.ts';
 
+  // One card of one deck, dialled in. The kind is not a choice here: a card is
+  // a member of a deck, and everything else is a component with a section of
+  // its own. What this screen owns is the card's own dial-in, which hangs off
+  // the image the way its versions do.
   interface Props {
     projectId: string;
     fileId: string;
@@ -32,30 +24,22 @@
 
   type File = components['schemas']['File'];
 
-  const KIND_LABELS: Record<ModelKind, string> = {
-    card: 'Card',
-    wood: 'Wooden component',
-    box: 'Box',
-    board: 'Board',
-  };
-
   let project = $state<components['schemas']['Project'] | null>(null);
   let error = $state<string | null>(null);
-  let source = $state<SourceImage | null>(null);
-  let back = $state<SourceImage | null>(null);
+  let artwork = $state<ModelSources['artwork'] | null>(null);
+  let back = $state<ModelSources['artwork'] | null>(null);
   let siblings = $state<File[]>([]);
-  let exporting = $state(false);
-  let built: BuiltModel | null = null;
 
   const file = $derived(models.file);
   const settings = $derived(models.settings);
   const canEdit = $derived(project?.role === 'editor');
   const backChoices = $derived(siblings.filter((sibling) => sibling.id !== fileId));
+  const sources = $derived(artwork ? { artwork, back } : null);
 
   $effect(() => {
     const id = fileId;
     error = null;
-    source = null;
+    artwork = null;
 
     void models.load(id).catch((caught: unknown) => {
       error =
@@ -91,7 +75,7 @@
       try {
         const { loadSource } = await import('../lib/model3d/index.ts');
         const loaded = await loadSource(current.id, current.content_type);
-        if (!stale) source = loaded;
+        if (!stale) artwork = loaded;
       } catch (caught) {
         if (!stale) error = caught instanceof Error ? caught.message : 'Could not read the image.';
       }
@@ -131,23 +115,22 @@
     };
   });
 
-  // Only images can be a card back, and only from the folder this file is in --
-  // one directory request rather than a walk of the whole project.
+  // The other cards of the same deck, which is the whole of what this card's
+  // reverse can be: a deck's images are its own, and one from Assets is not in
+  // this deck until it is moved in.
   $effect(() => {
     const current = file;
-    if (!current) return;
+    if (!current?.deck_id) {
+      siblings = [];
+      return;
+    }
 
     void api
-      .GET('/api/files/directory', {
-        params: {
-          query: {
-            project_id: current.project_id,
-            ...(current.folder_id ? { folder_id: current.folder_id } : {}),
-          },
-        },
-      })
+      .GET('/api/decks/{deckId}', { params: { path: { deckId: current.deck_id } } })
       .then((result) => {
-        siblings = assertOk(result).files.filter((row) => isModelSource(row.content_type));
+        siblings = assertOk(result)
+          .cards.map((card) => card.file)
+          .filter((row) => isModelSource(row.content_type));
       })
       .catch(() => {
         siblings = [];
@@ -171,58 +154,32 @@
 
   function change(patch: Partial<ModelSettings>): void {
     if (!canEdit) return;
-    models.update(patch as Partial<ModelSettings>);
+    models.update(patch);
     models.scheduleSave();
   }
 
-  function glbName(): string {
-    const base = file?.filename.replace(/\.[^.]+$/, '') ?? 'component';
-    return `${base}.glb`;
-  }
+  const deckHref = $derived(
+    file?.deck_id ? `/projects/${projectId}/decks/${file.deck_id}` : `/projects/${projectId}`
+  );
 
-  async function withGlb(action: (bytes: ArrayBuffer, filename: string) => Promise<void> | void) {
-    if (!built) {
-      toasts.error('There is no model to export yet.');
-      return;
-    }
+  // Into the same deck the card is in, which is where its artwork already
+  // lives: a .glb dropped into Assets would be the one file about this card
+  // that is somewhere else.
+  async function saveToProject(bytes: ArrayBuffer, filename: string): Promise<void> {
+    const current = file;
+    if (!current) return;
 
-    exporting = true;
-    try {
-      const { exportGlb } = await import('../lib/model3d/index.ts');
-      await action(await exportGlb(built.group), glbName());
-    } catch (caught) {
-      toasts.error(apiMessage(caught, 'The model could not be exported.'));
-    } finally {
-      exporting = false;
-    }
-  }
+    const query = new URLSearchParams({ project_id: current.project_id, filename });
 
-  function download() {
-    void withGlb((bytes, filename) => {
-      saveBlob(new Blob([bytes], { type: 'model/gltf-binary' }), filename);
+    assertUploadSize(bytes.byteLength);
+    const response = await fetch(`/api/files/upload?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'model/gltf-binary', ...authHeader() },
+      body: bytes,
     });
-  }
 
-  function saveToProject() {
-    void withGlb(async (bytes, filename) => {
-      const current = file;
-      if (!current) return;
-
-      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- one query string, built here and thrown away
-      const query = new URLSearchParams({ project_id: current.project_id, filename });
-      if (current.folder_id) query.set('folder_id', current.folder_id);
-
-      assertUploadSize(bytes.byteLength);
-      const response = await fetch(`/api/files/upload?${query}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'model/gltf-binary', ...authHeader() },
-        body: bytes,
-      });
-
-      await readUploadResponse(response, 'The model could not be saved.');
-
-      toasts.success(`Saved ${filename} to this project.`);
-    });
+    await readUploadResponse(response, 'The model could not be saved.');
+    toasts.success(`Saved ${filename} to Assets.`);
   }
 </script>
 
@@ -252,60 +209,19 @@
           {/if}
         </p>
       </div>
-      <a
-        class="focus-ring rounded px-3 py-2 text-sm underline"
-        href="/projects/{projectId}{file.folder_id ? `?folder=${file.folder_id}` : ''}"
-      >
-        Back to files
+      <a class="focus-ring rounded px-3 py-2 text-sm underline" href={deckHref}>
+        {file.deck_id ? 'Back to the deck' : 'Back to the project'}
       </a>
     </div>
 
-    <div class="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-      <div class="flex flex-col gap-3">
-        <ModelViewer {settings} {source} {back} onbuild={(model) => (built = model)} />
-        <div class="flex flex-wrap gap-2">
-          <Button variant="secondary" onclick={download} disabled={exporting}>Download .glb</Button>
-          {#if canEdit}
-            <Button onclick={saveToProject} disabled={exporting}>Save to project</Button>
-          {/if}
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-4 rounded-lg border border-edge bg-surface p-4">
-        <fieldset class="flex flex-col gap-2">
-          <legend class="text-sm font-medium">Component type</legend>
-          <div class="flex flex-wrap gap-2">
-            {#each MODEL_KINDS as kind (kind)}
-              <Button
-                variant={settings.kind === kind ? 'primary' : 'secondary'}
-                disabled={!canEdit}
-                aria-pressed={settings.kind === kind}
-                onclick={() => {
-                  models.setKind(kind);
-                  models.scheduleSave();
-                }}
-              >
-                {KIND_LABELS[kind]}
-              </Button>
-            {/each}
-          </div>
-        </fieldset>
-
-        {#if settings.kind === 'card'}
-          <CardSettings {settings} {backChoices} disabled={!canEdit} onchange={change} />
-        {:else if settings.kind === 'wood'}
-          <WoodSettings
-            {settings}
-            vector={file.content_type === 'image/svg+xml'}
-            disabled={!canEdit}
-            onchange={change}
-          />
-        {:else if settings.kind === 'box'}
-          <BoxSettings {settings} disabled={!canEdit} onchange={change} />
-        {:else}
-          <BoardSettings {settings} disabled={!canEdit} onchange={change} />
-        {/if}
-      </div>
-    </div>
+    <Studio
+      {settings}
+      {sources}
+      {canEdit}
+      {backChoices}
+      onchange={change}
+      exportName={file.filename.replace(/\.[^.]+$/, '')}
+      onsave={saveToProject}
+    />
   {/if}
 </div>

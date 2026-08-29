@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
 import { TINY_PNG, canvaZip, solidPng } from './lib/fixtures.mjs';
-import { createProject, inspectApi, signOut, signUp } from './lib/session.mjs';
+import { createProject, inspectApi, openAssets, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
@@ -39,7 +39,8 @@ const SCREENS = [
   { name: 'login', path: '/login' },
   { name: 'signup', path: '/signup' },
   { name: 'forgot-password', path: '/forgot-password' },
-  { name: 'model-studio', authed: true, reach: reachModelStudio },
+  { name: 'component-studio', authed: true, reach: reachModelStudio },
+  { name: 'component-section', authed: true, reach: reachComponentSection },
   { name: 'file-versions', authed: true, reach: reachFileVersions },
   { name: 'deleted', authed: true, reach: reachDeleted },
   { name: 'deck-editor', authed: true, reach: reachDeckEditor },
@@ -68,14 +69,31 @@ async function freshProject(browser, base, label) {
   await signOut(browser, base);
   await signUp(browser, base, { name: 'A11y Probe', stamp: `${Date.now()}-${label}` });
   await createProject(browser, `A11y ${label}`);
+  await openAssets(browser);
   await browser.setInputFiles('input[type="file"]', pngPath);
   return 'token.png';
 }
 
+// A component, created through the real form and given its artwork: the studio
+// is reached from the section a component lives in, not from a file in Assets.
 async function reachModelStudio(browser, base, scheme) {
-  await freshProject(browser, base, `studio-${scheme}`);
-  await browser.page.waitForSelector('a:has-text("Make 3D")', { timeout: 15_000 });
-  await browser.click('a:has-text("Make 3D")');
+  const dir = mkdtempSync(join(tmpdir(), 'tph-a11y-'));
+  const pngPath = join(dir, 'token.png');
+  writeFileSync(pngPath, TINY_PNG);
+
+  await signOut(browser, base);
+  await signUp(browser, base, { name: 'A11y Probe', stamp: `${Date.now()}-studio-${scheme}` });
+  await createProject(browser, `A11y studio-${scheme}`);
+
+  await browser.page.waitForSelector('a:has-text("Wooden pieces")', { timeout: 15_000 });
+  await browser.click('a:has-text("Wooden pieces")');
+  await browser.page.waitForSelector('button:has-text("New wooden piece")', { timeout: 15_000 });
+  await browser.click('button:has-text("New wooden piece")');
+  await browser.page.fill('input[maxlength="120"]', `Meeple ${scheme}`);
+  await browser.click('button[type="submit"]');
+
+  await browser.page.waitForSelector(`h1:has-text("Meeple ${scheme}")`, { timeout: 15_000 });
+  await browser.setInputFiles('input[type="file"]', pngPath);
   await expectCanvas(browser);
 }
 
@@ -98,6 +116,16 @@ async function expectCanvas(browser) {
   }
 }
 
+// A section with one component in it: a card each with a thumbnail, and the
+// form that names a new one.
+async function reachComponentSection(browser, base, scheme) {
+  await reachModelStudio(browser, base, `section-${scheme}`);
+  await browser.click('a:has-text("Back to wooden pieces")');
+  await browser.page.waitForSelector('h1:has-text("Wooden pieces")', { timeout: 15_000 });
+  await browser.click('button:has-text("New wooden piece")');
+  await browser.page.waitForSelector('button[type="submit"]', { timeout: 15_000 });
+}
+
 async function reachFileVersions(browser, base, scheme) {
   const filename = await freshProject(browser, base, `versions-${scheme}`);
   await browser.page.waitForSelector(`button[aria-label="Download ${filename}"]`, {
@@ -118,6 +146,7 @@ async function reachFileVersions(browser, base, scheme) {
 // whose reorder buttons are icons with nothing but an aria-label to read.
 async function reachDeckEditor(browser, base, scheme) {
   await freshProject(browser, base, `deck-${scheme}`);
+  await browser.click('a:has-text("Back to the project")');
   await browser.page.waitForSelector('a:has-text("Decks")', { timeout: 15_000 });
   await browser.click('a:has-text("Decks")');
 
@@ -129,22 +158,19 @@ async function reachDeckEditor(browser, base, scheme) {
   // The editor is a different screen, not a panel: waiting for its own heading
   // is what keeps axe off the list it navigated away from.
   await browser.page.waitForSelector('h2:has-text("Cards")', { timeout: 15_000 });
-  await browser.click('button:has-text("Add cards")');
+  await browser.click('button:has-text("Move in from Assets")');
   await browser.page.waitForSelector('button:has-text("Add every image here")', {
     timeout: 15_000,
   });
 }
 
-// The import screen with its folder picker open: a file input, a breadcrumb of
-// buttons and a form that names a new folder, none of which the deck editor has.
+// The import screen: a labelled file input and a drop zone, on the screen from
+// the moment it opens because there is nothing to set up first.
 async function reachDeckImport(browser, base, scheme) {
   await reachDeckEditor(browser, base, `import-${scheme}`);
   await browser.click('a:has-text("Import from Canva")');
-  await browser.page.waitForSelector('button:has-text("Choose a folder")', { timeout: 15_000 });
-  await browser.click('button:has-text("Choose a folder")');
-  await browser.page.waitForSelector('button:has-text("Use this folder")', { timeout: 15_000 });
-  await browser.click('button:has-text("New folder")');
-  await browser.page.waitForSelector('button:has-text("Create")', { timeout: 15_000 });
+  await browser.page.waitForSelector('h1:has-text("Import from Canva")', { timeout: 15_000 });
+  await browser.page.waitForSelector('input[type="file"]', { timeout: 15_000 });
 }
 
 // Two exports written to disk: the first makes a two-card deck, the second
@@ -181,19 +207,7 @@ async function reachImportedDeck(browser, base, scheme) {
   const deckName = `Proof history-${scheme}`;
   await reachDeckEditor(browser, base, `history-${scheme}`);
   await browser.click('a:has-text("Import from Canva")');
-
-  await browser.page.waitForSelector('button:has-text("Choose a folder")', { timeout: 15_000 });
-  await browser.click('button:has-text("Choose a folder")');
-  await browser.page.waitForSelector('button:has-text("New folder")', { timeout: 15_000 });
-  await browser.click('button:has-text("New folder")');
-  await browser.page.fill('input[maxlength="120"]', `Artwork ${scheme}`);
-  await browser.click('button:has-text("Create")');
-  await browser.page.waitForSelector(
-    `nav[aria-label="Folders"] button:has-text("Artwork ${scheme}")`,
-    { timeout: 15_000 }
-  );
-  await browser.click('button:has-text("Use this folder")');
-  await browser.page.waitForSelector('text=Artwork lands in', { timeout: 15_000 });
+  await browser.page.waitForSelector('input[type="file"]', { timeout: 15_000 });
 
   const exports = writeExports(scheme);
   await importOne(browser, exports.first, 2);
@@ -238,6 +252,7 @@ async function reachPrint(browser, base, scheme) {
 
 async function reachScene(browser, base, scheme) {
   await freshProject(browser, base, `scene-${scheme}`);
+  await browser.click('a:has-text("Back to the project")');
   await browser.click('a:has-text("Blender scene")');
   // The project's decks and its file tree both land before the pickers render;
   // axe run against the spinner would call an empty screen clean.

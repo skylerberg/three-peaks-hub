@@ -24,6 +24,9 @@ export const deckSchema = type({
   created_by: 'string',
   created_at: 'string',
   updated_at: 'string',
+  // Null for a live deck. A deck owns its artwork, so deleting one is soft and
+  // a screen resolving a deck by id has to tell a tombstone from a live row.
+  deleted_at: 'string | null',
   // Distinct cards, and the number of pieces of card those add up to. Both are
   // on the listing so the decks screen needs no follow-up request per deck.
   card_count: 'number',

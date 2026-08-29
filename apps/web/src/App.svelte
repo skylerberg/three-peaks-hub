@@ -2,6 +2,9 @@
   import Toasts from './components/ui/Toasts.svelte';
   import Spinner from './components/ui/Spinner.svelte';
   import Account from './routes/Account.svelte';
+  import Assets from './routes/Assets.svelte';
+  import Component from './routes/Component.svelte';
+  import Components from './routes/Components.svelte';
   import Deck from './routes/Deck.svelte';
   import DeckAsOf from './routes/DeckAsOf.svelte';
   import DeckHistory from './routes/DeckHistory.svelte';
@@ -21,6 +24,7 @@
   import ResetPassword from './routes/ResetPassword.svelte';
   import SceneExport from './routes/SceneExport.svelte';
   import Signup from './routes/Signup.svelte';
+  import { projectComponents } from './lib/components.svelte.ts';
   import { deckHistory } from './lib/deckHistory.svelte.ts';
   import { deckImports } from './lib/deckImports.svelte.ts';
   import { decks } from './lib/decks.svelte.ts';
@@ -64,6 +68,7 @@
       deckHistory.reset();
       deleted.reset();
       models.reset();
+      projectComponents.reset();
       versions.reset();
       realtime.stop();
     }
@@ -102,7 +107,13 @@
     {:else if route.name === 'projects'}
       <Projects />
     {:else if route.name === 'project'}
-      <Project projectId={route.params.projectId} folderId={route.params.folderId} />
+      <Project projectId={route.params.projectId} />
+    {:else if route.name === 'assets'}
+      <Assets projectId={route.params.projectId} folderId={route.params.folderId} />
+    {:else if route.name === 'components'}
+      <Components projectId={route.params.projectId} kind={route.params.kind} />
+    {:else if route.name === 'component'}
+      <Component projectId={route.params.projectId} componentId={route.params.componentId} />
     {:else if route.name === 'members'}
       <Members projectId={route.params.projectId} />
     {:else if route.name === 'deleted'}

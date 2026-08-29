@@ -6,15 +6,18 @@ import {
   type CardModelSettings,
   type ModelKind,
   type ModelSettings,
+  type PunchboardModelSettings,
   type WoodModelSettings,
 } from '@three-peaks/shared';
 import { buildBoardPanels } from './geometry/board.ts';
 import { buildBoxGeometry } from './geometry/box.ts';
 import { buildCardGeometry } from './geometry/card.ts';
+import { buildPunchboardPiece, punchboardLayout } from './geometry/punchboard.ts';
 import { buildWoodGeometry } from './geometry/wood.ts';
 import { boardMaterials } from './materials/board.ts';
 import { boxMaterials } from './materials/box.ts';
 import { cardMaterials } from './materials/cardStock.ts';
+import { punchboardMaterials } from './materials/punchboard.ts';
 import { woodMaterials } from './materials/wood.ts';
 import {
   normalizeOutlines,
@@ -42,7 +45,29 @@ const GROUP_NAMES: Record<ModelKind, string> = {
   wood: 'Component',
   box: 'Box',
   board: 'Board',
+  punchboard: 'Punchboard',
 };
+
+export class MissingCutSheetError extends Error {
+  constructor() {
+    super('A punchboard needs an SVG cut sheet: it is what says where the tokens are.');
+    this.name = 'MissingCutSheetError';
+  }
+}
+
+/**
+ * The images a component is built from.
+ *
+ * Two of them at most, and which second one depends on the kind: a card takes
+ * the artwork for its reverse, a punchboard takes the die line that says where
+ * its tokens are. Named rather than positional because the two are nothing
+ * alike, and a builder handed the wrong one would extrude a card back.
+ */
+export interface ModelSources {
+  artwork: SourceImage;
+  back?: SourceImage | null;
+  cut?: SourceImage | null;
+}
 
 // One kind may be several meshes -- a folded board is one per panel -- and they
 // share their materials, which is why the two lists are not the same length.
@@ -120,6 +145,34 @@ function buildBox(settings: BoxModelSettings, source: SourceImage): BuiltParts {
   return { meshes: [new Mesh(geometry, slots)], materials: slots };
 }
 
+// A punchboard is several meshes and the scene wants them as separate files, so
+// this builds the one it is asked for. `null` is all of them, which is what the
+// studio previews.
+function buildPunchboard(
+  settings: PunchboardModelSettings,
+  source: SourceImage,
+  cut: SourceImage | null,
+  part: string | null
+): BuiltParts {
+  if (!cut || cut.svgText === null) throw new MissingCutSheetError();
+
+  const layout = punchboardLayout(settings, cut.svgText);
+  const materials = punchboardMaterials(settings, sourceTexture(source));
+  const slots = [materials.face, materials.back, materials.edge];
+
+  const wanted = part === null ? layout.pieces : layout.pieces.filter((one) => one.name === part);
+  const meshes = wanted.map((piece) => {
+    const mesh = new Mesh(buildPunchboardPiece(layout, piece, settings), slots);
+    mesh.name = piece.name;
+    // A piece asked for by name is exported on its own, so it stands at the
+    // origin rather than where it sat on the sheet it came out of.
+    if (part === null) mesh.position.set(...piece.center);
+    return mesh;
+  });
+
+  return { meshes, materials: slots };
+}
+
 function buildBoard(settings: BoardModelSettings, source: SourceImage): BuiltParts {
   const materials = boardMaterials(settings, sourceTexture(source));
   const slots = [materials.face, materials.back, materials.edge];
@@ -139,29 +192,32 @@ export interface BuiltModel {
   materials: Material[];
 }
 
-function partsFor(
-  settings: ModelSettings,
-  source: SourceImage,
-  back: SourceImage | null
-): BuiltParts {
+function partsFor(settings: ModelSettings, sources: ModelSources, part: string | null): BuiltParts {
   switch (settings.kind) {
     case 'card':
-      return buildCard(settings, source, back);
+      return buildCard(settings, sources.artwork, sources.back ?? null);
     case 'wood':
-      return buildWood(settings, source);
+      return buildWood(settings, sources.artwork);
     case 'box':
-      return buildBox(settings, source);
+      return buildBox(settings, sources.artwork);
     case 'board':
-      return buildBoard(settings, source);
+      return buildBoard(settings, sources.artwork);
+    case 'punchboard':
+      return buildPunchboard(settings, sources.artwork, sources.cut ?? null, part);
   }
 }
 
+/**
+ * `part` names one mesh of a component that has several -- a punchboard's sheet
+ * or one of its tokens. Null builds the whole thing, which is what the studio
+ * previews and what every other kind is regardless.
+ */
 export function buildModel(
   settings: ModelSettings,
-  source: SourceImage,
-  back: SourceImage | null
+  sources: ModelSources,
+  part: string | null = null
 ): BuiltModel {
-  const built = partsFor(settings, source, back);
+  const built = partsFor(settings, sources, part);
 
   const group = new Group();
   group.name = GROUP_NAMES[settings.kind];

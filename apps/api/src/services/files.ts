@@ -8,7 +8,8 @@ import {
 } from '@three-peaks/shared';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
 import { newId } from '../utils/uuid.ts';
-import { blockedMessage, deletedAncestor } from './folderTree.ts';
+import { type FileHome, deletedOwner, homeFilter, parseHome } from './fileHome.ts';
+import { blockedMessage } from './folderTree.ts';
 import { SNIFF_BYTES, sniffContentType } from './imageSniff.ts';
 import { publishAfterCommit } from './realtime/index.ts';
 import { deleteStoredObjectsAfterCommit, storage } from './storage/index.ts';
@@ -18,6 +19,9 @@ export interface FileRow {
   id: string;
   project_id: string;
   folder_id: string | null;
+  deck_id: string | null;
+  component_id: string | null;
+  component_role: string | null;
   filename: string;
   content_type: string;
   byte_size: string | number;
@@ -35,6 +39,9 @@ export function serializeFile(row: FileRow) {
     id: row.id,
     project_id: row.project_id,
     folder_id: row.folder_id,
+    deck_id: row.deck_id,
+    component_id: row.component_id,
+    component_role: row.component_role,
     filename: row.filename,
     content_type: row.content_type,
     // bigint arrives as a string from pg; the wire type is a number.
@@ -53,6 +60,9 @@ export const FILE_COLUMNS = [
   'file.id as id',
   'file.project_id as project_id',
   'file.folder_id as folder_id',
+  'file.deck_id as deck_id',
+  'file.component_id as component_id',
+  'file.component_role as component_role',
   'file.filename as filename',
   'file.content_type as content_type',
   'file.byte_size as byte_size',
@@ -442,20 +452,20 @@ export async function restoreFile(
   if (!file) throw new AppError(404, 'File not found');
   if (file.deleted_at === null) return serializeFile(file);
 
-  // Nothing is auto-restored on the way up: un-deleting a folder somebody
-  // else deleted, without being asked to, is not this route's decision.
-  const blocked = await deletedAncestor(db, file.folder_id);
+  // Nothing is auto-restored on the way up: un-deleting the folder, deck or
+  // component somebody else deleted, without being asked to, is not this
+  // route's decision.
+  const home = parseHome(file);
+  const blocked = await deletedOwner(db, home);
   if (blocked !== null) throw new AppError(409, blockedMessage(blocked, 'That file'));
 
-  const folderId = file.folder_id;
   const filename = opts.filename ?? file.filename;
   const taken = await db
     .selectFrom('file')
     .select(['file.id as id'])
     .where('file.project_id', '=', file.project_id)
     .where('file.deleted_at', 'is', null)
-    .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
-    .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
+    .where(homeFilter(home))
     .where(sql<boolean>`lower(file.filename) = lower(${filename})`)
     .executeTakeFirst();
   if (taken) throw new AppError(409, `A file named "${filename}" is already there`);
@@ -494,6 +504,51 @@ export async function restoreFile(
   }
 }
 
+/**
+ * Every stored object belonging to one owner, with its files locked in id order
+ * first -- the order every bulk file lock in the repo takes, so a purge and an
+ * import wait on each other rather than deadlocking.
+ *
+ * Every version's key, not just the mirror's: the mirror names one object out
+ * of N and the rest would be left in the bucket with nothing pointing at them.
+ * The mirror key stays in the set as well, for a file written before
+ * file_version existed and so having no row of its own.
+ */
+export async function ownedStorageKeys(
+  db: Connection,
+  owner: { deckId: string } | { componentId: string }
+): Promise<string[]> {
+  const locked = await db
+    .selectFrom('file')
+    .select(['file.id as id'])
+    .$if('deckId' in owner, (qb) =>
+      qb.where('file.deck_id', '=', (owner as { deckId: string }).deckId)
+    )
+    .$if('componentId' in owner, (qb) =>
+      qb.where('file.component_id', '=', (owner as { componentId: string }).componentId)
+    )
+    .forUpdate()
+    .orderBy('file.id')
+    .execute();
+
+  const fileIds = locked.map((row) => row.id);
+  if (fileIds.length === 0) return [];
+
+  const rows = await db
+    .selectFrom('file')
+    .leftJoin('file_version', 'file_version.file_id', 'file.id')
+    .select(['file.storage_key as storage_key', 'file_version.storage_key as version_storage_key'])
+    .where('file.id', 'in', fileIds)
+    .execute();
+
+  const keys = new Set<string>();
+  for (const row of rows) {
+    keys.add(row.storage_key);
+    if (row.version_storage_key !== null) keys.add(row.version_storage_key);
+  }
+  return [...keys];
+}
+
 // The suffix a taken name is retried under, and the point past which retrying
 // is not the answer to anything.
 const MAX_NAME_SUFFIX = 999;
@@ -510,7 +565,7 @@ const MAX_NAME_SUFFIX = 999;
 export async function freeFilename(
   db: Connection,
   projectId: string,
-  folderId: string | null,
+  home: FileHome,
   desired: string
 ): Promise<string> {
   const rows = await db
@@ -518,8 +573,7 @@ export async function freeFilename(
     .select(['file.filename as filename'])
     .where('file.project_id', '=', projectId)
     .where('file.deleted_at', 'is', null)
-    .$if(folderId === null, (qb) => qb.where('file.folder_id', 'is', null))
-    .$if(folderId !== null, (qb) => qb.where('file.folder_id', '=', folderId))
+    .where(homeFilter(home))
     .execute();
 
   // Names are compared case-insensitively, the way the unique indexes do it.

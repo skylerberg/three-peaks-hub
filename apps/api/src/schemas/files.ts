@@ -13,7 +13,13 @@ export const folderSchema = type({
 export const fileSchema = type({
   id: 'string',
   project_id: 'string',
+  // Where the file lives, and exactly one of the three is set: a deck owns its
+  // cards, a component owns its source images, and a file naming neither is a
+  // loose asset in the folder tree.
   folder_id: 'string | null',
+  deck_id: 'string | null',
+  component_id: 'string | null',
+  component_role: 'string | null',
   filename: 'string',
   content_type: 'string',
   byte_size: 'number',
@@ -64,7 +70,12 @@ export const directoryListingSchema = type({
 export const uploadQuerySchema = type({
   project_id: uuid,
   filename: stringWithLength(1, 255),
+  // The destination, and at most one of the three. Absent altogether is the
+  // Assets root, which is what the previous release's client sends.
   'folder_id?': 'string.uuid',
+  'deck_id?': 'string.uuid',
+  'component_id?': 'string.uuid',
+  'role?': "'card' | 'back' | 'artwork' | 'cut'",
   'id?': uuid,
 });
 
@@ -126,11 +137,15 @@ export const restoreFolderQuerySchema = type({
 // One row of the deleted listing. Flat, with the path each entry came from,
 // because a deleted subtree has no live parent to browse into.
 export const deletedEntrySchema = type({
-  kind: "'file' | 'folder'",
+  kind: "'file' | 'folder' | 'deck' | 'component'",
   id: 'string',
   project_id: 'string',
   name: 'string',
-  // The folders above it, outermost first; empty at the project root.
+  // Which section it goes back to, and so which route restores it.
+  home_kind: "'folder' | 'deck' | 'component'",
+  // Where it came from: the folders above it, outermost first and empty at the
+  // Assets root, or the name of the deck or component that holds it. Empty for
+  // a deck or a component, which are inside nothing.
   path: 'string',
   content_type: 'string | null',
   // For a file, what purging it reclaims: every version of it, not the current one.
@@ -144,4 +159,15 @@ export const deletedEntrySchema = type({
 
 export const deletedListingSchema = type({
   entries: deletedEntrySchema.array(),
+});
+
+// Where a file is being moved to. Exactly one destination: a folder (null for
+// the Assets root), a deck, or a component. `role` says which slot it fills --
+// a deck's back rather than one of its cards, a punchboard's cut sheet rather
+// than its artwork.
+export const moveFileRequestSchema = type({
+  'folder_id?': 'string.uuid | null',
+  'deck_id?': 'string.uuid | null',
+  'component_id?': 'string.uuid | null',
+  'role?': "'card' | 'back' | 'artwork' | 'cut'",
 });

@@ -17,6 +17,7 @@ interface DeckRow {
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
+  deleted_at: Date | string | null;
   card_count: string | number | null;
   total_copies: string | number | null;
 }
@@ -31,6 +32,7 @@ const DECK_COLUMNS = [
   'deck.created_by as created_by',
   'deck.created_at as created_at',
   'deck.updated_at as updated_at',
+  'deck.deleted_at as deleted_at',
 ] as const;
 
 export function serializeDeck(row: DeckRow) {
@@ -44,6 +46,7 @@ export function serializeDeck(row: DeckRow) {
     created_by: row.created_by,
     created_at: new Date(row.created_at).toISOString(),
     updated_at: new Date(row.updated_at).toISOString(),
+    deleted_at: row.deleted_at === null ? null : new Date(row.deleted_at).toISOString(),
     card_count: Number(row.card_count ?? 0),
     total_copies: Number(row.total_copies ?? 0),
   };
@@ -96,4 +99,57 @@ export async function readDeckCards(c: Pick<AppContext, 'get'>, deckId: string) 
     position: row.position,
     file: serializeFile(row),
   }));
+}
+
+/**
+ * Refuses a card list that is not exactly the deck's own live artwork, bar a
+ * back image that is not itself a card.
+ *
+ * Both halves matter. A file the deck does not own would be a card that Assets
+ * still lists, which is the duplication owning artwork exists to remove; and a
+ * file left out would be artwork in the deck that no list names, which is a
+ * third place for an image to be and the one state this arrangement has none
+ * of. Removing a card means deleting it or moving it to Assets, and the message
+ * says so, because there is no other way to say it from here.
+ */
+export async function assertCardFiles(
+  c: Pick<AppContext, 'get'>,
+  deckId: string,
+  fileIds: readonly string[]
+): Promise<void> {
+  const db = c.get('db');
+  const deck = await db
+    .selectFrom('deck')
+    .select(['deck.back_file_id as back_file_id'])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirstOrThrow();
+
+  const owned = await db
+    .selectFrom('file')
+    .select(['file.id as id', 'file.filename as filename'])
+    .where('file.deck_id', '=', deckId)
+    .where('file.deleted_at', 'is', null)
+    .orderBy('file.filename', 'asc')
+    .execute();
+
+  const ownedIds = new Set(owned.map((row) => row.id));
+  const given = new Set(fileIds);
+
+  for (const id of given) {
+    if (!ownedIds.has(id)) {
+      throw new AppError(
+        422,
+        'Every card has to be an image this deck holds. Upload it here, or move it in from Assets.'
+      );
+    }
+  }
+
+  const stranded = owned.filter((row) => !given.has(row.id) && row.id !== deck.back_file_id);
+  if (stranded.length > 0) {
+    const rest = stranded.length === 1 ? '' : ` and ${stranded.length - 1} more`;
+    throw new AppError(
+      422,
+      `"${stranded[0].filename}"${rest} would be left in this deck with no place in it. Delete it, or move it to Assets.`
+    );
+  }
 }

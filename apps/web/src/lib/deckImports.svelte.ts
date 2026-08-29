@@ -4,7 +4,6 @@ import { ApiError, api, apiMessage, assertOk, authHeader } from '../api/client.t
 import type { CanvaPage } from './canva/pages.ts';
 import { readCanvaExport } from './canva/pages.ts';
 import { ZipError } from './canva/zip.ts';
-import { files } from './files.svelte.ts';
 import { newId } from './ids.ts';
 import { readUploadResponse } from './upload.ts';
 
@@ -28,8 +27,10 @@ function pageCount(pages: number): string {
 }
 
 class DeckImportStore {
+  // What this deck was last imported from, and whether a run is open. Null is
+  // a deck nothing has ever been imported into, which is not a state anybody
+  // has to fix: the artwork goes into the deck itself.
   binding = $state<DeckImport | null>(null);
-  folderName = $state<string | null>(null);
   loadingBinding = $state(false);
 
   run = $state<ImportRun | null>(null);
@@ -42,10 +43,10 @@ class DeckImportStore {
   // one instance and an unconfirmed plan outlives the screen that made it, so
   // without this the next deck's screen adopts it and imports into this one.
   runDeckId = $state<string | null>(null);
-  // The same scope for the binding, which is read per deck and holds the id of
-  // the open run a screen offers to resume or discard. Cleared before the read
-  // rather than only overwritten after it, so nothing downstream can be handed
-  // the deck just left while the next one is still on the wire.
+  // The same scope for the import row, which is read per deck and holds the id
+  // of the open run a screen offers to resume or discard. Cleared before the
+  // read rather than only overwritten after it, so nothing downstream can be
+  // handed the deck just left while the next one is still on the wire.
   bindingDeckId = $state<string | null>(null);
   status = $state<ImportStatus>('idle');
   error = $state<string | null>(null);
@@ -63,17 +64,8 @@ class DeckImportStore {
   #bindingGeneration = 0;
   #runGeneration = 0;
 
-  // What a binding event carried, applied rather than read back -- the name
-  // comes with it, so this costs nothing.
-  applyBinding(deckId: string, binding: DeckImport | null, folderName: string | null): void {
-    if (this.bindingDeckId !== deckId) return;
-    this.binding = binding;
-    this.folderName = folderName;
-  }
-
-  // A run opening and closing is the one thing about the binding that moves
-  // without the binding row being rewritten, so it is derived from the run
-  // event rather than announced twice.
+  // A run opening and closing is the only thing about this row that moves, so
+  // it is derived from the run event rather than announced twice.
   applyOpenRun(deckId: string, runId: string | null): void {
     if (this.bindingDeckId !== deckId || !this.binding) return;
     this.binding = { ...this.binding, open_run_id: runId };
@@ -86,36 +78,16 @@ class DeckImportStore {
     this.#deckId = deckId;
     this.bindingDeckId = null;
     this.binding = null;
-    this.folderName = null;
     this.loadingBinding = true;
 
     try {
       const binding = await this.#readBinding(deckId);
-      const name = binding?.folder_id ? await this.#folderName(projectId, binding.folder_id) : null;
       if (generation !== this.#bindingGeneration) return;
       this.binding = binding;
-      this.folderName = name;
       this.bindingDeckId = deckId;
     } finally {
       if (generation === this.#bindingGeneration) this.loadingBinding = false;
     }
-  }
-
-  async bind(projectId: string, deckId: string, folderId: string): Promise<void> {
-    assertOk(
-      await api.PUT('/api/decks/{deckId}/import', {
-        params: { path: { deckId } },
-        body: { folder_id: folderId, source_kind: 'zip' },
-      })
-    );
-    await this.loadBinding(projectId, deckId);
-  }
-
-  // The row survives with a null folder, so the runs and the card mapping are
-  // still there and re-binding the same folder picks up where this left off.
-  async unbind(projectId: string, deckId: string): Promise<void> {
-    assertOk(await api.DELETE('/api/decks/{deckId}/import', { params: { path: { deckId } } }));
-    await this.loadBinding(projectId, deckId);
   }
 
   async readExport(file: File): Promise<void> {
@@ -319,7 +291,6 @@ class DeckImportStore {
     this.#bindingGeneration += 1;
     this.#runGeneration += 1;
     this.binding = null;
-    this.folderName = null;
     this.loadingBinding = false;
     this.run = null;
     this.plan = null;
@@ -404,18 +375,6 @@ class DeckImportStore {
         return null;
       }
       throw caught;
-    }
-  }
-
-  async #folderName(projectId: string, folderId: string): Promise<string | null> {
-    try {
-      const listing = await files.readDirectory(projectId, folderId);
-      return listing.folder?.name ?? null;
-    } catch (error) {
-      // Purged out from under the binding, which the screen says out loud
-      // rather than showing an id nobody can act on.
-      if (error instanceof ApiError && error.status === 404) return null;
-      throw error;
     }
   }
 

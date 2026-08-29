@@ -3,6 +3,7 @@ import {
   DEFAULT_BOARD_SETTINGS,
   DEFAULT_BOX_SETTINGS,
   DEFAULT_CARD_SETTINGS,
+  DEFAULT_PUNCHBOARD_SETTINGS,
   DEFAULT_WOOD_SETTINGS,
   type GlbAsset,
   type ModelSettings,
@@ -13,11 +14,21 @@ import {
   componentFootprint,
   deckCardSettings,
   planScene,
+  type SceneComponentSelection,
   type SceneDeckSelection,
   type SceneSelection,
 } from './assets.ts';
 
 const image = (id: string) => ({ file_id: id, content_type: 'image/png' });
+
+// assetKey reads a whole selection; these tests are about the parts of one that
+// decide whether two picks are the same file.
+const key = (
+  settings: ModelSettings,
+  front: ReturnType<typeof image>,
+  back: ReturnType<typeof image> | null,
+  extra: Partial<Omit<SceneComponentSelection, 'copies'>> = {}
+) => assetKey({ label: 'x', settings, front, back, cut: null, part: null, ...extra });
 
 const card = (patch: Partial<typeof DEFAULT_CARD_SETTINGS> = {}): ModelSettings => ({
   ...DEFAULT_CARD_SETTINGS,
@@ -47,8 +58,8 @@ const glbAssets = (assets: SceneAsset[]): GlbAsset[] =>
 
 describe('assetKey', () => {
   it('reads two selections of one component as one file', () => {
-    expect(assetKey(card(), image('a'), image('back'))).toBe(
-      assetKey({ ...DEFAULT_CARD_SETTINGS }, image('a'), image('back'))
+    expect(key(card(), image('a'), image('back'))).toBe(
+      key({ ...DEFAULT_CARD_SETTINGS }, image('a'), image('back'))
     );
   });
 
@@ -57,22 +68,37 @@ describe('assetKey', () => {
       Object.entries(DEFAULT_CARD_SETTINGS).reverse()
     ) as ModelSettings;
 
-    expect(assetKey(reversed, image('a'), null)).toBe(assetKey(card(), image('a'), null));
+    expect(key(reversed, image('a'), null)).toBe(key(card(), image('a'), null));
   });
 
   it('separates two cards cut to one size but printed with different artwork', () => {
-    expect(assetKey(card(), image('a'), null)).not.toBe(assetKey(card(), image('b'), null));
+    expect(key(card(), image('a'), null)).not.toBe(key(card(), image('b'), null));
   });
 
   it('separates one image dialled in two ways', () => {
-    expect(assetKey(card(), image('a'), null)).not.toBe(
-      assetKey(card({ thickness_mm: 2 }), image('a'), null)
+    expect(key(card(), image('a'), null)).not.toBe(
+      key(card({ thickness_mm: 2 }), image('a'), null)
     );
   });
 
   it('separates two cards that differ only in what is on the back', () => {
-    expect(assetKey(card(), image('a'), image('one'))).not.toBe(
-      assetKey(card(), image('a'), image('two'))
+    expect(key(card(), image('a'), image('one'))).not.toBe(key(card(), image('a'), image('two')));
+  });
+
+  // A punchboard is several files out of one component, and the part is the
+  // only thing telling two of them apart.
+  it('separates two parts of one punchboard', () => {
+    const settings = { ...DEFAULT_PUNCHBOARD_SETTINGS } as ModelSettings;
+    const cut = image('die-line');
+    expect(key(settings, image('sheet'), null, { cut, part: 'Sheet' })).not.toBe(
+      key(settings, image('sheet'), null, { cut, part: 'Token.001' })
+    );
+  });
+
+  it('separates one component cut by two different die lines', () => {
+    const settings = { ...DEFAULT_PUNCHBOARD_SETTINGS } as ModelSettings;
+    expect(key(settings, image('sheet'), null, { cut: image('one'), part: 'Sheet' })).not.toBe(
+      key(settings, image('sheet'), null, { cut: image('two'), part: 'Sheet' })
     );
   });
 });
@@ -99,6 +125,13 @@ describe('componentFootprint', () => {
     expect(componentFootprint(DEFAULT_BOARD_SETTINGS)).toEqual({
       width_mm: 500,
       depth_mm: 500,
+      height_mm: 2,
+    });
+    // The sheet. A token is smaller, and only the die line knows by how much,
+    // so it carries its own measurement rather than being sized from here.
+    expect(componentFootprint(DEFAULT_PUNCHBOARD_SETTINGS)).toEqual({
+      width_mm: 280,
+      depth_mm: 210,
       height_mm: 2,
     });
   });
@@ -213,6 +246,8 @@ describe('planScene', () => {
           label: 'Box',
           front: image('wrap'),
           back: null,
+          cut: null,
+          part: null,
           settings: { ...DEFAULT_BOX_SETTINGS, width_mm: 120, height_mm: 90, depth_mm: 60 },
           copies: 1,
         },
@@ -234,6 +269,8 @@ describe('planScene', () => {
           label: 'Board',
           front: image('board'),
           back: null,
+          cut: null,
+          part: null,
           settings: DEFAULT_BOARD_SETTINGS,
           copies: 1,
         },
@@ -241,6 +278,8 @@ describe('planScene', () => {
           label: 'Token',
           front: image('token'),
           back: null,
+          cut: null,
+          part: null,
           settings: DEFAULT_WOOD_SETTINGS,
           copies: 3,
         },
@@ -265,6 +304,8 @@ describe('planScene', () => {
           label: 'Board',
           front: image('board'),
           back: null,
+          cut: null,
+          part: null,
           settings: DEFAULT_BOARD_SETTINGS,
           copies: 1,
         },

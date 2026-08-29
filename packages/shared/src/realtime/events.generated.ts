@@ -6,13 +6,16 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     RealtimeEvent:
+      | components['schemas']['ComponentCreatedEvent']
+      | components['schemas']['ComponentDeletedEvent']
+      | components['schemas']['ComponentUpdatedEvent']
       | components['schemas']['DeckCreatedEvent']
       | components['schemas']['DeckDeletedEvent']
-      | components['schemas']['DeckImportBindingChangedEvent']
       | components['schemas']['DeckImportFinishedEvent']
       | components['schemas']['DeckImportStartedEvent']
       | components['schemas']['DeckUpdatedEvent']
       | components['schemas']['FileDeletedEvent']
+      | components['schemas']['FileMovedEvent']
       | components['schemas']['FileUpdatedEvent']
       | components['schemas']['FileUploadedEvent']
       | components['schemas']['FileVersionCreatedEvent']
@@ -25,6 +28,274 @@ export interface components {
       | components['schemas']['ProjectUpdatedEvent'];
     /** @description Close codes a /ws socket can be closed with, beyond the standard RFC 6455 ones. 4401 (UNAUTHORIZED): credential revoked 4429 (REPLACED): replaced by a newer connection */
     RealtimeCloseCode: 4401 | 4429;
+    ComponentCreatedEvent: {
+      /** @constant */
+      type: 'component_created';
+      project_id: string;
+      data: {
+        actor_user_id: string;
+        created_at: string;
+        created_by: string;
+        deleted_at: string | null;
+        files: {
+          file: {
+            byte_size: number;
+            component_id: string | null;
+            component_role: string | null;
+            content_type: string;
+            created_at: string;
+            deck_id: string | null;
+            deleted_at: string | null;
+            filename: string;
+            folder_id: string | null;
+            id: string;
+            image_height: number | null;
+            image_width: number | null;
+            name_locked: boolean;
+            project_id: string;
+            updated_at: string;
+            uploaded_by: string;
+          };
+          /** @enum {unknown} */
+          role: 'artwork' | 'cut';
+        }[];
+        id: string;
+        kind: string;
+        missing_roles: ('artwork' | 'cut')[];
+        name: string;
+        project_id: string;
+        settings:
+          | {
+              back_color: string;
+              edge_color: string;
+              height_mm: number;
+              /** @constant */
+              kind: 'punchboard';
+              seed: number;
+              /** @enum {unknown} */
+              sheet_state: 'intact' | 'punched';
+              thickness_mm: number;
+              width_mm: number;
+            }
+          | {
+              bevel_mm: number;
+              grain_color: string;
+              grain_scale: number;
+              /** @constant */
+              kind: 'wood';
+              longest_side_mm: number;
+              printed: boolean;
+              seed: number;
+              simplify_tolerance: number;
+              thickness_mm: number;
+              /** @enum {unknown} */
+              trace_source: 'alpha' | 'luminance';
+              trace_threshold: number;
+              wood_color: string;
+            }
+          | {
+              corner_bevel_mm: number;
+              depth_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'box';
+              seed: number;
+              width_mm: number;
+            }
+          | {
+              edge_color: string;
+              /** @enum {unknown} */
+              fold: 'bifold' | 'none' | 'quadfold';
+              fold_gap_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'board';
+              seed: number;
+              thickness_mm: number;
+              width_mm: number;
+            };
+        updated_at: string;
+      };
+    };
+    ComponentDeletedEvent: {
+      /** @constant */
+      type: 'component_deleted';
+      project_id: string;
+      data: {
+        actor_user_id: string;
+        created_at: string;
+        created_by: string;
+        deleted_at: string | null;
+        files: {
+          file: {
+            byte_size: number;
+            component_id: string | null;
+            component_role: string | null;
+            content_type: string;
+            created_at: string;
+            deck_id: string | null;
+            deleted_at: string | null;
+            filename: string;
+            folder_id: string | null;
+            id: string;
+            image_height: number | null;
+            image_width: number | null;
+            name_locked: boolean;
+            project_id: string;
+            updated_at: string;
+            uploaded_by: string;
+          };
+          /** @enum {unknown} */
+          role: 'artwork' | 'cut';
+        }[];
+        id: string;
+        kind: string;
+        missing_roles: ('artwork' | 'cut')[];
+        name: string;
+        project_id: string;
+        purged: boolean;
+        settings:
+          | {
+              back_color: string;
+              edge_color: string;
+              height_mm: number;
+              /** @constant */
+              kind: 'punchboard';
+              seed: number;
+              /** @enum {unknown} */
+              sheet_state: 'intact' | 'punched';
+              thickness_mm: number;
+              width_mm: number;
+            }
+          | {
+              bevel_mm: number;
+              grain_color: string;
+              grain_scale: number;
+              /** @constant */
+              kind: 'wood';
+              longest_side_mm: number;
+              printed: boolean;
+              seed: number;
+              simplify_tolerance: number;
+              thickness_mm: number;
+              /** @enum {unknown} */
+              trace_source: 'alpha' | 'luminance';
+              trace_threshold: number;
+              wood_color: string;
+            }
+          | {
+              corner_bevel_mm: number;
+              depth_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'box';
+              seed: number;
+              width_mm: number;
+            }
+          | {
+              edge_color: string;
+              /** @enum {unknown} */
+              fold: 'bifold' | 'none' | 'quadfold';
+              fold_gap_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'board';
+              seed: number;
+              thickness_mm: number;
+              width_mm: number;
+            };
+        updated_at: string;
+      };
+    };
+    ComponentUpdatedEvent: {
+      /** @constant */
+      type: 'component_updated';
+      project_id: string;
+      data: {
+        actor_user_id: string;
+        created_at: string;
+        created_by: string;
+        deleted_at: string | null;
+        files: {
+          file: {
+            byte_size: number;
+            component_id: string | null;
+            component_role: string | null;
+            content_type: string;
+            created_at: string;
+            deck_id: string | null;
+            deleted_at: string | null;
+            filename: string;
+            folder_id: string | null;
+            id: string;
+            image_height: number | null;
+            image_width: number | null;
+            name_locked: boolean;
+            project_id: string;
+            updated_at: string;
+            uploaded_by: string;
+          };
+          /** @enum {unknown} */
+          role: 'artwork' | 'cut';
+        }[];
+        id: string;
+        kind: string;
+        missing_roles: ('artwork' | 'cut')[];
+        name: string;
+        project_id: string;
+        settings:
+          | {
+              back_color: string;
+              edge_color: string;
+              height_mm: number;
+              /** @constant */
+              kind: 'punchboard';
+              seed: number;
+              /** @enum {unknown} */
+              sheet_state: 'intact' | 'punched';
+              thickness_mm: number;
+              width_mm: number;
+            }
+          | {
+              bevel_mm: number;
+              grain_color: string;
+              grain_scale: number;
+              /** @constant */
+              kind: 'wood';
+              longest_side_mm: number;
+              printed: boolean;
+              seed: number;
+              simplify_tolerance: number;
+              thickness_mm: number;
+              /** @enum {unknown} */
+              trace_source: 'alpha' | 'luminance';
+              trace_threshold: number;
+              wood_color: string;
+            }
+          | {
+              corner_bevel_mm: number;
+              depth_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'box';
+              seed: number;
+              width_mm: number;
+            }
+          | {
+              edge_color: string;
+              /** @enum {unknown} */
+              fold: 'bifold' | 'none' | 'quadfold';
+              fold_gap_mm: number;
+              height_mm: number;
+              /** @constant */
+              kind: 'board';
+              seed: number;
+              thickness_mm: number;
+              width_mm: number;
+            };
+        updated_at: string;
+      };
+    };
     DeckCreatedEvent: {
       /** @constant */
       type: 'deck_created';
@@ -37,6 +308,7 @@ export interface components {
         card_width_mm: number;
         created_at: string;
         created_by: string;
+        deleted_at: string | null;
         id: string;
         name: string;
         project_id: string;
@@ -50,27 +322,19 @@ export interface components {
       project_id: string;
       data: {
         actor_user_id: string;
+        back_file_id: string | null;
+        card_count: number;
+        card_height_mm: number;
+        card_width_mm: number;
+        created_at: string;
+        created_by: string;
+        deleted_at: string | null;
         id: string;
-      };
-    };
-    DeckImportBindingChangedEvent: {
-      /** @constant */
-      type: 'deck_import_binding_changed';
-      project_id: string;
-      data: {
-        actor_user_id: string;
-        binding: {
-          created_at: string;
-          deck_id: string;
-          folder_id: string | null;
-          id: string;
-          open_run_id: string | null;
-          source_kind: string;
-          source_label: string | null;
-          updated_at: string;
-        } | null;
-        deck_id: string;
-        folder_name: string | null;
+        name: string;
+        project_id: string;
+        purged: boolean;
+        total_copies: number;
+        updated_at: string;
       };
     };
     DeckImportFinishedEvent: {
@@ -136,8 +400,11 @@ export interface components {
         cards: {
           file: {
             byte_size: number;
+            component_id: string | null;
+            component_role: string | null;
             content_type: string;
             created_at: string;
+            deck_id: string | null;
             deleted_at: string | null;
             filename: string;
             folder_id: string | null;
@@ -160,6 +427,7 @@ export interface components {
           card_width_mm: number;
           created_at: string;
           created_by: string;
+          deleted_at: string | null;
           id: string;
           name: string;
           project_id: string;
@@ -175,8 +443,11 @@ export interface components {
       data: {
         actor_user_id: string;
         byte_size: number;
+        component_id: string | null;
+        component_role: string | null;
         content_type: string;
         created_at: string;
+        deck_id: string | null;
         deleted_at: string | null;
         filename: string;
         folder_id: string | null;
@@ -191,6 +462,30 @@ export interface components {
         uploaded_by: string;
       };
     };
+    FileMovedEvent: {
+      /** @constant */
+      type: 'file_moved';
+      project_id: string;
+      data: {
+        actor_user_id: string;
+        byte_size: number;
+        component_id: string | null;
+        component_role: string | null;
+        content_type: string;
+        created_at: string;
+        deck_id: string | null;
+        deleted_at: string | null;
+        filename: string;
+        folder_id: string | null;
+        id: string;
+        image_height: number | null;
+        image_width: number | null;
+        name_locked: boolean;
+        project_id: string;
+        updated_at: string;
+        uploaded_by: string;
+      };
+    };
     FileUpdatedEvent: {
       /** @constant */
       type: 'file_updated';
@@ -198,8 +493,11 @@ export interface components {
       data: {
         actor_user_id: string;
         byte_size: number;
+        component_id: string | null;
+        component_role: string | null;
         content_type: string;
         created_at: string;
+        deck_id: string | null;
         deleted_at: string | null;
         filename: string;
         folder_id: string | null;
@@ -219,8 +517,11 @@ export interface components {
       data: {
         actor_user_id: string;
         byte_size: number;
+        component_id: string | null;
+        component_role: string | null;
         content_type: string;
         created_at: string;
+        deck_id: string | null;
         deleted_at: string | null;
         filename: string;
         folder_id: string | null;
@@ -242,8 +543,11 @@ export interface components {
         actor_user_id: string;
         file: {
           byte_size: number;
+          component_id: string | null;
+          component_role: string | null;
           content_type: string;
           created_at: string;
+          deck_id: string | null;
           deleted_at: string | null;
           filename: string;
           folder_id: string | null;
@@ -352,6 +656,18 @@ export interface components {
               kind: 'card';
               seed: number;
               stock_color: string;
+              thickness_mm: number;
+              width_mm: number;
+            }
+          | {
+              back_color: string;
+              edge_color: string;
+              height_mm: number;
+              /** @constant */
+              kind: 'punchboard';
+              seed: number;
+              /** @enum {unknown} */
+              sheet_state: 'intact' | 'punched';
               thickness_mm: number;
               width_mm: number;
             }

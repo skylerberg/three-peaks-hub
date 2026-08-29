@@ -80,8 +80,23 @@
     return new Date(timestamp).toLocaleString();
   }
 
+  const ICONS: Record<DeletedEntry['kind'], string> = {
+    file: '📄',
+    folder: '📁',
+    deck: '🂠',
+    component: '🧩',
+  };
+
+  // What the entry sat in: a folder trail for an asset, the owner's own name
+  // for artwork, and the section for a deck or a component, which sit in
+  // nothing and so carry an empty path.
+  const SECTIONS: Partial<Record<DeletedEntry['kind'], string>> = {
+    deck: 'Decks',
+    component: 'Components',
+  };
+
   function where(entry: DeletedEntry): string {
-    return entry.path || 'Files';
+    return entry.path || SECTIONS[entry.kind] || 'Assets';
   }
 
   // The obvious second name to try, with a file's extension left where a reader
@@ -94,7 +109,9 @@
 
   async function send(entry: DeletedEntry, name: string | undefined): Promise<void> {
     if (entry.kind === 'file') await deleted.restoreFile(entry.id, name);
-    else await deleted.restoreFolder(entry.id, name);
+    else if (entry.kind === 'folder') await deleted.restoreFolder(entry.id, name);
+    else if (entry.kind === 'deck') await deleted.restoreDeck(entry.id);
+    else await deleted.restoreComponent(entry.id);
   }
 
   async function restore(entry: DeletedEntry) {
@@ -127,12 +144,18 @@
     }
   }
 
-  // A folder purge is the one action here that destroys something nobody
+  // Purging an owner is the one action here that destroys something nobody
   // deleted, so the question has to say that rather than warn in the abstract.
+  const HOLDS: Partial<Record<DeletedEntry['kind'], string>> = {
+    folder: 'Everything still inside it goes too, including files nobody deleted',
+    deck: 'Every card in it goes too, including artwork nobody deleted',
+    component: 'Its artwork goes too, even if nobody deleted it',
+  };
+
   function purgeQuestion(entry: DeletedEntry): string {
-    return entry.kind === 'folder'
-      ? `Permanently delete the folder ${entry.name}? Everything still inside it goes too, ` +
-          'including files nobody deleted, and none of it can be brought back.'
+    const holds = HOLDS[entry.kind];
+    return holds
+      ? `Permanently delete ${entry.name}? ${holds}, and none of it can be brought back.`
       : `Permanently delete ${entry.name}? Every version of it goes too, and none of it can be brought back.`;
   }
 
@@ -141,7 +164,9 @@
     busy = true;
     try {
       if (entry.kind === 'file') await deleted.purgeFile(entry.id);
-      else await deleted.purgeFolder(entry.id);
+      else if (entry.kind === 'folder') await deleted.purgeFolder(entry.id);
+      else if (entry.kind === 'deck') await deleted.purgeDeck(entry.id);
+      else await deleted.purgeComponent(entry.id);
       toasts.success(`${entry.name} is gone, and its space is back.`);
     } catch (caught) {
       toasts.error(apiMessage(caught));
@@ -166,7 +191,7 @@
         </p>
       </div>
       <a class="focus-ring rounded px-3 py-2 text-sm underline" href="/projects/{projectId}">
-        Back to files
+        Back to the project
       </a>
     </div>
 
@@ -182,12 +207,16 @@
           <li class="flex flex-wrap items-center justify-between gap-3 p-3">
             <div class="min-w-0">
               <p class="flex items-center gap-2 font-medium">
-                <span aria-hidden="true">{entry.kind === 'folder' ? '📁' : '📄'}</span>
+                <span aria-hidden="true">{ICONS[entry.kind]}</span>
                 <span class="truncate">{entry.name}</span>
               </p>
               <p class="text-sm text-muted">
                 {#if entry.kind === 'folder'}
                   Folder
+                {:else if entry.content_type === null}
+                  {entry.kind === 'deck' ? 'Deck' : 'Component'} · {formatBytes(
+                    entry.byte_size ?? 0
+                  )}
                 {:else}
                   {formatBytes(entry.byte_size ?? 0)} · {entry.content_type}
                 {/if}

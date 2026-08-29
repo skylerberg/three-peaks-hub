@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { formatBytes, isModelSource } from '@three-peaks/shared';
+  import { COMPONENT_KIND_INFO, type ComponentKind, formatBytes } from '@three-peaks/shared';
+  import { api, assertOk } from '../api/client.ts';
   import Thumbnail from './Thumbnail.svelte';
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
@@ -18,6 +19,8 @@
   let { projectId, folderId, canEdit }: Props = $props();
 
   let fileInput = $state<HTMLInputElement | null>(null);
+  let moving = $state<string | null>(null);
+  let destinations = $state<{ value: string; label: string }[]>([]);
   let dropActive = $state(false);
   let creatingFolder = $state(false);
   let newFolderName = $state('');
@@ -48,8 +51,49 @@
     };
   });
 
+  // Where a loose asset can be sent. Read once per project rather than per row:
+  // a component that has no artwork yet is exactly the one somebody is looking
+  // to fill, so nothing here is filtered out.
+  $effect(() => {
+    const id = projectId;
+    if (!canEdit) return;
+
+    void Promise.all([
+      api.GET('/api/decks', { params: { query: { project_id: id } } }),
+      api.GET('/api/components', { params: { query: { project_id: id } } }),
+    ])
+      .then(([deckRows, componentRows]) => {
+        destinations = [
+          ...assertOk(deckRows).decks.map((deck) => ({
+            value: `deck:${deck.id}`,
+            label: `Deck: ${deck.name}`,
+          })),
+          ...assertOk(componentRows).components.map((component) => ({
+            value: `component:${component.id}`,
+            label: `${COMPONENT_KIND_INFO[component.kind as ComponentKind].singular}: ${component.name}`,
+          })),
+        ];
+      })
+      .catch(() => {
+        destinations = [];
+      });
+  });
+
+  async function moveTo(fileId: string, choice: string): Promise<void> {
+    const [kind, id] = choice.split(':');
+    if (!id) return;
+    moving = null;
+    try {
+      await files.moveFile(fileId, kind === 'deck' ? { deck_id: id } : { component_id: id });
+      await files.refresh();
+    } catch (error) {
+      toasts.error(apiMessage(error));
+    }
+  }
+
   function open(id: string | null) {
-    router.navigate(id ? `/projects/${projectId}?folder=${id}` : `/projects/${projectId}`);
+    const assets = `/projects/${projectId}/assets`;
+    router.navigate(id ? `${assets}?folder=${id}` : assets);
   }
 
   async function uploadAll(list: FileList | null) {
@@ -58,7 +102,7 @@
     // burst of concurrent uploads can each pass a check the set of them fails.
     for (const file of Array.from(list)) {
       try {
-        await files.upload(projectId, folderId, file);
+        await files.upload(projectId, { folder_id: folderId }, file);
       } catch (error) {
         toasts.error(`${file.name}: ${apiMessage(error)}`);
       }
@@ -265,13 +309,15 @@
               >
                 Versions
               </a>
-              {#if isModelSource(file.content_type)}
-                <a
+              {#if canEdit && destinations.length > 0}
+                <button
+                  type="button"
                   class="focus-ring inline-flex min-h-11 items-center rounded px-2 underline"
-                  href="/projects/{projectId}/files/{file.id}/3d"
+                  aria-label="Move {file.filename}"
+                  onclick={() => (moving = moving === file.id ? null : file.id)}
                 >
-                  Make 3D
-                </a>
+                  Move to…
+                </button>
               {/if}
               {#if canEdit}
                 <button
@@ -292,6 +338,24 @@
                 </button>
               {/if}
             </div>
+
+            {#if moving === file.id}
+              <div class="flex flex-col gap-1">
+                <label class="text-xs text-muted" for="move-{file.id}">
+                  Move {file.filename} to
+                </label>
+                <select
+                  id="move-{file.id}"
+                  class="focus-ring min-h-11 rounded-md border border-edge bg-surface px-2 text-sm"
+                  onchange={(event) => moveTo(file.id, event.currentTarget.value)}
+                >
+                  <option value="">Choose a deck or component…</option>
+                  {#each destinations as destination (destination.value)}
+                    <option value={destination.value}>{destination.label}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
           </li>
         {/each}
 
