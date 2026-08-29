@@ -67,7 +67,10 @@
     return new Date(timestamp).toLocaleString();
   }
 
+  // Strongest tier first, and every one of them named: which tier placed a card
+  // is how much to trust that it landed on the right artwork.
   function matchLabel(card: RunCard): string {
+    if (card.matched_by === 'page_id') return 'matched by Canva page';
     if (card.matched_by === 'identity') return 'matched by page name';
     if (card.matched_by === 'page_number') return 'matched by page number';
     return 'new card';

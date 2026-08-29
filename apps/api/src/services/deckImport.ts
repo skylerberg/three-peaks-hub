@@ -491,6 +491,9 @@ export async function readDeckAsOfRun(c: Ctx, importId: string, runId: string): 
 interface StartRunPage {
   pageNumber: number;
   title: string | null;
+  // What the source calls this page, when it has a name for it of its own. A
+  // ZIP never does; the Canva app always does.
+  pageId: string | null;
 }
 
 export interface StartRunInput {
@@ -533,6 +536,7 @@ interface MappingRow {
   file_id: string;
   filename: string;
   identity_key: string;
+  source_page_id: string | null;
   page_number: number;
   added_to_deck_at: Date | string | null;
   file_live: boolean;
@@ -542,8 +546,9 @@ interface PlannedPage {
   pageNumber: number;
   title: string | null;
   cardId: string;
-  matchedBy: 'identity' | 'page_number' | null;
+  matchedBy: 'page_id' | 'identity' | 'page_number' | null;
   identityKey: string;
+  sourcePageId: string | null;
   name: string | null;
 }
 
@@ -552,9 +557,20 @@ interface PlannedPage {
 // which pages did and did not land.
 function orderedManifest(pages: StartRunPage[]): StartRunPage[] {
   const sorted = [...pages].sort((a, b) => a.pageNumber - b.pageNumber);
+  const pageIds = new Set<string>();
   for (const [index, page] of sorted.entries()) {
     if (page.pageNumber !== index + 1) {
       throw new AppError(422, `An export's pages are numbered 1 to ${sorted.length}, each once`);
+    }
+    // A design's page ids are unique within it, and the whole of the strongest
+    // tier rests on that. Two pages claiming one id would have them contend for
+    // a card the way two titles do -- which the tier has no tie-break for,
+    // because it was built on there never being one.
+    if (page.pageId !== null) {
+      if (pageIds.has(page.pageId)) {
+        throw new AppError(422, "An export's pages each have their own page id");
+      }
+      pageIds.add(page.pageId);
     }
   }
   return sorted;
@@ -573,6 +589,7 @@ async function readLiveMapping(
       'deck_import_card.file_id as file_id',
       'file.filename as filename',
       'deck_import_card.identity_key as identity_key',
+      'deck_import_card.source_page_id as source_page_id',
       'deck_import_card.page_number as page_number',
       'deck_import_card.added_to_deck_at as added_to_deck_at',
       sql<boolean>`file.deleted_at is null`.as('file_live'),
@@ -591,18 +608,28 @@ async function readLiveMapping(
 }
 
 /**
- * Assigns every page of an export to a card, in two passes over the manifest.
+ * Assigns every page of an export to a card, in three passes over the manifest.
  *
- * Every page's identity is settled first, and only then does what is left probe
- * by page number. One interleaved walk would let an earlier page's page-number
- * fallback take the card a later page names outright -- an export with a page
- * slid into the middle of it moves every title down one, so the weaker claim
- * would win on nothing but being walked first.
+ * A page's own id settles first, then its title, and only then does what is
+ * left probe by page number. One interleaved walk would let an earlier page's
+ * weaker claim take the card a later page names outright -- an export with a
+ * page slid into the middle of it moves every title down one, so the weaker
+ * claim would win on nothing but being walked first. That argument is why the
+ * passes were separated in the first place, and it applies once more with a
+ * third tier above the other two.
  *
- * Both passes go in page order, so two pages of one export sharing a title
- * settle the same way every time: the lower-numbered one keeps the card, and
- * the other falls to the page number and then to a card that does not exist
- * yet, rather than the export being refused.
+ * All three go in page order, so two pages of one export sharing a title settle
+ * the same way every time: the lower-numbered one keeps the card, and the other
+ * falls to the page number and then to a card that does not exist yet, rather
+ * than the export being refused. Page ids cannot contend like that -- they are
+ * unique within the design they came from.
+ *
+ * A page carries its id onto whatever card it matched, by whichever tier. That
+ * is the whole of adoption: a deck built from ZIPs is matched by title here,
+ * and finishing writes the ids onto those cards, so the import after this one
+ * survives a reorder that this one could not have. The title key is left
+ * exactly where it was, which is what keeps the second tier alive for a design
+ * somebody copies later.
  */
 function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] {
   const byIdentity = new Map<string, MappingRow>();
@@ -614,25 +641,42 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
     else byPage.set(row.page_number, [row]);
   }
 
+  const byPageId = new Map<string, MappingRow>();
+  for (const row of mapping) {
+    if (row.source_page_id !== null && !byPageId.has(row.source_page_id)) {
+      byPageId.set(row.source_page_id, row);
+    }
+  }
+
   const claimed = new Set<string>();
   const matches = new Map<number, { row: MappingRow; matchedBy: PlannedPage['matchedBy'] }>();
   const keys = pages.map((page) => deckIdentityKey(page.pageNumber, page.title));
 
-  for (const [index, key] of keys.entries()) {
-    const row = byIdentity.get(key);
-    if (!row || claimed.has(row.card_id)) continue;
+  const claim = (
+    index: number,
+    row: MappingRow | undefined,
+    matchedBy: PlannedPage['matchedBy']
+  ): void => {
+    if (matches.has(index) || !row || claimed.has(row.card_id)) return;
     claimed.add(row.card_id);
-    matches.set(index, { row, matchedBy: 'identity' });
+    matches.set(index, { row, matchedBy });
+  };
+
+  for (const [index, page] of pages.entries()) {
+    if (page.pageId !== null) claim(index, byPageId.get(page.pageId), 'page_id');
+  }
+
+  for (const [index, key] of keys.entries()) {
+    claim(index, byIdentity.get(key), 'identity');
   }
 
   for (const [index, page] of pages.entries()) {
     if (matches.has(index)) continue;
-    const row = (byPage.get(page.pageNumber) ?? []).find(
-      (candidate) => !claimed.has(candidate.card_id)
+    claim(
+      index,
+      (byPage.get(page.pageNumber) ?? []).find((candidate) => !claimed.has(candidate.card_id)),
+      'page_number'
     );
-    if (!row) continue;
-    claimed.add(row.card_id);
-    matches.set(index, { row, matchedBy: 'page_number' });
   }
 
   const planned: PlannedPage[] = pages.map((page, index) => {
@@ -643,6 +687,10 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
       cardId: match?.row.card_id ?? newId(),
       matchedBy: match?.matchedBy ?? null,
       identityKey: keys[index],
+      // Carried onto whatever card this page matched, which is what adopts a
+      // deck the ZIP path built. A page whose source has no id for it leaves
+      // the card's alone rather than clearing one an earlier run wrote.
+      sourcePageId: page.pageId,
       name: match?.row.filename ?? null,
     };
   });
@@ -797,6 +845,7 @@ export async function startRun(
         card_id: page.cardId,
         matched_by: page.matchedBy,
         identity_key: page.identityKey,
+        source_page_id: page.sourcePageId,
       }))
     )
     .execute();
@@ -989,6 +1038,7 @@ interface PlannedCard {
   card_id: string;
   matched_by: string | null;
   identity_key: string;
+  source_page_id: string | null;
 }
 
 async function readPlannedPage(
@@ -1002,6 +1052,7 @@ async function readPlannedPage(
       'import_run_page.card_id as card_id',
       'import_run_page.matched_by as matched_by',
       'import_run_page.identity_key as identity_key',
+      'import_run_page.source_page_id as source_page_id',
     ])
     .where('import_run_page.run_id', '=', runId)
     .where('import_run_page.page_number', '=', pageNumber)
@@ -1129,6 +1180,7 @@ async function landPage(
     file = await createCard(c, run, {
       cardId: planned.card_id,
       identityKey: planned.identity_key,
+      sourcePageId: planned.source_page_id,
       pageNumber: input.pageNumber,
       derivedName,
       stored,
@@ -1260,6 +1312,7 @@ async function landPage(
 interface NewCard {
   cardId: string;
   identityKey: string;
+  sourcePageId: string | null;
   pageNumber: number;
   derivedName: string;
   stored: StoredUpload;
@@ -1330,6 +1383,11 @@ async function createCard(c: Ctx, run: OpenRun, card: NewCard): Promise<CardFile
       import_id: run.importId,
       file_id: file.id,
       identity_key: identityKey,
+      // Straight in, where the key next to it had to be deconflicted first. The
+      // page-id tier runs before the others and takes whatever card already
+      // holds an id, so a page the plan calls new is one no live card can be
+      // contending with for it.
+      source_page_id: card.sourcePageId,
       page_number: card.pageNumber,
     })
     .execute();
@@ -1458,6 +1516,12 @@ async function detachMovedCards(db: Connection, importId: string, deckId: string
 // under a key derived from its own id, which nothing else can hold; the second
 // then has an empty index to write into, so it cannot violate whatever the plan
 // decided. Nowhere else does a run rewrite a mapping row it did not create.
+//
+// Only identity_key needs that, because only a title moves between cards -- a
+// page slid into the middle of an export shifts every title down one. A page id
+// cannot: the tier that matches on it runs first and takes the card already
+// holding it, so no other row is left wanting that id. Parking it as well would
+// also destroy the value the coalesce below reads back.
 async function applyPlannedIdentities(db: Connection, runId: string): Promise<void> {
   await db
     .updateTable('deck_import_card')
@@ -1473,6 +1537,10 @@ async function applyPlannedIdentities(db: Connection, runId: string): Promise<vo
     .set({
       identity_key: (eb) => eb.ref('import_run_page.identity_key'),
       page_number: (eb) => eb.ref('import_run_page.page_number'),
+      // Coalesced, not assigned: a ZIP has no page id for anything, and a run
+      // from one must not strip the ids an app run wrote. Re-importing a deck
+      // the other way round is then a thing that can be done twice.
+      source_page_id: sql`coalesce(import_run_page.source_page_id, deck_import_card.source_page_id)`,
     })
     .whereRef('import_run_page.card_id', '=', 'deck_import_card.id')
     .where('import_run_page.run_id', '=', runId)

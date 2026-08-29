@@ -1,7 +1,16 @@
-// A Canva export is a ZIP whose entries are named after the page number and the
-// page title -- `1.png`, `3 - Draft Deck Back.png`. Both halves of that name are
-// read here so the browser and the API agree on what a page is called and which
-// card it is, rather than each folding a title its own way.
+// What a page of an export is called, and which card it is. Both are decided
+// here so the browser and the API agree rather than each folding a title its
+// own way.
+//
+// The two sources say different amounts. A ZIP names its entries after the page
+// number and the page title -- `1.png`, `3 - Draft Deck Back.png` -- and that
+// name is everything it knows. The Canva app reads the design itself and also
+// has the page's own id, which is stable across a rename and a reorder.
+//
+// A page id is not folded into the identity key, and that is the whole reason a
+// card can be matched two ways. It rides in a column of its own, so a card
+// keeps its title key as well -- and a design somebody copied, whose page ids
+// are all new, is still recognised by the titles that came with it.
 
 // What an export came out of. 'zip' is a file somebody downloaded and dropped;
 // 'canva' is the Canva app pushing the design it is open on.
@@ -9,9 +18,16 @@ export const IMPORT_SOURCE_KINDS = ['zip', 'canva'] as const;
 
 export const IMPORT_OUTCOMES = ['added', 'updated', 'unchanged', 'removed'] as const;
 
-export const IMPORT_MATCHED_BY = ['identity', 'page_number'] as const;
+// The tiers a page can match a card on, strongest first. Reported per row,
+// because which one caught a page is what says how much to trust it.
+export const IMPORT_MATCHED_BY = ['page_id', 'identity', 'page_number'] as const;
 
 export const IMPORT_TITLE_MAX_LENGTH = 200;
+
+// A source's own id for a page. Canva's are short and opaque; the bound is
+// generous because nothing here parses one, and it exists so an identity key
+// cannot be made arbitrarily long by the caller.
+export const IMPORT_PAGE_ID_MAX_LENGTH = 128;
 
 // What the API keeps when it is handed the name of an export: trimmed, cut to
 // the length above, and nothing at all when that leaves it empty. A run's label

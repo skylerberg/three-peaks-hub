@@ -18,6 +18,46 @@
 
 export const guards = [
   {
+    // The tiers exist in an order, and the order is the design: an id settles a
+    // page before a title does. Running the title tier first is a one-line
+    // reordering that reads as harmless and quietly hands each card to whatever
+    // page happens to share its name.
+    name: 'a page id outranks a title, never the other way round',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find:
+      '  for (const [index, page] of pages.entries()) {\n' +
+      "    if (page.pageId !== null) claim(index, byPageId.get(page.pageId), 'page_id');\n" +
+      '  }\n\n' +
+      '  for (const [index, key] of keys.entries()) {\n' +
+      "    claim(index, byIdentity.get(key), 'identity');\n" +
+      '  }',
+    replace:
+      '  for (const [index, key] of keys.entries()) {\n' +
+      "    claim(index, byIdentity.get(key), 'identity');\n" +
+      '  }\n\n' +
+      '  for (const [index, page] of pages.entries()) {\n' +
+      "    if (page.pageId !== null) claim(index, byPageId.get(page.pageId), 'page_id');\n" +
+      '  }',
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'lets a page id outrank a title another page holds',
+  },
+  {
+    // Assigning rather than coalescing looks like the obvious way to write the
+    // column, and costs nothing visible: the run that does it succeeds, the
+    // deck is correct, and the damage only shows up on the NEXT app import,
+    // which has quietly dropped to matching on titles again.
+    name: 'a ZIP run does not strip the page ids an app run wrote',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find:
+      'source_page_id: sql`coalesce(import_run_page.source_page_id, ' +
+      'deck_import_card.source_page_id)`,',
+    replace: "source_page_id: (eb) => eb.ref('import_run_page.source_page_id'),",
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'keeps the ids through a ZIP re-import, so the app still places the deck',
+  },
+  {
     name: 'a caller with no access gets 404, not 403',
     package: 'api',
     file: 'src/services/authorization.ts',
