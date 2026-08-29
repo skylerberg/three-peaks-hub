@@ -94,6 +94,7 @@ export interface DeckImport {
   id: string;
   source_kind: string;
   source_label: string | null;
+  source_ref: string | null;
   updated_at: Generated<Timestamp>;
 }
 

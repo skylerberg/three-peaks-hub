@@ -1,11 +1,17 @@
 import { type } from 'arktype';
-import { IMPORT_TITLE_MAX_LENGTH, MAX_DECK_CARDS } from '@three-peaks/shared';
+import { IMPORT_SOURCE_KINDS, IMPORT_TITLE_MAX_LENGTH, MAX_DECK_CARDS } from '@three-peaks/shared';
 import { optionalText, stringWithLength, uuid } from './common.ts';
+
+// Enumerated from the shared list rather than left a bare string, so widening
+// what a source may be shows up as a red diff in the generated client -- which
+// is the only place a consumer would otherwise meet a value it has no branch
+// for.
+const sourceKind = type.enumerated(...IMPORT_SOURCE_KINDS);
 
 export const deckImportSchema = type({
   id: 'string',
   deck_id: 'string',
-  source_kind: 'string',
+  source_kind: sourceKind,
   source_label: 'string | null',
   open_run_id: 'string | null',
   created_at: 'string',
