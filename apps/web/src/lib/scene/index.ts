@@ -15,6 +15,7 @@ export {
   sceneTemplate,
   type SceneTemplate,
 } from './templates.ts';
+export { type Footprint } from './layout.ts';
 export {
   planScene,
   type SceneComponentSelection,

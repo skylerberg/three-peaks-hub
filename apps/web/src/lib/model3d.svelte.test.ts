@@ -117,22 +117,11 @@ describe('ModelStore editing', () => {
     expect(models.settings).toMatchObject({ kind: 'card', width_mm: 70 });
   });
 
-  // Switching kind and back is a thing people do to compare, and losing every
-  // dial they had set on the way makes it useless.
-  it('remembers each kind while switching between them', () => {
-    models.update({ width_mm: 70 });
-    models.setKind('wood');
-    models.update({ thickness_mm: 12 });
-    models.setKind('card');
-
-    expect(models.settings).toMatchObject({ kind: 'card', width_mm: 70 });
-    models.setKind('wood');
-    expect(models.settings).toMatchObject({ kind: 'wood', thickness_mm: 12 });
-  });
-
-  it('starts a kind it has never seen from that kind’s defaults', () => {
-    models.setKind('wood');
-    expect(models.settings).toEqual(DEFAULT_WOOD_SETTINGS);
+  // This store holds one deck card's dial-in, and a card in a deck is a card:
+  // every other kind is a component with a section and a settings row of its
+  // own, so there is no kind to switch to here at all.
+  it('opens on the card defaults', () => {
+    expect(models.settings).toEqual(DEFAULT_CARD_SETTINGS);
   });
 });
 

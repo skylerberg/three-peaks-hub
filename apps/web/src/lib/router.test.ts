@@ -17,18 +17,50 @@ describe('matchRoute', () => {
     expect(matchRoute(path).name).toBe(name);
   });
 
-  it('reads the project id and the folder query', () => {
-    const route = matchRoute(`/projects/${UUID}`, 'folder=abc');
-    expect(route).toEqual({
+  it('reads the project id, with no folder of its own to carry', () => {
+    expect(matchRoute(`/projects/${UUID}`)).toEqual({
       name: 'project',
+      params: { projectId: UUID },
+    });
+  });
+
+  // `?folder=` is how the explorer used to be addressed, and a bookmark still
+  // says so. It reads as Assets rather than 404ing or dropping the folder.
+  it('reads an old folder query on the project path as Assets', () => {
+    expect(matchRoute(`/projects/${UUID}`, 'folder=abc')).toEqual({
+      name: 'assets',
       params: { projectId: UUID, folderId: 'abc' },
     });
   });
 
-  it('treats an empty folder query as the project root', () => {
-    expect(matchRoute(`/projects/${UUID}`, 'folder=')).toMatchObject({
+  it('reads the assets path and its folder query', () => {
+    expect(matchRoute(`/projects/${UUID}/assets`, 'folder=abc')).toEqual({
+      name: 'assets',
+      params: { projectId: UUID, folderId: 'abc' },
+    });
+  });
+
+  it('treats an empty folder query as the Assets root', () => {
+    expect(matchRoute(`/projects/${UUID}/assets`, 'folder=')).toMatchObject({
       params: { folderId: null },
     });
+  });
+
+  // A uuid is one component and a word is a section; nothing else could be
+  // either, which is what lets the two share a path.
+  it('tells a component apart from its section by the shape of the segment', () => {
+    expect(matchRoute(`/projects/${UUID}/components/${UUID}`)).toEqual({
+      name: 'component',
+      params: { projectId: UUID, componentId: UUID },
+    });
+    expect(matchRoute(`/projects/${UUID}/components/punchboard`)).toEqual({
+      name: 'components',
+      params: { projectId: UUID, kind: 'punchboard' },
+    });
+  });
+
+  it('does not match a section that is not a component kind', () => {
+    expect(matchRoute(`/projects/${UUID}/components/sprockets`).name).toBe('not-found');
   });
 
   it('does not match a project path whose id is not a uuid', () => {

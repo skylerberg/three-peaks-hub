@@ -205,18 +205,9 @@ async function run() {
       const projectId = (await fetch('/api/projects', { headers }).then((r) => r.json()))
         .projects[0].id;
 
-      const ids = {};
-      for (const [name, bytes] of Object.entries(uploads)) {
-        const query = new URLSearchParams({ project_id: projectId, filename: `${name}.png` });
-        const created = await fetch(`/api/files/upload?${query}`, {
-          method: 'POST',
-          headers: { ...headers, 'Content-Type': 'image/png' },
-          body: new Uint8Array(bytes),
-        }).then((r) => r.json());
-        ids[name] = created.id;
-      }
-
-      const makeDeck = async (name, backFileId, cards) => {
+      // Into the deck, not into the project: a deck owns its cards and its back,
+      // so each one is created first and its artwork uploaded into it.
+      const makeDeck = async (name, back, cards) => {
         const deck = await fetch('/api/decks', {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
@@ -225,14 +216,39 @@ async function run() {
             name,
             card_width_mm: 63,
             card_height_mm: 88,
-            back_file_id: backFileId,
           }),
         }).then((r) => r.json());
+
+        const into = async (image, role) => {
+          const query = new URLSearchParams({
+            project_id: projectId,
+            filename: `${image}.png`,
+            deck_id: deck.id,
+            ...(role ? { role } : {}),
+          });
+          const created = await fetch(`/api/files/upload?${query}`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'image/png' },
+            body: new Uint8Array(uploads[image]),
+          }).then((r) => r.json());
+          return created.id;
+        };
+
+        const placed = [];
+        for (const card of cards) placed.push({ ...card, file_id: await into(card.image) });
+
+        await fetch(`/api/decks/${deck.id}`, {
+          method: 'PATCH',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ back_file_id: await into(back, 'back') }),
+        });
 
         await fetch(`/api/decks/${deck.id}/cards`, {
           method: 'PUT',
           headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cards }),
+          body: JSON.stringify({
+            cards: placed.map((card) => ({ file_id: card.file_id, quantity: card.quantity })),
+          }),
         });
         return deck.id;
       };
@@ -240,13 +256,13 @@ async function run() {
       // Eight cards in the first deck and three in the second: the first sheet
       // then carries both decks, which is the case a per-sheet back would get
       // wrong and a per-slot back gets right.
-      await makeDeck('Alpha deck', ids['back-one'], [
-        { file_id: ids.alpha, quantity: 6 },
-        { file_id: ids.beta, quantity: 2 },
+      await makeDeck('Alpha deck', 'back-one', [
+        { image: 'alpha', quantity: 6 },
+        { image: 'beta', quantity: 2 },
       ]);
-      await makeDeck('Beta deck', ids['back-two'], [{ file_id: ids.gamma, quantity: 3 }]);
+      await makeDeck('Beta deck', 'back-two', [{ image: 'gamma', quantity: 3 }]);
 
-      return { projectId, ids };
+      return { projectId };
     }, files);
 
     await browser.goto(`${base}/projects/${setup.projectId}/print`, { wait: 0 });

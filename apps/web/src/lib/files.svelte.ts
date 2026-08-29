@@ -13,6 +13,16 @@ interface PendingUpload {
   filename: string;
 }
 
+// Where an upload lands. A folder id (null for the Assets root), a deck, or a
+// component -- and `role` says which slot it fills: a deck's back rather than
+// one of its cards, a punchboard's cut sheet rather than its artwork.
+interface UploadTarget {
+  folder_id?: string | null;
+  deck_id?: string;
+  component_id?: string;
+  role?: string;
+}
+
 class FileStore {
   listing = $state<DirectoryListing | null>(null);
   loading = $state(false);
@@ -83,9 +93,12 @@ class FileStore {
     if (!listing) return;
     const rest = listing.files.filter((entry) => entry.id !== row.id);
     // A tombstone leaves the live listing; it turns up on the deleted screen,
-    // which reads its own.
+    // which reads its own. So does a file a deck or a component now owns: this
+    // listing is Assets, and Assets is what belongs to neither.
+    const belongsHere =
+      (row.folder_id ?? null) === here && row.deck_id === null && row.component_id === null;
     listing.files =
-      (row.folder_id ?? null) === here && row.deleted_at === null
+      belongsHere && row.deleted_at === null
         ? FileStore.#insertSorted(rest, row, (entry) => entry.filename)
         : rest;
   }
@@ -121,7 +134,11 @@ class FileStore {
         listing.storage_used_bytes = event.data.storage_used_bytes;
         return true;
 
+      // A move carries the row with its new home, and #placeFile drops it from
+      // the listing when that home is not this one. Nothing about the bytes
+      // changed on either, so the meter stays where it is.
       case 'file_updated':
+      case 'file_moved':
         this.#placeFile(here, event.data);
         return true;
 
@@ -150,7 +167,7 @@ class FileStore {
     );
   }
 
-  async upload(projectId: string, folderId: string | null, file: File): Promise<void> {
+  async upload(projectId: string, target: UploadTarget, file: File): Promise<void> {
     assertUploadSize(file.size);
     const key = `${file.name}-${crypto.randomUUID()}`;
     this.pending = [...this.pending, { key, filename: file.name }];
@@ -158,7 +175,9 @@ class FileStore {
     try {
       // eslint-disable-next-line svelte/prefer-svelte-reactivity -- built to make one URL and discarded
       const query = new URLSearchParams({ project_id: projectId, filename: file.name });
-      if (folderId) query.set('folder_id', folderId);
+      for (const [name, value] of Object.entries(target)) {
+        if (typeof value === 'string' && value.length > 0) query.set(name, value);
+      }
 
       // The file IS the body. Serializing it into JSON would read the whole
       // thing into memory on both ends, which is exactly what the streaming
@@ -200,11 +219,19 @@ class FileStore {
     assertOk(await api.PATCH('/api/files/{id}', { params: { path: { id } }, body: { filename } }));
   }
 
-  async moveFile(id: string, folderId: string | null): Promise<void> {
+  // Every home change goes through this, folder to folder included: the server
+  // re-deduplicates the name against wherever it is arriving, which a plain
+  // rename could not do.
+  async moveFile(id: string, to: UploadTarget): Promise<void> {
     assertOk(
-      await api.PATCH('/api/files/{id}', {
+      await api.POST('/api/files/{id}/move', {
         params: { path: { id } },
-        body: { folder_id: folderId },
+        body: {
+          folder_id: to.folder_id ?? null,
+          ...(to.deck_id ? { deck_id: to.deck_id } : {}),
+          ...(to.component_id ? { component_id: to.component_id } : {}),
+          ...(to.role ? { role: to.role as 'card' | 'back' | 'artwork' | 'cut' } : {}),
+        },
       })
     );
   }

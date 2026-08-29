@@ -210,14 +210,16 @@ describe('Deck import screen', () => {
     fetchMock.mockReset();
   });
 
-  it('will not offer a ZIP until the deck is bound to a folder', async () => {
+  // 404 on the import row is "never imported into", not "set something up
+  // first": the artwork lands in the deck, so there is nowhere else to choose
+  // and nothing standing between a fresh deck and its first export.
+  it('offers a ZIP straight away on a deck nothing has been imported into', async () => {
     stubApi({ bound: false });
 
     render(DeckImport, { projectId: PROJECT, deckId: DECK });
     await settle();
 
-    expect(screen.getByRole('button', { name: 'Choose a folder' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Canva export (.zip)')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Canva export (.zip)')).toBeInTheDocument();
   });
 
   it('shows the plan and uploads nothing until Import is pressed', async () => {
@@ -359,32 +361,6 @@ describe('Deck import screen', () => {
     await settle();
 
     expect(screen.getByRole('button', { name: 'Import 3 pages' })).toBeInTheDocument();
-  });
-
-  it('says what changing the folder actually costs', async () => {
-    stubApi();
-
-    render(DeckImport, { projectId: PROJECT, deckId: DECK });
-    await settle();
-    await fireEvent.click(screen.getByRole('button', { name: 'Change folder' }));
-
-    expect(screen.getByText(/has to be in the new folder first/u)).toBeInTheDocument();
-    expect(screen.queryByText(/stay where they are/u)).not.toBeInTheDocument();
-  });
-
-  // Naming a way out that no control offers reads as a missing button rather
-  // than as the one remedy there is.
-  it('offers no remedy the screen has no control for', async () => {
-    stubApi();
-
-    render(DeckImport, { projectId: PROJECT, deckId: DECK });
-    await settle();
-    await fireEvent.click(screen.getByRole('button', { name: 'Change folder' }));
-
-    expect(screen.getByText(/has to be in the new folder first/u).textContent).not.toMatch(
-      /unbind/iu
-    );
-    expect(screen.queryByRole('button', { name: /unbind/iu })).not.toBeInTheDocument();
   });
 
   // The route block is not keyed, so moving from one deck's import screen to

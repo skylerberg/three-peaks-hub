@@ -82,9 +82,14 @@ class DeckStore {
 
   // What a deck_updated event carries, applied instead of read back. Both
   // halves always arrive, so there is nothing to test for here.
+  //
+  // A deck the list has never seen is a restore: the delete took it out, and
+  // restoring publishes an update rather than a create. Inserting it is what
+  // stops a tab sitting on the list from having to reload to see it come back.
   applyDeckUpdate(deck: Deck, cards: readonly DeckCard[]): void {
     const listed = this.decks.findIndex((entry) => entry.id === deck.id);
     if (listed !== -1) this.decks[listed] = deck;
+    else if (deck.deleted_at === null) this.applyDeckCreated(deck);
 
     if (this.deck?.id !== deck.id) return;
     this.deck = deck;

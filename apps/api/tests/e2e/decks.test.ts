@@ -15,11 +15,16 @@ describe('decks', () => {
   let projectId: string;
   let cardA: string;
   let cardB: string;
-  let backId: string;
+  let assetId: string;
   let foreignFileId: string;
 
-  async function uploadTo(user: TestUser, project: string, filename: string) {
-    const query = new URLSearchParams({ project_id: project, filename });
+  async function uploadTo(
+    user: TestUser,
+    project: string,
+    filename: string,
+    into: { deck_id?: string; role?: string } = {}
+  ) {
+    const query = new URLSearchParams({ project_id: project, filename, ...into });
     const res = await user.api.postBytes(
       `/api/files/upload?${query}`,
       PNG as unknown as BodyInit,
@@ -52,11 +57,7 @@ describe('decks', () => {
       role: 'viewer',
     });
 
-    [cardA, cardB, backId] = await Promise.all([
-      uploadTo(owner, projectId, 'card-a.png'),
-      uploadTo(owner, projectId, 'card-b.png'),
-      uploadTo(owner, projectId, 'back.png'),
-    ]);
+    assetId = await uploadTo(owner, projectId, 'loose-asset.png');
 
     const foreignProject = (
       await (await stranger.api.post('/api/projects', { name: 'Elsewhere' })).json()
@@ -94,17 +95,24 @@ describe('decks', () => {
     expect((await createDeck('Enormous', { card_width_mm: 5000 })).status).toBe(422);
   });
 
-  it('refuses a card back from another project', async () => {
+  it('refuses a card back at creation, when the deck holds no images yet', async () => {
     const res = await createDeck('Foreign back', { back_file_id: foreignFileId });
     expect(res.status).toBe(422);
-    expect(res.body.error).toMatch(/same project/);
+    expect(res.body.error).toMatch(/upload the back into it/);
   });
 
   describe('cards', () => {
     let deckId: string;
 
     beforeAll(async () => {
-      deckId = (await createDeck('Card list', { back_file_id: backId })).body.id;
+      deckId = (await createDeck('Card list')).body.id;
+      // Into the deck, which is the only place a card can come from: an image
+      // in Assets is not one until it is moved in.
+      [cardA, cardB] = await Promise.all([
+        uploadTo(owner, projectId, 'card-a.png', { deck_id: deckId }),
+        uploadTo(owner, projectId, 'card-b.png', { deck_id: deckId }),
+      ]);
+      await uploadTo(owner, projectId, 'back.png', { deck_id: deckId, role: 'back' });
     });
 
     it('replaces the whole list, numbering positions from the array', async () => {
@@ -138,9 +146,22 @@ describe('decks', () => {
       expect(body.cards.map((card: { file_id: string }) => card.file_id)).toEqual([cardB, cardA]);
     });
 
-    it('empties a deck', async () => {
+    it('refuses a list that leaves one of the deck’s own images out', async () => {
       const res = await owner.api.put(`/api/decks/${deckId}/cards`, { cards: [] });
-      expect((await res.json()).cards).toEqual([]);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatch(/no place in it/);
+    });
+
+    it('refuses an image from Assets that has not been moved in', async () => {
+      const res = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: cardA, quantity: 1 },
+          { file_id: cardB, quantity: 1 },
+          { file_id: assetId, quantity: 1 },
+        ],
+      });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatch(/an image this deck holds/);
     });
 
     it('refuses the same card twice, because that is a quantity', async () => {
@@ -161,9 +182,29 @@ describe('decks', () => {
       expect(res.status).toBe(422);
     });
 
+    it('takes the back out of the deck when it is moved to Assets', async () => {
+      const deck = (await createDeck('Loses a back by hand')).body.id as string;
+      const back = await uploadTo(owner, projectId, 'hand-back.png', {
+        deck_id: deck,
+        role: 'back',
+      });
+      expect((await (await owner.api.get(`/api/decks/${deck}`)).json()).deck.back_file_id).toBe(
+        back
+      );
+
+      expect((await owner.api.post(`/api/files/${back}/move`, { folder_id: null })).status).toBe(
+        200
+      );
+      const after = await (await owner.api.get(`/api/decks/${deck}`)).json();
+      expect(after.deck.back_file_id).toBeNull();
+    });
+
     it.each([0, 1000, 1.5])('refuses a quantity of %s', async (quantity) => {
       const res = await owner.api.put(`/api/decks/${deckId}/cards`, {
-        cards: [{ file_id: cardA, quantity }],
+        cards: [
+          { file_id: cardA, quantity },
+          { file_id: cardB, quantity: 1 },
+        ],
       });
       expect(res.status).toBe(422);
     });
@@ -181,7 +222,10 @@ describe('decks', () => {
     it('moves the deck timestamp when only its contents change', async () => {
       const before = (await (await owner.api.get(`/api/decks/${deckId}`)).json()).deck.updated_at;
       await owner.api.put(`/api/decks/${deckId}/cards`, {
-        cards: [{ file_id: cardA, quantity: 2 }],
+        cards: [
+          { file_id: cardA, quantity: 2 },
+          { file_id: cardB, quantity: 1 },
+        ],
       });
       const after = (await (await owner.api.get(`/api/decks/${deckId}`)).json()).deck.updated_at;
       expect(new Date(after).getTime()).toBeGreaterThanOrEqual(new Date(before).getTime());
@@ -193,11 +237,10 @@ describe('decks', () => {
     let doomed: string;
 
     beforeAll(async () => {
-      doomed = await uploadTo(owner, projectId, 'doomed.png');
       deckId = (await createDeck('Fragile')).body.id;
-      await owner.api.put(`/api/decks/${deckId}/cards`, {
-        cards: [{ file_id: doomed, quantity: 1 }],
-      });
+      // Uploading it into the deck is what makes it a card: there is no second
+      // step, because artwork in a deck with no place in it cannot exist.
+      doomed = await uploadTo(owner, projectId, 'doomed.png', { deck_id: deckId });
     });
 
     // A tombstone is what someone deciding whether to restore it reads first,
@@ -218,8 +261,11 @@ describe('decks', () => {
 
   describe('a back image that is purged', () => {
     it('leaves the deck standing with no back', async () => {
-      const orphanBack = await uploadTo(owner, projectId, 'orphan-back.png');
-      const deckId = (await createDeck('Loses its back', { back_file_id: orphanBack })).body.id;
+      const deckId = (await createDeck('Loses its back')).body.id as string;
+      const orphanBack = await uploadTo(owner, projectId, 'orphan-back.png', {
+        deck_id: deckId,
+        role: 'back',
+      });
 
       await owner.api.delete(`/api/files/${orphanBack}?purge=true`);
 
@@ -230,16 +276,40 @@ describe('decks', () => {
   });
 
   describe('deleting a deck', () => {
-    it('takes its cards and leaves the images alone', async () => {
-      const deckId = (await createDeck('Temporary')).body.id;
-      await owner.api.put(`/api/decks/${deckId}/cards`, {
-        cards: [{ file_id: cardA, quantity: 1 }],
-      });
+    it('tombstones it and keeps its artwork, and a restore brings both back', async () => {
+      const deckId = (await createDeck('Temporary')).body.id as string;
+      const card = await uploadTo(owner, projectId, 'temporary-card.png', { deck_id: deckId });
 
       expect((await owner.api.delete(`/api/decks/${deckId}`)).status).toBe(204);
+
+      // Readable, like a deleted file: its cards are what somebody deciding
+      // whether to restore it reads first.
+      const gone = await (await owner.api.get(`/api/decks/${deckId}`)).json();
+      expect(gone.deck.deleted_at).not.toBeNull();
+      expect(gone.cards).toHaveLength(1);
+      // The card's own tombstone is untouched. Marking it would make the
+      // restore below resurrect artwork somebody had deleted card by card.
+      expect(gone.cards[0].file.deleted_at).toBeNull();
+      expect((await owner.api.get(`/api/files/${card}`)).status).toBe(200);
+
+      // Out of the listing, though, and out of Assets: a deck's tombstone is
+      // never copied onto its artwork, and the artwork was never in Assets.
+      const listed = await (await owner.api.get(`/api/decks?project_id=${projectId}`)).json();
+      expect(listed.decks.map((deck: { id: string }) => deck.id)).not.toContain(deckId);
+
+      expect((await owner.api.post(`/api/decks/${deckId}/restore`)).status).toBe(200);
+      const back = await (await owner.api.get(`/api/decks/${deckId}`)).json();
+      expect(back.deck.deleted_at).toBeNull();
+      expect(back.cards).toHaveLength(1);
+    });
+
+    it('purges the deck and every byte its cards held', async () => {
+      const deckId = (await createDeck('Doomed for good')).body.id as string;
+      const card = await uploadTo(owner, projectId, 'doomed-for-good.png', { deck_id: deckId });
+
+      expect((await owner.api.delete(`/api/decks/${deckId}?purge=true`)).status).toBe(204);
       expect((await owner.api.get(`/api/decks/${deckId}`)).status).toBe(404);
-      // Unlike a file, there is no tombstone to find and nothing to purge.
-      expect((await owner.api.get(`/api/files/${cardA}`)).status).toBe(200);
+      expect((await owner.api.get(`/api/files/${card}`)).status).toBe(404);
     });
   });
 

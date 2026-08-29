@@ -123,10 +123,83 @@ function positionExtent(json) {
 // Default settings, so what each one measures is DEFAULT_BOX_SETTINGS and
 // DEFAULT_BOARD_SETTINGS read in metres: a 295 mm box, and one panel of a
 // bifold 500 mm board, which is 500 mm on its uncut side.
+// A die line with two closed shapes on a 100x50 sheet: one square and one
+// circle, so the tracing-free path is exercised on a curve as well as on
+// straight edges. The viewBox is what the sheet's millimetres are stretched
+// over, and both shapes sit well inside it.
+const CUT_SHEET = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+  <rect x="10" y="10" width="30" height="30" fill="#000" />
+  <circle cx="75" cy="25" r="15" fill="#000" />
+</svg>
+`;
+
+// The kinds the save path above does not reach. A box is one mesh over six
+// material slots, a folded board is a mesh per panel, and a punchboard is the
+// sheet plus one mesh per token the die line cuts -- three shapes the exporter
+// is otherwise never handed. Read off the download rather than saved, because a
+// second file of the same name is a different question from whether one exports
+// at all.
 const BUILT_KINDS = [
-  { button: 'Box', settles: 'Corner bevel', meshes: 1, materials: 6, across: 0.295 },
-  { button: 'Board', settles: 'Fold gap', meshes: 2, materials: 3, across: 0.5 },
+  {
+    section: 'Boxes',
+    singular: 'box',
+    name: 'Probe box',
+    settles: 'Corner bevel',
+    meshes: 1,
+    materials: 6,
+    across: 0.295,
+  },
+  {
+    section: 'Boards',
+    singular: 'board',
+    name: 'Probe board',
+    settles: 'Fold gap',
+    meshes: 2,
+    materials: 3,
+    across: 0.5,
+  },
+  {
+    section: 'Punchboards',
+    singular: 'punchboard',
+    name: 'Probe punchboard',
+    settles: 'Cut edge colour',
+    cut: CUT_SHEET,
+    // The sheet and the two tokens the die line cuts out of it.
+    meshes: 3,
+    materials: 3,
+    across: 0.28,
+  },
 ];
+
+// Every kind is its own component now, named in its own section and given its
+// artwork afterwards -- so reaching one is a walk rather than a click on a
+// picker the studio no longer has.
+async function makeComponent(browser, kind, files) {
+  // By URL rather than by a back link: the link out of a component names the
+  // section it is in, which differs per kind, and this runs from all of them.
+  const here = new URL(browser.page.url());
+  await browser.goto(`${here.origin}/projects/${here.pathname.split('/')[2]}`, { wait: 0 });
+
+  await browser.page.waitForSelector(`a:has-text("${kind.section}")`, { timeout: 15_000 });
+  await browser.click(`a:has-text("${kind.section}")`);
+  await browser.page.waitForSelector(`button:has-text("New ${kind.singular}")`, {
+    timeout: 15_000,
+  });
+  await browser.click(`button:has-text("New ${kind.singular}")`);
+  await browser.page.fill('input[maxlength="120"]', kind.name);
+  await browser.click('button[type="submit"]');
+  await browser.page.waitForSelector(`h1:has-text("${kind.name}")`, { timeout: 15_000 });
+
+  await browser.page.setInputFiles('label:has-text("Artwork") input[type="file"]', files.pngPath);
+  if (kind.cut) {
+    const cutPath = join(files.dir, 'cut.svg');
+    writeFileSync(cutPath, kind.cut);
+    await browser.page.waitForSelector('label:has-text("Cut sheet") input[type="file"]', {
+      timeout: 15_000,
+    });
+    await browser.page.setInputFiles('label:has-text("Cut sheet") input[type="file"]', cutPath);
+  }
+}
 
 // The studio hands the browser bytes it already holds, so this is the download
 // event and not a request anything could answer differently.
@@ -193,13 +266,21 @@ async function run() {
     const pngPath = join(dir, 'token.png');
     writeFileSync(pngPath, discPng());
 
-    await browser.setInputFiles('input[type="file"]', pngPath);
-    await browser.page.waitForSelector('a:has-text("Make 3D")', { timeout: 15_000 });
-    check('an image offers the 3D studio', true);
+    // A component is named first and given its artwork afterwards, and the
+    // studio is the component's own screen -- there is no picking a file out of
+    // Assets and asking what it should become.
+    await browser.page.waitForSelector('a:has-text("Wooden pieces")', { timeout: 15_000 });
+    await browser.click('a:has-text("Wooden pieces")');
+    await browser.page.waitForSelector('button:has-text("New wooden piece")', { timeout: 15_000 });
+    await browser.click('button:has-text("New wooden piece")');
+    await browser.page.fill('input[maxlength="120"]', 'Probe meeple');
+    await browser.click('button[type="submit"]');
+    await browser.page.waitForSelector('h1:has-text("Probe meeple")', { timeout: 15_000 });
+    check('a component is created and opened', true);
 
-    await browser.click('a:has-text("Make 3D")');
+    await browser.setInputFiles('input[type="file"]', pngPath);
     await browser.page.waitForSelector('canvas', { timeout: 15_000 });
-    check('the studio opens on a canvas', true);
+    check('the studio opens on a canvas once the artwork is there', true);
 
     // WebGL is what the viewer needs, and a headless browser without it draws
     // nothing while every other assertion still passes.
@@ -209,9 +290,10 @@ async function run() {
     });
     check('the canvas has a live WebGL context', drawing);
 
-    await browser.click('button:has-text("Wooden component")');
+    // No kind picker to click: the kind was decided when the component was
+    // created, so the panel that opens is the one for it.
     await browser.page.waitForSelector('text=Longest side', { timeout: 10_000 });
-    check('the wooden settings replace the card settings', true);
+    check('the panel is the one for the kind the component is', true);
 
     // The model is built from bytes that have to be fetched and decoded first,
     // and the viewer shows this spinner until it has one. Clicking Save before
@@ -239,7 +321,9 @@ async function run() {
     const started = Date.now();
     const outcome = await Promise.race([
       browser.page
-        .waitForSelector('text=/Saved token\\.glb/', { timeout: SAVE_TIMEOUT_MS })
+        // Named after the component rather than after the image it was built
+        // from: the component is the thing, and its artwork is one of its parts.
+        .waitForSelector('text=/Saved Probe meeple\\.glb/', { timeout: SAVE_TIMEOUT_MS })
         .then(() => ({ saved: true, said: '' })),
       browser.page
         .waitForSelector('[role="alert"]', { timeout: SAVE_TIMEOUT_MS })
@@ -324,7 +408,7 @@ async function run() {
     // handed. Read off the download rather than saved, because a second file of
     // the same name is a different question from whether a box exports at all.
     for (const kind of BUILT_KINDS) {
-      await browser.click(`button:has-text("${kind.button}")`);
+      await makeComponent(browser, kind, { pngPath, dir });
       await browser.page.waitForSelector(`text=${kind.settles}`, { timeout: 10_000 });
       await browser.page.waitForSelector('text=Building the model', {
         state: 'hidden',
@@ -332,20 +416,20 @@ async function run() {
       });
 
       const exported = inspectGlb(await downloadedGlb(browser));
-      check(`the ${kind.button.toLowerCase()} exports a glTF container`, exported.magic === 'glTF');
+      check(`the ${kind.singular} exports a glTF container`, exported.magic === 'glTF');
       check(
-        `the ${kind.button.toLowerCase()} exports ${kind.meshes} mesh(es)`,
+        `the ${kind.singular} exports ${kind.meshes} mesh(es)`,
         (exported.json?.meshes?.length ?? 0) === kind.meshes,
         String(exported.json?.meshes?.length)
       );
       check(
-        `the ${kind.button.toLowerCase()} keeps one material per slot`,
+        `the ${kind.singular} keeps one material per slot`,
         (exported.json?.materials?.length ?? 0) === kind.materials,
         String(exported.json?.materials?.length)
       );
       const span = positionExtent(exported.json);
       check(
-        `the ${kind.button.toLowerCase()} measures its longest side in metres`,
+        `the ${kind.singular} measures its longest side in metres`,
         span !== null && Math.abs(span - kind.across) < 0.0005,
         `${span} m across, expected ${kind.across}`
       );

@@ -14,6 +14,8 @@ const selection: SceneSelection = {
       label: 'Board',
       front: image('board'),
       back: null,
+      cut: null,
+      part: null,
       settings: { ...DEFAULT_CARD_SETTINGS, width_mm: 200, height_mm: 200 },
       copies: 1,
     },

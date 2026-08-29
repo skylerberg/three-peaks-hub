@@ -192,8 +192,9 @@ describe('Deck editor', () => {
     await wait(AFTER_THE_WINDOW_MS);
 
     expect(urlsRequested().length).toBe(before);
-    // And the last one is on screen, without anything having been read.
-    await screen.findByText('renamed-20.png');
+    // And the last one is on screen, without anything having been read. All of
+    // them, because the card-back picker lists every card by name as well.
+    expect(await screen.findAllByText('renamed-20.png')).not.toHaveLength(0);
   });
 
   // The history screen is read-only, so it is offered outside the editor-only
@@ -242,7 +243,7 @@ describe('Deck editor', () => {
     render(Deck, { projectId: PROJECT, deckId: DECK });
     await waitFor(() => expect(thumbnailReads()).toBe(3));
     // The copies inputs are disabled until the role has come back.
-    await screen.findByRole('button', { name: 'Add cards' });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
 
     const copies = await screen.findAllByLabelText('Copies');
     await fireEvent.change(copies[0], { target: { value: '3' } });
@@ -264,7 +265,7 @@ describe('Deck editor', () => {
 
     render(Deck, { projectId: PROJECT, deckId: DECK });
     await screen.findByText('back.png');
-    await screen.findByRole('button', { name: 'Add cards' });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
     expect(fileRowReads(BACK)).toBe(1);
 
     const copies = await screen.findAllByLabelText('Copies');
@@ -286,7 +287,7 @@ describe('Deck editor', () => {
 
     render(Deck, { projectId: PROJECT, deckId: DECK });
     await waitFor(() => expect(thumbnailReads()).toBe(3));
-    await screen.findByRole('button', { name: 'Add cards' });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
 
     const loadsBefore = deckLoads();
     FakeWebSocket.last().receive({

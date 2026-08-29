@@ -54,6 +54,7 @@ const SCENE_ROUTES = [
 const EXPORT_TIMEOUT_MS = 300_000;
 
 const DECK_NAME = 'Trailer deck';
+const BOX_NAME = 'Retail box';
 const DECK_GROUP = 'deck:trailer-deck';
 const CARD_WIDTH_MM = 63;
 const CARD_HEIGHT_MM = 88;
@@ -319,17 +320,8 @@ async function run() {
         const projectId = (await fetch('/api/projects', { headers }).then((r) => r.json()))
           .projects[0].id;
 
-        const ids = {};
-        for (const [name, bytes] of Object.entries(fixture.images)) {
-          const query = new URLSearchParams({ project_id: projectId, filename: `${name}.png` });
-          const created = await fetch(`/api/files/upload?${query}`, {
-            method: 'POST',
-            headers: { ...headers, 'Content-Type': 'image/png' },
-            body: new Uint8Array(bytes),
-          }).then((r) => r.json());
-          ids[name] = created.id;
-        }
-
+        // The deck first: its cards are uploaded into it, because a deck owns
+        // its artwork and an image in Assets is not one of its cards.
         const deck = await fetch('/api/decks', {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
@@ -338,9 +330,43 @@ async function run() {
             name: fixture.deckName,
             card_width_mm: fixture.cardWidthMm,
             card_height_mm: fixture.cardHeightMm,
-            back_file_id: ids.back,
           }),
         }).then((r) => r.json());
+
+        // The box, named before it has anything in it, the way a component is.
+        const box = await fetch('/api/components', {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: projectId, kind: 'box', name: fixture.boxName }),
+        }).then((r) => r.json());
+
+        const into = {
+          alpha: { deck_id: deck.id },
+          beta: { deck_id: deck.id },
+          back: { deck_id: deck.id, role: 'back' },
+          wrap: { component_id: box.id, role: 'artwork' },
+        };
+
+        const ids = {};
+        for (const [name, bytes] of Object.entries(fixture.images)) {
+          const query = new URLSearchParams({
+            project_id: projectId,
+            filename: `${name}.png`,
+            ...into[name],
+          });
+          const created = await fetch(`/api/files/upload?${query}`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'image/png' },
+            body: new Uint8Array(bytes),
+          }).then((r) => r.json());
+          ids[name] = created.id;
+        }
+
+        await fetch(`/api/decks/${deck.id}`, {
+          method: 'PATCH',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ back_file_id: ids.back }),
+        });
 
         await fetch(`/api/decks/${deck.id}/cards`, {
           method: 'PUT',
@@ -356,8 +382,8 @@ async function run() {
         // The one component in the selection anybody has dialled in. The cards
         // are left alone, which is the 404 the planner reads as "the defaults,
         // at the deck's own size".
-        const saved = await fetch(`/api/models/${ids.wrap}`, {
-          method: 'PUT',
+        const saved = await fetch(`/api/components/${box.id}`, {
+          method: 'PATCH',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ settings: fixture.box }),
         });
@@ -367,6 +393,7 @@ async function run() {
       {
         images,
         deckName: DECK_NAME,
+        boxName: BOX_NAME,
         cardWidthMm: CARD_WIDTH_MM,
         cardHeightMm: CARD_HEIGHT_MM,
         copies: COPIES,
@@ -374,7 +401,7 @@ async function run() {
       }
     );
 
-    if (!check('the box settings are saved against its image', setup.savedBox === 200)) return 1;
+    if (!check('the box settings are saved on the component', setup.savedBox === 200)) return 1;
 
     await browser.goto(`${base}/projects/${setup.projectId}/scene`, { wait: 0 });
     await browser.page.waitForSelector('h1:has-text("Blender scene")', { timeout: 15_000 });
@@ -384,8 +411,10 @@ async function run() {
     check('the export screen opens', true);
 
     await browser.click(`label:has-text("${DECK_NAME}") input[type="checkbox"]`);
-    await browser.page.waitForSelector('label:has-text("wrap.png")', { timeout: 15_000 });
-    await browser.click('label:has-text("wrap.png") input[type="checkbox"]');
+    // By name out of its section: the picker offers components, not the files
+    // underneath them.
+    await browser.page.waitForSelector(`label:has-text("${BOX_NAME}")`, { timeout: 15_000 });
+    await browser.click(`label:has-text("${BOX_NAME}") input[type="checkbox"]`);
 
     await browser.page.getByLabel('Piece', { exact: true }).selectOption('d6');
     await browser.click('button:has-text("Add piece")');

@@ -30,6 +30,45 @@ export const guards = [
     testName: 'sees 404, not 403, when reading',
   },
   {
+    // The whole of what makes Assets the owner-less case. Dropping it puts every
+    // card of every deck back in the explorer, which is the duplication the
+    // sections exist to remove -- and it reads as a harmless filter to delete.
+    name: 'Assets lists nothing a deck or a component holds',
+    package: 'api',
+    file: 'src/routes/files.ts',
+    find: "        .where('file.deleted_at', 'is', null)\n        .where(unowned)",
+    replace: "        .where('file.deleted_at', 'is', null)",
+    tests: ['tests/e2e/components.test.ts'],
+    testName: 'keeps its artwork out of the Assets listing',
+  },
+  {
+    // Leaving an image the deck owns out of its card list would strand it: in
+    // the deck, and in no list any screen draws. The other half of the same
+    // rule -- refusing a file the deck does not own -- has a test of its own.
+    name: 'a deck may not be left holding artwork with no place in it',
+    package: 'api',
+    file: 'src/services/decks.ts',
+    find: '  if (stranded.length > 0) {',
+    replace: '  if (false) {',
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'refuses a list that leaves one of the deck’s own images out',
+  },
+  {
+    // A tombstone above a row is not a tombstone on it. Marking the cards would
+    // make a restore resurrect artwork somebody deleted one card at a time,
+    // which is exactly what the folder rule already refuses to do.
+    name: 'a deck’s tombstone is never copied onto its cards',
+    package: 'api',
+    file: 'src/routes/decks.ts',
+    find: "      const marked = await db\n        .updateTable('deck')",
+    replace:
+      "      await db\n        .updateTable('file')\n        .set({ deleted_at: new Date() })\n" +
+      "        .where('file.deck_id', '=', deckId)\n        .execute();\n" +
+      "      const marked = await db\n        .updateTable('deck')",
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'tombstones it and keeps its artwork',
+  },
+  {
     name: 'project roles normalize fail-closed',
     package: 'api',
     file: 'packages/shared/src/roles.ts',
@@ -750,8 +789,10 @@ export const guards = [
     name: 'the export picker is gone while pages are going up',
     package: 'web',
     file: 'src/routes/DeckImport.svelte',
-    find: '      {#if binding?.folder_id && !openRunId && !busy}',
-    replace: '      {#if binding?.folder_id}',
+    // The whole condition, because the screen has two reasons to hide the
+    // picker and dropping one leaves the other doing the work.
+    find: '      {#if !openRunId && !busy}',
+    replace: '      {#if true}',
     tests: ['src/routes/DeckImport.svelte.test.ts'],
     testName: 'takes the export picker away while pages are going up',
     runner: 'web',
@@ -808,27 +849,10 @@ export const guards = [
     name: 'a binding belongs to the deck it was read for',
     package: 'web',
     file: 'src/lib/deckImports.svelte.ts',
-    find:
-      '    this.bindingDeckId = null;\n' +
-      '    this.binding = null;\n' +
-      '    this.folderName = null;\n',
+    find: '    this.bindingDeckId = null;\n    this.binding = null;\n',
     replace: '',
     tests: ['src/lib/deckImports.svelte.test.ts'],
     testName: 'drops the previous deck',
-    runner: 'web',
-  },
-  {
-    // Unbinding is not a way out either: the refusal asks about the cards, not
-    // about the old folder id, so it stands after an unbind.
-    name: 'the folder copy names only a remedy that exists',
-    package: 'web',
-    file: 'src/routes/DeckImport.svelte',
-    find: '                them there, otherwise choosing another folder is refused.',
-    replace:
-      '                them there, or unbind this deck, otherwise choosing another folder is\n' +
-      '                refused.',
-    tests: ['src/routes/DeckImport.svelte.test.ts'],
-    testName: 'offers no remedy the screen has no control for',
     runner: 'web',
   },
   {
@@ -953,8 +977,11 @@ export const guards = [
     name: 'two cards printed with different artwork are two files',
     package: 'web',
     file: 'src/lib/scene/assets.ts',
-    find: '  return stableKey([settings, front.file_id, back?.file_id ?? null]);',
-    replace: '  return stableKey([settings]);',
+    find:
+      '    component.settings,\n' +
+      '    component.front.file_id,\n' +
+      '    component.back?.file_id ?? null,\n',
+    replace: '    component.settings,\n',
     tests: ['src/lib/scene/assets.test.ts'],
     testName: 'separates two cards cut to one size but printed with different artwork',
     runner: 'web',
@@ -1023,9 +1050,9 @@ export const guards = [
     package: 'web',
     file: 'src/lib/scene/assets.ts',
     find:
-      '    const key = assetKey(component.settings, component.front, component.back);\n' +
+      '    const key = assetKey(component);\n' +
       '    const existing = this.#ids.get(key);\n    if (existing) return existing;',
-    replace: '    const key = assetKey(component.settings, component.front, component.back);',
+    replace: '    const key = assetKey(component);',
     tests: ['src/lib/scene/assets.test.ts'],
     testName: 'collapses a deck onto one asset per distinct card and one instance per copy',
     runner: 'web',

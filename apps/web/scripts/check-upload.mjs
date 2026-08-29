@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
 import { TINY_PNG } from './lib/fixtures.mjs';
-import { createProject, inspectApi, signUp } from './lib/session.mjs';
+import { createProject, inspectApi, openAssets, signUp } from './lib/session.mjs';
 
 const PORT = Number(process.env.UPLOAD_PROBE_PORT ?? 17331);
 const API = process.env.API_PROXY_TARGET ?? 'http://localhost:17310';
@@ -73,6 +73,7 @@ async function run() {
     check('signing up lands on the projects screen', true);
 
     await createProject(browser, 'Probe Project');
+    await openAssets(browser);
     check('a created project appears in the list', true);
 
     // --- upload through the real file input --------------------------------

@@ -143,17 +143,10 @@ describe('deck imports', () => {
     return (await res.json()).id as string;
   }
 
-  function bind(deckId: string, folderId: string, label?: string, user: TestUser = owner) {
-    return user.api.put(`/api/decks/${deckId}/import`, {
-      folder_id: folderId,
-      ...(label === undefined ? {} : { source_label: label }),
-    });
-  }
-
+  // Nothing to set up: the deck is where its artwork lands, and the import row
+  // that remembers the export appears on the first run.
   async function scenario(name: string) {
-    const [folderId, deckId] = await Promise.all([makeFolder(name), makeDeck(name)]);
-    expect((await bind(deckId, folderId, name)).status).toBe(201);
-    return { folderId, deckId };
+    return { deckId: await makeDeck(name) };
   }
 
   // Two spellings of one request: the page count the run route reads, and the
@@ -300,17 +293,12 @@ describe('deck imports', () => {
     return ((await res.json()).versions as unknown[]).length;
   }
 
-  async function filenamesIn(folderId: string): Promise<string[]> {
-    const res = await owner.api.get(
-      `/api/files/directory?project_id=${projectId}&folder_id=${folderId}`
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { files: { filename: string }[] };
-    return body.files.map((file) => file.filename).sort();
+  async function filenamesIn(deckId: string): Promise<string[]> {
+    return (await readDeck(deckId)).cards.map((card) => card.file.filename).sort();
   }
 
-  async function uploadByHand(folderId: string, filename: string, bytes: Buffer): Promise<string> {
-    const query = new URLSearchParams({ project_id: projectId, filename, folder_id: folderId });
+  async function uploadByHand(deckId: string, filename: string, bytes: Buffer): Promise<string> {
+    const query = new URLSearchParams({ project_id: projectId, filename, deck_id: deckId });
     const res = await owner.api.postBytes(
       `/api/files/upload?${query}`,
       bytes as unknown as BodyInit,
@@ -327,88 +315,43 @@ describe('deck imports', () => {
   const outcomes = (pages: Map<number, PageResult>) =>
     [...pages.entries()].sort(([a], [b]) => a - b).map(([, result]) => result.outcome);
 
-  describe('binding a deck to a folder', () => {
-    it('binds once and then only updates the label', async () => {
-      const folderId = await makeFolder('bind-target');
-      const deckId = await makeDeck('Bind me');
+  describe('the import row', () => {
+    it('appears on the first run rather than being set up beforehand', async () => {
+      const { deckId } = await scenario('implicit-import');
+      // 404 here is "never imported", not "pick a folder first": there is
+      // nowhere else the artwork could go.
+      expect((await readImport(deckId)).status).toBe(404);
 
-      const first = await bind(deckId, folderId, 'Draft deck');
-      expect(first.status).toBe(201);
-      expect((await first.json()).folder_id).toBe(folderId);
-      expect((await readImport(deckId)).body.open_run_id).toBeNull();
-
-      const again = await bind(deckId, folderId, 'Draft deck v2');
-      expect(again.status).toBe(200);
-      expect((await again.json()).source_label).toBe('Draft deck v2');
-    });
-
-    it('refuses a folder inside a deleted one, the way a stranger is refused', async () => {
-      const parentId = await makeFolder('doomed-parent');
-      const childId = await makeFolder('live-child', parentId);
-      expect((await owner.api.delete(`/api/files/folders/${parentId}`)).status).toBe(204);
-
-      const deckId = await makeDeck('Into the dark');
-      const res = await bind(deckId, childId);
-      expect(res.status).toBe(404);
-      expect((await res.json()).error).toBe('Folder not found');
-    });
-
-    it('refuses to move the binding while its cards are still in the old folder', async () => {
-      const { deckId, folderId } = await scenario('rebind-guard');
-      await importPages(deckId, [{ title: 'Only', bytes: png('only') }]);
-
-      const elsewhere = await makeFolder('rebind-elsewhere');
-      const res = await bind(deckId, elsewhere);
-      expect(res.status).toBe(409);
-      expect((await readImport(deckId)).body.folder_id).toBe(folderId);
-    });
-
-    it('unbinds without losing the timeline, and resumes when the folder is bound back', async () => {
-      const { deckId, folderId } = await scenario('unbind-resume');
-      const pages = [
-        { title: 'One', bytes: png('one') },
-        { title: 'Two', bytes: png('two') },
-      ];
-      const first = await importPages(deckId, pages);
-
-      expect((await owner.api.delete(`/api/decks/${deckId}/import`)).status).toBe(204);
-      const unbound = await readImport(deckId);
-      expect(unbound.body.folder_id).toBeNull();
-      expect(await timeline(deckId)).toHaveLength(1);
-      expect((await startRun(deckId, 1)).status).toBe(409);
-
-      expect((await bind(deckId, folderId)).status).toBe(200);
-      const second = await importPages(deckId, pages);
-      expect(outcomes(second.pages)).toEqual(['unchanged', 'unchanged']);
-      expect(second.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
-      expect(second.run.counts.added).toBe(0);
-      expect(await timeline(deckId)).toHaveLength(2);
-    });
-
-    it('keeps the binding and the timeline when the folder is purged', async () => {
-      const { deckId, folderId } = await scenario('purged-folder');
-      await importPages(deckId, [{ title: 'Doomed', bytes: png('doomed') }]);
-
-      expect((await owner.api.delete(`/api/files/folders/${folderId}`)).status).toBe(204);
-      expect((await owner.api.delete(`/api/files/folders/${folderId}?purge=true`)).status).toBe(
-        204
-      );
+      await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
 
       const binding = await readImport(deckId);
       expect(binding.status).toBe(200);
-      expect(binding.body.folder_id).toBeNull();
+      expect(binding.body.deck_id).toBe(deckId);
+      expect(binding.body.open_run_id).toBeNull();
+    });
+
+    it('keeps the timeline when the deck is tombstoned, and refuses a run into it', async () => {
+      const { deckId } = await scenario('deleted-deck-import');
+      await importPages(deckId, [{ title: 'Doomed', bytes: png('doomed') }]);
+
+      expect((await owner.api.delete(`/api/decks/${deckId}`)).status).toBe(204);
+
       expect(await timeline(deckId)).toHaveLength(1);
       expect((await startRun(deckId, 1)).status).toBe(409);
+
+      // And it resumes on the way back, which is what makes the tombstone a
+      // pause rather than the end of the deck's history.
+      expect((await owner.api.post(`/api/decks/${deckId}/restore`)).status).toBe(200);
+      expect((await startRun(deckId, 1)).status).toBe(201);
     });
   });
 
   describe('a first export', () => {
     let deckId: string;
-    let folderId: string;
     let first: Import;
 
     beforeAll(async () => {
-      ({ deckId, folderId } = await scenario('first-export'));
+      ({ deckId } = await scenario('first-export'));
       first = await importPages(deckId, [
         { bytes: png('untitled front') },
         { title: 'Goblin', bytes: png('goblin') },
@@ -417,7 +360,7 @@ describe('deck imports', () => {
     });
 
     it('names each card after the page it came from', async () => {
-      expect(await filenamesIn(folderId)).toEqual(['1.png', '2 - Goblin.png', '3 - Dragon.png']);
+      expect(await filenamesIn(deckId)).toEqual(['1.png', '2 - Goblin.png', '3 - Dragon.png']);
       expect(outcomes(first.pages)).toEqual(['added', 'added', 'added']);
       expect(first.pages.get(2)!.matched_by).toBeNull();
       expect(first.pages.get(2)!.file_version_number).toBe(1);
@@ -547,7 +490,7 @@ describe('deck imports', () => {
 
       expect(shape(firstBackwards, secondBackwards)).toEqual(shape(firstForwards, secondForwards));
       expect(secondBackwards.run.counts).toEqual(secondForwards.run.counts);
-      expect(await filenamesIn(backwards.folderId)).toEqual(await filenamesIn(forwards.folderId));
+      expect(await filenamesIn(backwards.deckId)).toEqual(await filenamesIn(forwards.deckId));
     });
 
     it('falls back to the page number when a title changed, and re-anchors on it', async () => {
@@ -579,7 +522,7 @@ describe('deck imports', () => {
 
   describe('two pages with one title', () => {
     it('imports both rather than refusing the deck', async () => {
-      const { deckId, folderId } = await scenario('duplicate-titles');
+      const { deckId } = await scenario('duplicate-titles');
       const pages = [
         { title: 'Back', bytes: png('back one') },
         { title: 'Back', bytes: png('back two') },
@@ -588,7 +531,7 @@ describe('deck imports', () => {
 
       expect(outcomes(first.pages)).toEqual(['added', 'added']);
       expect(first.pages.get(1)!.file_id).not.toBe(first.pages.get(2)!.file_id);
-      expect(await filenamesIn(folderId)).toEqual(['1 - Back.png', '2 - Back.png']);
+      expect(await filenamesIn(deckId)).toEqual(['1 - Back.png', '2 - Back.png']);
       expect((await readDeck(deckId)).cards).toHaveLength(2);
 
       // And the next import finds both again: the loser of the collision took a
@@ -732,13 +675,13 @@ describe('deck imports', () => {
     });
 
     it('restores it under a suffix when its name has been taken meanwhile', async () => {
-      const { deckId, folderId } = await scenario('returning-under-suffix');
+      const { deckId } = await scenario('returning-under-suffix');
       const first = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha') },
         { title: 'Gamma', bytes: png('gamma') },
       ]);
       await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
-      await uploadByHand(folderId, '2 - Gamma.png', png('by hand'));
+      await uploadByHand(deckId, '2 - Gamma.png', png('by hand'));
 
       const back = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha') },
@@ -751,9 +694,9 @@ describe('deck imports', () => {
     });
 
     it('leaves a file somebody put in the folder by hand alone', async () => {
-      const { deckId, folderId } = await scenario('hand-placed-file');
+      const { deckId } = await scenario('hand-placed-file');
       await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
-      const byHand = await uploadByHand(folderId, 'notes.png', png('notes'));
+      const byHand = await uploadByHand(deckId, 'notes.png', png('notes'));
 
       await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
       expect((await readFile(byHand)).body.deleted_at).toBeNull();
@@ -822,7 +765,7 @@ describe('deck imports', () => {
       expect(deck.cards.map((card) => card.quantity)).toEqual([5, 2, 1]);
     });
 
-    it('does not put back a card somebody took out of the deck', async () => {
+    it('refuses a card list that would leave one of its own images out', async () => {
       const { deckId } = await scenario('hand-removed');
       const first = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha') },
@@ -830,22 +773,31 @@ describe('deck imports', () => {
       ]);
       const [alpha, beta] = [1, 2].map((number) => first.pages.get(number)!.file_id!);
 
+      // The deck owns Beta, so dropping it from the list would leave artwork in
+      // the deck with no place in it -- and no screen showing it anywhere.
       const trimmed = await owner.api.put(`/api/decks/${deckId}/cards`, {
         cards: [{ file_id: alpha, quantity: 1 }],
       });
-      expect(trimmed.status).toBe(200);
+      expect(trimmed.status).toBe(422);
 
-      await importPages(deckId, [
-        { title: 'Alpha', bytes: png('alpha') },
-        { title: 'Beta', bytes: png('beta redrawn') },
-      ]);
+      // Moving it out is how it leaves, and then the list is accepted.
+      const elsewhere = await makeFolder('hand-removed-destination');
+      expect(
+        (await owner.api.post(`/api/files/${beta}/move`, { folder_id: elsewhere })).status
+      ).toBe(200);
+      expect(
+        (
+          await owner.api.put(`/api/decks/${deckId}/cards`, {
+            cards: [{ file_id: alpha, quantity: 1 }],
+          })
+        ).status
+      ).toBe(200);
 
-      const deck = await readDeck(deckId);
-      expect(deck.cards.map((card) => card.file_id)).toEqual([alpha]);
-      // Still imported and still versioned: only its place in the deck was the
-      // person's to decide.
-      expect(await versionCount(beta)).toBe(2);
+      // The image is untouched by the move: it is in Assets, versioned as it
+      // was, and no import tombstoned it on the way out.
+      expect(await versionCount(beta)).toBe(1);
       expect((await readFile(beta)).body.deleted_at).toBeNull();
+      expect((await readFile(beta)).body.deck_id).toBeNull();
     });
   });
 
@@ -859,7 +811,10 @@ describe('deck imports', () => {
       expect(res.status).toBe(409);
       expect((await res.json()).error).toMatch(/imported 1 of 3 pages/);
       expect((await readImport(deckId)).body.open_run_id).toBe(run.id);
-      expect((await readDeck(deckId)).cards).toEqual([]);
+      // The page that landed is already a card: the deck owns the artwork the
+      // moment it arrives, and artwork in a deck with no place in it is the one
+      // state this arrangement has none of.
+      expect((await readDeck(deckId)).cards).toHaveLength(1);
       expect((await abandon(run.id)).status).toBe(200);
     });
 
@@ -883,7 +838,7 @@ describe('deck imports', () => {
     });
 
     it('abandons half way and leaves every page that landed imported', async () => {
-      const { deckId, folderId } = await scenario('abandoned-run');
+      const { deckId } = await scenario('abandoned-run');
       const run = await openRun(deckId, 4);
       await landPage(run.id, 1, { title: 'Alpha', bytes: png('alpha') });
       await landPage(run.id, 2, { title: 'Beta', bytes: png('beta') });
@@ -891,13 +846,15 @@ describe('deck imports', () => {
       const res = await abandon(run.id);
       expect(res.status).toBe(200);
       expect((await res.json()).status).toBe('abandoned');
-      expect(await filenamesIn(folderId)).toEqual(['1 - Alpha.png', '2 - Beta.png']);
-      // An abandon tombstones nothing and hands the deck nothing.
-      expect((await readDeck(deckId)).cards).toEqual([]);
+      expect(await filenamesIn(deckId)).toEqual(['1 - Alpha.png', '2 - Beta.png']);
+      // An abandon tombstones nothing, and the two pages that landed stay in
+      // the deck -- they are its artwork now, and leaving them out of its
+      // arrangement would put them on no screen at all.
+      expect((await readDeck(deckId)).cards).toHaveLength(2);
     });
 
     it('re-runs after an abandon with no duplicates and no wasted versions', async () => {
-      const { deckId, folderId } = await scenario('rerun-after-abandon');
+      const { deckId } = await scenario('rerun-after-abandon');
       const pages = [
         { title: 'Alpha', bytes: png('alpha') },
         { title: 'Beta', bytes: png('beta') },
@@ -916,11 +873,7 @@ describe('deck imports', () => {
       expect(complete.pages.get(1)!.file_id).toBe(landed[0].file_id);
       expect(complete.pages.get(2)!.file_id).toBe(landed[1].file_id);
       expect(complete.run.counts.removed).toBe(0);
-      expect(await filenamesIn(folderId)).toEqual([
-        '1 - Alpha.png',
-        '2 - Beta.png',
-        '3 - Gamma.png',
-      ]);
+      expect(await filenamesIn(deckId)).toEqual(['1 - Alpha.png', '2 - Beta.png', '3 - Gamma.png']);
 
       // The two that landed under the abandoned run had never been handed to
       // the deck, so this finish is what puts all three of them in it.
@@ -944,9 +897,9 @@ describe('deck imports', () => {
       ]);
       const moved = first.pages.get(2)!.file_id!;
 
-      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
-        200
-      );
+      expect(
+        (await owner.api.post(`/api/files/${moved}/move`, { folder_id: elsewhere })).status
+      ).toBe(200);
 
       const second = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
       expect(second.run.counts.removed).toBe(0);
@@ -975,12 +928,12 @@ describe('deck imports', () => {
 
   describe('bytes that are not an image', () => {
     it('refuses the page and keeps nothing', async () => {
-      const { deckId, folderId } = await scenario('not-an-image');
+      const { deckId } = await scenario('not-an-image');
       const run = await openRun(deckId, 1);
 
       const res = await postPage(run.id, 1, Buffer.from('this is a spreadsheet'), 'Alpha');
       expect(res.status).toBe(422);
-      expect(await filenamesIn(folderId)).toEqual([]);
+      expect(await filenamesIn(deckId)).toEqual([]);
       expect((await abandon(run.id)).status).toBe(200);
     });
   });
@@ -1156,9 +1109,9 @@ describe('deck imports', () => {
       ];
       const first = await importPages(deckId, pages);
       const moved = first.pages.get(2)!.file_id!;
-      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
-        200
-      );
+      expect(
+        (await owner.api.post(`/api/files/${moved}/move`, { folder_id: elsewhere })).status
+      ).toBe(200);
 
       // Nothing has finished since the move, so the mapping row for the moved
       // file is still attached and still holding Beta's key.
@@ -1173,7 +1126,9 @@ describe('deck imports', () => {
       expect((await finish(run.id)).status).toBe(200);
       expect((await readFile(moved)).body.deleted_at).toBeNull();
       expect((await readFile(moved)).body.folder_id).toBe(elsewhere);
-      expect((await readDeck(deckId)).cards).toHaveLength(3);
+      // Two, not three: moving the file out took it out of the arrangement as
+      // well, so what is left is Alpha and the card page 2 was imported onto.
+      expect((await readDeck(deckId)).cards).toHaveLength(2);
     });
   });
 
@@ -1194,7 +1149,7 @@ describe('deck imports', () => {
           rows.map((row) => ({
             id: row.id,
             project_id: projectId,
-            folder_id: null,
+            deck_id: deckId,
             filename: row.filename,
             storage_key: randomUUID(),
             content_type: 'image/png',
@@ -1226,11 +1181,13 @@ describe('deck imports', () => {
       const res = await startRun(deckId, 1, owner, [page]);
       expect({ status: res.status, body: await res.json() }).toMatchObject({ status: 422 });
 
-      expect((await readImport(deckId)).body.open_run_id).toBeNull();
+      // Nothing was opened at all: the import row is written inside the same
+      // transaction the refusal rolls back.
+      expect((await readImport(deckId)).status).toBe(404);
       expect((await readDeck(deckId)).cards).toHaveLength(MAX_DECK_CARDS);
     });
 
-    it('refuses to finish a run a hand edit has pushed past the cap', async () => {
+    it('refuses the page a hand edit has pushed past the cap', async () => {
       const { deckId } = await scenario('deck-filled-during-a-run');
       await fillDeck(deckId, MAX_DECK_CARDS - 1);
 
@@ -1238,12 +1195,12 @@ describe('deck imports', () => {
       const run = await openRun(deckId, 1, [page]);
       // The last free place, taken by hand while the run was open.
       await fillDeck(deckId, 1);
-      await landPage(run.id, 1, page);
 
-      const res = await finish(run.id);
+      // The page rather than the finish: the card joins the deck as its bytes
+      // land, so that is where the cap has to hold. A deck one card past it is
+      // one the editor can never save again.
+      const res = await postPage(run.id, 1, page.bytes, page.title);
       expect({ status: res.status, body: await res.json() }).toMatchObject({ status: 422 });
-      // A deck the editor can still save: one card past the cap and every hand
-      // edit fails validation on a list the import wrote.
       expect((await readDeck(deckId)).cards).toHaveLength(MAX_DECK_CARDS);
       expect((await abandon(run.id)).status).toBe(200);
     });
@@ -1398,9 +1355,9 @@ describe('deck imports', () => {
         { title: 'Beta', bytes: png('beta') },
       ]);
       const moved = first.pages.get(2)!.file_id!;
-      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
-        200
-      );
+      expect(
+        (await owner.api.post(`/api/files/${moved}/move`, { folder_id: elsewhere })).status
+      ).toBe(200);
 
       const second = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha redrawn') }]);
       expect(second.run.counts.removed).toBe(0);
@@ -1472,9 +1429,9 @@ describe('deck imports', () => {
     });
 
     it('leaves out a card somebody added to the deck by hand', async () => {
-      const { deckId, folderId } = await scenario('as-of-hand-added');
+      const { deckId } = await scenario('as-of-hand-added');
       const first = await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
-      const byHand = await uploadByHand(folderId, 'chosen.png', png('chosen'));
+      const byHand = await uploadByHand(deckId, 'chosen.png', png('chosen'));
 
       const cards = [
         { file_id: first.pages.get(1)!.file_id!, quantity: 1 },
@@ -1559,9 +1516,9 @@ describe('deck imports', () => {
         { title: 'Beta', bytes: png('beta') },
       ]);
       const moved = first.pages.get(2)!.file_id!;
-      expect((await owner.api.patch(`/api/files/${moved}`, { folder_id: elsewhere })).status).toBe(
-        200
-      );
+      expect(
+        (await owner.api.post(`/api/files/${moved}/move`, { folder_id: elsewhere })).status
+      ).toBe(200);
 
       // Gamma takes the page number Beta's card is still carrying from the run
       // before, so the page number alone cannot decide the order.
@@ -1577,11 +1534,10 @@ describe('deck imports', () => {
 
   describe('authorization', () => {
     let deckId: string;
-    let folderId: string;
     let runId: string;
 
     beforeAll(async () => {
-      ({ deckId, folderId } = await scenario('guarded-import'));
+      ({ deckId } = await scenario('guarded-import'));
       runId = (await openRun(deckId, 1)).id;
     });
 
@@ -1596,8 +1552,6 @@ describe('deck imports', () => {
     });
 
     it.each([
-      ['binding', (user: TestUser) => bind(deckId, folderId, undefined, user)],
-      ['unbinding', (user: TestUser) => user.api.delete(`/api/decks/${deckId}/import`)],
       ['starting a run', (user: TestUser) => startRun(deckId, 1, user)],
       ['importing a page', (user: TestUser) => postPage(runId, 1, png('viewer'), 'Alpha', user)],
       ['finishing a run', (user: TestUser) => finish(runId, user)],
@@ -1609,7 +1563,6 @@ describe('deck imports', () => {
     // 403 would tell an outsider that this deck exists and is being imported.
     it.each([
       ['reading the binding', (user: TestUser) => user.api.get(`/api/decks/${deckId}/import`)],
-      ['binding', (user: TestUser) => bind(deckId, folderId, undefined, user)],
       ['starting a run', (user: TestUser) => startRun(deckId, 1, user)],
       [
         'reading a run',

@@ -110,6 +110,32 @@ describe('DeletedStore restore', () => {
     expect(requestAt(2).search).toBe('');
   });
 
+  // Four kinds now go through the Deleted screen, and each has a route of its
+  // own. Sending a deck to the folder route answers 404 for a deck that is
+  // plainly there, which reads as a bug in the listing rather than in the send.
+  it('restores each kind through the route that owns it', async () => {
+    const DECK = '33333333-3333-4333-8333-333333333333';
+    const COMPONENT = '44444444-4444-4444-8444-444444444444';
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+    await deleted.restoreDeck(DECK);
+    expect(requestAt(0).pathname).toBe(`/api/decks/${DECK}/restore`);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+    await deleted.restoreComponent(COMPONENT);
+    expect(requestAt(1).pathname).toBe(`/api/components/${COMPONENT}/restore`);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(204));
+    await deleted.purgeDeck(DECK);
+    expect(requestAt(2).pathname).toBe(`/api/decks/${DECK}`);
+    expect(requestAt(2).searchParams.get('purge')).toBe('true');
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(204));
+    await deleted.purgeComponent(COMPONENT);
+    expect(requestAt(3).pathname).toBe(`/api/components/${COMPONENT}`);
+    expect(requestAt(3).searchParams.get('purge')).toBe('true');
+  });
+
   // Whether the screen offers a new name turns on this, and a folder deleted
   // after the listing loaded is how the wrong branch is reached.
   it('tells a taken name apart from a folder standing in the way', () => {

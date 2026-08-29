@@ -75,7 +75,7 @@ describe('publishAfterCommit', () => {
     subscribeToBus((entry) => seen.push(entry));
 
     const hooks: (() => void | Promise<void>)[] = [];
-    publishAfterCommit(hooks, 'actor-1', 'deck_deleted', 'p1', { id: 'd1' });
+    publishAfterCommit(hooks, 'actor-1', 'project_deleted', 'p1', { id: 'd1' });
     await hooks[0]();
 
     expect(seen[0].project_id).toBe('p1');

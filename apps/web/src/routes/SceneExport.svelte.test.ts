@@ -1,6 +1,7 @@
 import { fetchMock, jsonResponse } from '../api/testUtils.ts';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_WOOD_SETTINGS } from '@three-peaks/shared';
 import SceneExport from './SceneExport.svelte';
 import { decks } from '../lib/decks.svelte.ts';
 import { toasts } from '../lib/toasts.svelte.ts';
@@ -60,6 +61,28 @@ const FOLDER = {
   updated_at: STAMP,
 };
 
+function component(id: string, name: string, kind: string, files: ReturnType<typeof file>[]) {
+  return {
+    id,
+    project_id: PROJECT_ID,
+    kind,
+    name,
+    settings: { ...DEFAULT_WOOD_SETTINGS, kind } as never,
+    created_by: 'someone',
+    created_at: STAMP,
+    updated_at: STAMP,
+    deleted_at: null,
+    files: files.map((row) => ({ role: 'artwork' as const, file: row })),
+    missing_roles: files.length > 0 ? [] : (['artwork'] as const),
+  };
+}
+
+const MEEPLE = component('66666666-6666-4666-8666-666666666666', 'Meeple', 'wood', [
+  file('44444444-4444-4444-8444-444444444444', 'token.png'),
+]);
+// Named but not given its artwork yet, which is nothing the table can hold.
+const UNREADY = component('77777777-7777-4777-8777-777777777777', 'Half a piece', 'wood', []);
+
 function listing(folder: typeof FOLDER | null, rows: ReturnType<typeof file>[]) {
   return {
     breadcrumb: folder ? [folder] : [],
@@ -89,16 +112,14 @@ function serve(): void {
     if (url.pathname === `/api/decks/${DECK.id}`) {
       return jsonResponse(200, { deck: DECK, cards: CARDS });
     }
+    if (url.pathname === '/api/components') {
+      return jsonResponse(200, { components: [MEEPLE, UNREADY] });
+    }
     if (url.pathname === '/api/files/directory') {
-      return url.searchParams.get('folder_id') === FOLDER_ID
-        ? jsonResponse(
-            200,
-            listing(FOLDER, [file('44444444-4444-4444-8444-444444444444', 'token.png')])
-          )
-        : jsonResponse(
-            200,
-            listing(null, [file('55555555-5555-4555-8555-555555555555', 'board.png')])
-          );
+      return jsonResponse(
+        200,
+        listing(null, [file('55555555-5555-4555-8555-555555555555', 'board.png')])
+      );
     }
     if (url.pathname.startsWith('/api/models/')) {
       return jsonResponse(500, { error: 'Settings are unreadable' });
@@ -118,7 +139,13 @@ function readout(): string {
 
 function asked(prefix: string): string[] {
   return fetchMock.mock.calls
-    .map(([input]) => new URL(typeof input === 'string' ? input : (input as Request).url).pathname)
+    .map(
+      ([input]) =>
+        // A base, because a thumbnail fetches its bytes with a relative path
+        // and URL will not parse one on its own.
+        new URL(typeof input === 'string' ? input : (input as Request).url, 'http://localhost')
+          .pathname
+    )
     .filter((path) => path.startsWith(prefix));
 }
 
@@ -151,22 +178,26 @@ describe('Scene export screen', () => {
     expect(screen.getByRole('button', { name: 'Export bundle' })).toBeEnabled();
   });
 
-  // The picker walks folders, so the listing a file was ticked in is gone by
-  // the time anyone presses Export.
-  it('keeps a file ticked after walking into another folder and back', async () => {
+  // Components are picked by name out of their sections; there is no folder to
+  // walk into, which is the whole of what the sections did away with.
+  it('picks a component by name and counts it', async () => {
     render(SceneExport, { projectId: PROJECT_ID });
     await settle();
 
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'board.png' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Tokens' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Meeple' }));
     await settle();
 
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'token.png' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+    expect(screen.getByRole('checkbox', { name: 'Meeple' })).toBeChecked();
+    expect(readout()).toMatch(/1 piece on the table/);
+  });
+
+  // A component still waiting for its artwork has nothing to build from, so
+  // offering it would only be a tick that fails at export.
+  it('leaves out a component that has no artwork yet', async () => {
+    render(SceneExport, { projectId: PROJECT_ID });
     await settle();
 
-    expect(screen.getByRole('checkbox', { name: 'board.png' })).toBeChecked();
-    expect(readout()).toMatch(/2 pieces on the table/);
+    expect(screen.queryByRole('checkbox', { name: 'Half a piece' })).not.toBeInTheDocument();
   });
 
   it('offers the templates the exporter itself knows about', async () => {

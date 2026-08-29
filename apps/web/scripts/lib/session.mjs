@@ -119,5 +119,14 @@ export async function createProject(browser, projectName) {
   await browser.click('button[type="submit"]');
   await browser.page.waitForSelector(`a:has-text("${projectName}")`, { timeout: 10_000 });
   await browser.click(`a:has-text("${projectName}")`);
+  // The project screen is a list of sections, so this leaves the browser at the
+  // way in to all of them rather than inside one.
+  await browser.page.waitForSelector('a:has-text("Assets")', { timeout: 10_000 });
+}
+
+// The file explorer, which is one section among the others: what belongs to no
+// deck and no component.
+export async function openAssets(browser) {
+  await browser.click('a:has-text("Assets")');
   await browser.page.waitForSelector('button:has-text("Upload files")', { timeout: 10_000 });
 }

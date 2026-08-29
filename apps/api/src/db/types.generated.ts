@@ -42,6 +42,19 @@ export interface AppUser {
   updated_at: Generated<Timestamp>;
 }
 
+export interface Component {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  deleted_at: Timestamp | null;
+  deleted_by: string | null;
+  id: string;
+  kind: string;
+  name: string;
+  project_id: string;
+  settings: Json;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface ComponentModel {
   created_at: Generated<Timestamp>;
   id: string;
@@ -58,6 +71,8 @@ export interface Deck {
   card_width_mm: Numeric;
   created_at: Generated<Timestamp>;
   created_by: string;
+  deleted_at: Timestamp | null;
+  deleted_by: string | null;
   id: string;
   name: string;
   project_id: string;
@@ -96,8 +111,11 @@ export interface DeckImportCard {
 export interface File {
   byte_size: Int8;
   checksum: string | null;
+  component_id: string | null;
+  component_role: string | null;
   content_type: string;
   created_at: Generated<Timestamp>;
+  deck_id: string | null;
   deleted_at: Timestamp | null;
   deleted_by: string | null;
   filename: string;
@@ -207,6 +225,7 @@ export interface Session {
 
 export interface DB {
   app_user: AppUser;
+  component: Component;
   component_model: ComponentModel;
   deck: Deck;
   deck_card: DeckCard;

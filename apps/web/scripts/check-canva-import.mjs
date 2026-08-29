@@ -27,7 +27,6 @@ const selftest = process.argv.includes('--selftest');
 // Named here rather than added to the shared list: an API without them is only
 // too old for this probe, and every other one should still run.
 const IMPORT_ROUTES = [
-  ['put', '/api/decks/{deckId}/import'],
   ['post', '/api/decks/{deckId}/import/runs'],
   ['post', '/api/decks/import/runs/{runId}/pages'],
   ['post', '/api/decks/import/runs/{runId}/finish'],
@@ -107,7 +106,7 @@ async function readDeck(browser, deckId) {
         fileId: card.file_id,
         position: card.position,
         filename: card.file.filename,
-        folderId: card.file.folder_id,
+        deckId: card.file.deck_id,
         versions: history.versions.length,
       });
     }
@@ -118,7 +117,7 @@ async function readDeck(browser, deckId) {
 // Every complaint the deck could raise, as strings, so the same function can be
 // asked to find some. Comparing NFC on both sides: a title that went out as one
 // code point can come back decomposed and read identically in a terminal.
-function deckProblems(deck, folderId) {
+function deckProblems(deck, deckId) {
   const problems = [];
   const ordered = [...deck.cards].sort((a, b) => a.position - b.position);
 
@@ -138,28 +137,12 @@ function deckProblems(deck, folderId) {
     if (card.versions !== 1) {
       problems.push(`“${card.filename}” is at ${card.versions} versions, expected 1`);
     }
-    if (card.folderId !== folderId) {
-      problems.push(`“${card.filename}” is not in the folder the deck is bound to`);
+    if (card.deckId !== deckId) {
+      problems.push(`“${card.filename}” is not held by the deck it was imported into`);
     }
   });
 
   return problems;
-}
-
-async function bindFolder(browser, name) {
-  await browser.click('button:has-text("Choose a folder")');
-  await browser.page.waitForSelector('button:has-text("New folder")', { timeout: 15_000 });
-  await browser.click('button:has-text("New folder")');
-  await browser.page.fill('input[maxlength="120"]', name);
-  await browser.click('button:has-text("Create")');
-  // The breadcrumb, not the button: "Use this folder" is on the screen from the
-  // start and merely disabled at the project root, so waiting for it would wait
-  // for nothing and click into the root.
-  await browser.page.waitForSelector(`nav[aria-label="Folders"] button:has-text("${name}")`, {
-    timeout: 15_000,
-  });
-  await browser.click('button:has-text("Use this folder")');
-  await browser.page.waitForSelector(`text=Artwork lands in`, { timeout: 15_000 });
 }
 
 /**
@@ -256,13 +239,10 @@ async function run() {
     await browser.page.waitForSelector('h1:has-text("Import from Canva")', { timeout: 15_000 });
     check('the deck editor links to the import screen', true);
 
-    await bindFolder(browser, 'Cards');
-    const folderId = await browser.page.evaluate(async (id) => {
-      const headers = { Authorization: `Bearer ${localStorage.getItem('tph.token')}` };
-      const binding = await fetch(`/api/decks/${id}/import`, { headers }).then((r) => r.json());
-      return binding.folder_id;
-    }, deckId);
-    check('picking a folder binds the deck to it', typeof folderId === 'string', String(folderId));
+    // Nothing to set up first: the deck is where the artwork lands, so the file
+    // input is on the screen the moment it opens.
+    await browser.page.waitForSelector('input[type="file"]', { timeout: 15_000 });
+    check('the import screen offers a ZIP straight away', true);
 
     // --- the first import --------------------------------------------------
     const first = await importExport(browser, zipPath, '4 new · 0 updated · 0 removed');
@@ -276,7 +256,7 @@ async function run() {
     );
 
     const imported = await readDeck(browser, deckId);
-    const firstProblems = deckProblems(imported, folderId);
+    const firstProblems = deckProblems(imported, deckId);
     check(
       'the deck holds the export’s pages, in order, each at version 1',
       firstProblems.length === 0,
@@ -303,7 +283,7 @@ async function run() {
     );
 
     const reimported = await readDeck(browser, deckId);
-    const secondProblems = deckProblems(reimported, folderId);
+    const secondProblems = deckProblems(reimported, deckId);
     check(
       're-importing identical bytes writes no new version',
       secondProblems.length === 0,
@@ -352,7 +332,7 @@ async function run() {
         return deck.id;
       }, projectId);
 
-      const untouched = deckProblems(await readDeck(browser, emptyDeckId), folderId);
+      const untouched = deckProblems(await readDeck(browser, emptyDeckId), deckId);
       if (untouched.length === 0) {
         console.error('[selftest] FAILED: a deck with no cards passed the deck assertions');
         return 1;
@@ -364,18 +344,18 @@ async function run() {
           index === 1 ? { ...card, versions: 2 } : card
         ),
       };
-      if (deckProblems(versioned, folderId).length === 0) {
+      if (deckProblems(versioned, deckId).length === 0) {
         console.error('[selftest] FAILED: a card at two versions passed the version assertion');
         return 1;
       }
       console.log('  ok   a card that gained a second version is rejected');
 
-      const relocated = { cards: reimported.cards.map((card) => ({ ...card, folderId: null })) };
-      if (deckProblems(relocated, folderId).length === 0) {
-        console.error('[selftest] FAILED: artwork outside the bound folder was accepted');
+      const relocated = { cards: reimported.cards.map((card) => ({ ...card, deckId: null })) };
+      if (deckProblems(relocated, deckId).length === 0) {
+        console.error('[selftest] FAILED: artwork the deck does not hold was accepted');
         return 1;
       }
-      console.log('  ok   artwork that did not land in the bound folder is rejected');
+      console.log('  ok   artwork the deck does not hold is rejected');
     }
   } finally {
     await browser.close();

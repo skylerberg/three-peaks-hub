@@ -5,9 +5,11 @@ import {
   DEFAULT_BOARD_SETTINGS,
   DEFAULT_BOX_SETTINGS,
   DEFAULT_CARD_SETTINGS,
+  DEFAULT_PUNCHBOARD_SETTINGS,
   MAX_MODEL_SEED,
   MODEL_KINDS,
   MODEL_LIMITS,
+  PUNCHBOARD_SHEET_STATES,
   defaultSettingsFor,
 } from '@three-peaks/shared';
 import { modelSettingsSchema } from '../../src/schemas/models.ts';
@@ -49,6 +51,13 @@ describe('model settings validation', () => {
       expect(rejects({ ...DEFAULT_BOARD_SETTINGS, fold })).toBe(false);
     }
     expect(rejects({ ...DEFAULT_BOARD_SETTINGS, fold: 'trifold' })).toBe(true);
+  });
+
+  it('accepts every sheet state PUNCHBOARD_SHEET_STATES names, and no other', () => {
+    for (const sheet_state of PUNCHBOARD_SHEET_STATES) {
+      expect(rejects({ ...DEFAULT_PUNCHBOARD_SETTINGS, sheet_state })).toBe(false);
+    }
+    expect(rejects({ ...DEFAULT_PUNCHBOARD_SETTINGS, sheet_state: 'torn' })).toBe(true);
   });
 
   it('refuses a kind outside MODEL_KINDS', () => {

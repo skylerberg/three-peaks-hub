@@ -3,6 +3,7 @@
 // and the generated client gets an anonymous duplicate rather than a shared type.
 export * from './auth.ts';
 export * from './common.ts';
+export * from './components.ts';
 export * from './decks.ts';
 export * from './files.ts';
 export * from './imports.ts';

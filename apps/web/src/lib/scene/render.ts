@@ -33,9 +33,10 @@ export function componentRenderer(): SceneAssetRenderer {
   };
 
   return async (build) => {
-    const front = await read(build.front);
+    const artwork = await read(build.front);
     const back = build.back ? await read(build.back) : null;
-    const model = buildModel(build.settings, front, back);
+    const cut = build.cut ? await read(build.cut) : null;
+    const model = buildModel(build.settings, { artwork, back, cut }, build.part);
     try {
       return new Uint8Array(await exportGlb(model.group));
     } finally {

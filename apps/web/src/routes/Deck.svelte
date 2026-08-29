@@ -18,6 +18,7 @@
   import { ApiError, api, assertOk } from '../api/client.ts';
   import { deckImports } from '../lib/deckImports.svelte.ts';
   import { type DeckCard, decks } from '../lib/decks.svelte.ts';
+  import { files } from '../lib/files.svelte.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
@@ -33,7 +34,8 @@
 
   let error = $state<string | null>(null);
   let canEdit = $state(false);
-  let picking = $state<'cards' | 'back' | null>(null);
+  let picking = $state<'cards' | null>(null);
+  let uploading = $state(false);
   let name = $state('');
   let backFile = $state<File | null>(null);
 
@@ -47,9 +49,12 @@
   const totalCopies = $derived(cards.reduce((sum, card) => sum + card.quantity, 0));
   const importStatus = $derived.by(() => {
     if (deckImports.binding?.open_run_id) return 'An import is open.';
-    if (deckImports.folderName) return `Artwork lands in ${deckImports.folderName}.`;
-    if (deckImports.binding?.folder_id) return 'The folder this deck imported into is gone.';
-    return 'Not set up yet.';
+    if (deckImports.binding?.source_label) {
+      return `Last imported from ${deckImports.binding.source_label}.`;
+    }
+    // Nothing to set up: the artwork lands in this deck, so there is nowhere
+    // else it could go and nothing to choose first.
+    return 'Never imported into.';
   });
 
   $effect(() => {
@@ -136,10 +141,6 @@
         case 'file_version_created':
           decks.applyCardFile(event.data.file);
           return;
-        case 'deck_import_binding_changed':
-          if (event.data.deck_id !== deckId) return;
-          deckImports.applyBinding(deckId, event.data.binding, event.data.folder_name);
-          return;
         case 'deck_import_started':
           if (event.data.deck_id !== deckId) return;
           deckImports.applyOpenRun(deckId, event.data.run.id);
@@ -188,20 +189,61 @@
     }
   }
 
-  function addCards(files: File[]) {
-    picking = null;
-    const existing = new Set(cards.map((card) => card.file_id));
-    const additions = files
-      .filter((file) => !existing.has(file.id))
-      .map((file) => ({ file_id: file.id, quantity: 1 }) as DeckCard);
-    if (additions.length === 0) return;
-    void saveCards([...cards, ...additions]);
+  // A deck owns its cards, so adding one is either an upload into the deck or a
+  // move out of Assets. Both put the deck_card row there on the server, which
+  // is what keeps the deck from ever holding artwork with no place in it.
+  async function uploadCards(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    uploading = true;
+    try {
+      // Sequential rather than parallel: the quota is checked per request, and
+      // a burst of concurrent uploads can each pass a check the set fails.
+      for (const file of Array.from(list)) {
+        try {
+          await files.upload(projectId, { deck_id: deckId }, file);
+        } catch (caught) {
+          toasts.error(`${file.name}: ${apiMessage(caught)}`);
+        }
+      }
+      await decks.refreshDeck().catch(() => {});
+    } finally {
+      uploading = false;
+    }
   }
 
-  function chooseBack(files: File[]) {
+  async function moveIn(chosen: File[]) {
     picking = null;
-    const [file] = files;
-    if (file) void patch({ back_file_id: file.id });
+    for (const file of chosen) {
+      try {
+        await files.moveFile(file.id, { deck_id: deckId });
+      } catch (caught) {
+        toasts.error(`${file.filename}: ${apiMessage(caught)}`);
+      }
+    }
+    await decks.refreshDeck().catch(() => {});
+  }
+
+  // Out of the deck, not out of the list: leaving a card in the deck with no
+  // place in it is the one state a deck owning its artwork does not have.
+  async function moveOut(card: DeckCard) {
+    if (!confirm(`Move ${card.file.filename} to Assets? It leaves this deck.`)) return;
+    try {
+      await files.moveFile(card.file_id, { folder_id: null });
+      await decks.refreshDeck();
+    } catch (caught) {
+      toasts.error(apiMessage(caught));
+    }
+  }
+
+  async function removeCard(card: DeckCard) {
+    if (!confirm(`Delete ${card.file.filename}? Its history is kept, and Deleted can put it back.`))
+      return;
+    try {
+      await files.deleteFile(card.file_id);
+      await decks.refreshDeck();
+    } catch (caught) {
+      toasts.error(apiMessage(caught));
+    }
   }
 
   function setQuantity(fileId: string, quantity: number) {
@@ -340,26 +382,33 @@
           <div class="flex items-center gap-3">
             <Thumbnail fileId={backFile.id} alt="" />
             <span class="min-w-0 flex-1 truncate text-sm">{backFile.filename}</span>
-            {#if canEdit}
-              <Button variant="secondary" onclick={() => (picking = 'back')}>Change</Button>
-              <Button variant="ghost" onclick={() => patch({ back_file_id: null })}>Remove</Button>
-            {/if}
           </div>
         {:else}
           <p class="text-sm text-muted">
             No back chosen. Sheets for this deck will print fronts only.
           </p>
-          {#if canEdit}
-            <div>
-              <Button variant="secondary" onclick={() => (picking = 'back')}>Choose a back</Button>
-            </div>
-          {/if}
+        {/if}
+
+        {#if canEdit}
+          <div class="flex flex-col gap-1">
+            <label class="text-sm" for="{uid}-back">Use one of this deck's images</label>
+            <select
+              id="{uid}-back"
+              class="focus-ring min-h-11 rounded-md border border-edge bg-surface px-2 text-sm"
+              value={backFileId ?? ''}
+              onchange={(event) => patch({ back_file_id: event.currentTarget.value || null })}
+            >
+              <option value="">No back</option>
+              {#each cards as card (card.file_id)}
+                <option value={card.file_id}>{card.file.filename}</option>
+              {/each}
+            </select>
+            <p class="text-xs text-muted">
+              A deck's back is one of its own images. Upload it below, or move it in from Assets.
+            </p>
+          </div>
         {/if}
       </div>
-
-      {#if picking === 'back'}
-        <FilePicker {projectId} onpick={chooseBack} oncancel={() => (picking = null)} />
-      {/if}
     </section>
 
     {#if canEdit}
@@ -382,8 +431,32 @@
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-lg font-semibold">Cards</h2>
         {#if canEdit}
-          <Button onclick={() => (picking = picking === 'cards' ? null : 'cards')}>Add cards</Button
-          >
+          <div class="flex flex-wrap items-center gap-2">
+            <label
+              class="focus-within:focus-ring inline-flex min-h-11 cursor-pointer items-center
+                     rounded-md bg-accent px-4 text-sm font-medium text-on-accent
+                     hover:bg-accent-strong"
+            >
+              {uploading ? 'Uploading…' : 'Upload cards'}
+              <input
+                class="sr-only"
+                type="file"
+                multiple
+                accept="image/*"
+                disabled={uploading}
+                onchange={(event) => {
+                  const input = event.currentTarget;
+                  void uploadCards(input.files).finally(() => (input.value = ''));
+                }}
+              />
+            </label>
+            <Button
+              variant="secondary"
+              onclick={() => (picking = picking === 'cards' ? null : 'cards')}
+            >
+              Move in from Assets
+            </Button>
+          </div>
         {/if}
       </div>
 
@@ -391,8 +464,7 @@
         <FilePicker
           {projectId}
           multiple
-          taken={cards.map((card) => card.file_id)}
-          onpick={addCards}
+          onpick={(chosen) => void moveIn(chosen)}
           oncancel={() => (picking = null)}
         />
       {/if}
@@ -458,13 +530,8 @@
                   >
                     ↓
                   </Button>
-                  <Button
-                    variant="ghost"
-                    onclick={() =>
-                      saveCards(cards.filter((entry) => entry.file_id !== card.file_id))}
-                  >
-                    Remove
-                  </Button>
+                  <Button variant="ghost" onclick={() => void moveOut(card)}>To Assets</Button>
+                  <Button variant="ghost" onclick={() => void removeCard(card)}>Delete</Button>
                 </div>
               {/if}
             </li>

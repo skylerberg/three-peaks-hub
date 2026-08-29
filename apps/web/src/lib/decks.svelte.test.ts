@@ -14,6 +14,7 @@ function deck(overrides: Record<string, unknown> = {}) {
     card_width_mm: 63,
     card_height_mm: 88,
     back_file_id: null,
+    deleted_at: null,
     created_by: 'someone',
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
@@ -32,6 +33,9 @@ function card(fileId: string, quantity: number, position: number) {
       id: fileId,
       project_id: PROJECT,
       folder_id: null,
+      deck_id: DECK,
+      component_id: null,
+      component_role: null,
       filename: `${fileId}.png`,
       content_type: 'image/png',
       byte_size: 10,
@@ -213,6 +217,26 @@ describe('DeckStore', () => {
       decks.applyDeckUpdate(deck({ name: 'Renamed', updated_at: '2026-02-01T00:00:00.000Z' }), []);
 
       expect(decks.decks[0].name).toBe('Renamed');
+    });
+
+    // Deleting a deck is soft now, so it comes back through an update rather
+    // than a create -- and a tab sitting on the list would otherwise have to
+    // reload to see it.
+    it('puts a restored deck back in the listing it had left', async () => {
+      fetchMock.mockImplementationOnce(async () => jsonResponse(200, { decks: [] }));
+      await decks.loadList(PROJECT);
+      expect(decks.decks).toHaveLength(0);
+
+      decks.applyDeckUpdate(deck({ updated_at: '2026-02-01T00:00:00.000Z' }), []);
+      expect(decks.decks.map((row) => row.id)).toEqual([DECK]);
+    });
+
+    it('leaves a deck it has never seen out while that deck is deleted', async () => {
+      fetchMock.mockImplementationOnce(async () => jsonResponse(200, { decks: [] }));
+      await decks.loadList(PROJECT);
+
+      decks.applyDeckUpdate(deck({ deleted_at: '2026-02-01T00:00:00.000Z' }), []);
+      expect(decks.decks).toHaveLength(0);
     });
 
     it('ignores an event for a deck that is not the one open', async () => {

@@ -1,35 +1,23 @@
 import type { components } from '@three-peaks/shared/api';
-import {
-  DEFAULT_CARD_SETTINGS,
-  defaultSettingsFor,
-  type ModelKind,
-  type ModelSettings,
-} from '@three-peaks/shared';
+import { DEFAULT_CARD_SETTINGS, type ModelSettings } from '@three-peaks/shared';
 import { ApiError, api, assertOk } from '../api/client.ts';
+import { SAVE_DELAY_MS } from './autosave.ts';
 
 type File = components['schemas']['File'];
-
-// Long enough that dragging a slider is one request rather than sixty, short
-// enough that letting go and closing the tab still saves.
-const SAVE_DELAY_MS = 600;
 
 class ModelStore {
   file = $state<File | null>(null);
   settings = $state<ModelSettings>({ ...DEFAULT_CARD_SETTINGS });
   loading = $state(false);
   saving = $state(false);
-  // Remembered per kind, so switching to wood and back does not reset a card
-  // that was already dialled in.
-  #remembered = new Map<ModelKind, ModelSettings>();
   #timer: ReturnType<typeof setTimeout> | null = null;
 
   // Two loads are routinely in flight at once when a screen opens and a
   // realtime event lands. Only the newest may assign.
   #generation = 0;
 
-  // Settings saved elsewhere. The file row is untouched by this event because
-  // the image did not change, and #remembered is left alone: it holds what this
-  // person dialled in for the other kind, which is theirs and not the row's.
+  // Settings saved elsewhere. The file row is untouched by this event, because
+  // the image itself did not change.
   applySettings(settings: ModelSettings): void {
     this.settings = settings;
   }
@@ -48,8 +36,6 @@ class ModelStore {
 
       if (generation !== this.#generation) return;
       this.file = file;
-      this.#remembered.clear();
-      this.#remembered.set(settings.kind, settings);
       this.settings = settings;
     } finally {
       if (generation === this.#generation) this.loading = false;
@@ -72,13 +58,6 @@ class ModelStore {
 
   update(patch: Partial<ModelSettings>): void {
     this.settings = { ...this.settings, ...patch } as ModelSettings;
-    this.#remembered.set(this.settings.kind, this.settings);
-  }
-
-  setKind(kind: ModelKind): void {
-    if (this.settings.kind === kind) return;
-    this.settings = this.#remembered.get(kind) ?? defaultSettingsFor(kind);
-    this.#remembered.set(kind, this.settings);
   }
 
   // Debounced rather than fired per keystroke, and the pending timer is cleared
@@ -121,7 +100,6 @@ class ModelStore {
     this.#timer = null;
     this.file = null;
     this.settings = { ...DEFAULT_CARD_SETTINGS };
-    this.#remembered.clear();
     this.loading = false;
     this.saving = false;
   }
