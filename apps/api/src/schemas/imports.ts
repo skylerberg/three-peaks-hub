@@ -1,5 +1,11 @@
 import { type } from 'arktype';
-import { IMPORT_SOURCE_KINDS, IMPORT_TITLE_MAX_LENGTH, MAX_DECK_CARDS } from '@three-peaks/shared';
+import {
+  IMPORT_MATCHED_BY,
+  IMPORT_PAGE_ID_MAX_LENGTH,
+  IMPORT_SOURCE_KINDS,
+  IMPORT_TITLE_MAX_LENGTH,
+  MAX_DECK_CARDS,
+} from '@three-peaks/shared';
 import { optionalText, stringWithLength, uuid } from './common.ts';
 
 // Enumerated from the shared list rather than left a bare string, so widening
@@ -7,6 +13,10 @@ import { optionalText, stringWithLength, uuid } from './common.ts';
 // is the only place a consumer would otherwise meet a value it has no branch
 // for.
 const sourceKind = type.enumerated(...IMPORT_SOURCE_KINDS);
+
+// Enumerated for the same reason, and it earns it twice over: adding a tier is
+// exactly the change a client renders a blank cell for.
+const matchedBy = type.enumerated(...IMPORT_MATCHED_BY).or('null');
 
 export const deckImportSchema = type({
   id: 'string',
@@ -50,7 +60,7 @@ export const importRunListSchema = type({
 export const importRunCardSchema = type({
   page_number: 'number | null',
   outcome: 'string',
-  matched_by: 'string | null',
+  matched_by: matchedBy,
   restored: 'boolean',
   name: 'string',
   file_id: 'string | null',
@@ -100,7 +110,7 @@ export const importRunDeckSchema = type({
 export const importPageResultSchema = type({
   page_number: 'number',
   outcome: 'string',
-  matched_by: 'string | null',
+  matched_by: matchedBy,
   restored: 'boolean',
   // True when this page had already landed and the answer was read back off
   // its ledger row rather than worked out a second time.
@@ -123,9 +133,16 @@ const importTitle = stringWithLength(1, IMPORT_TITLE_MAX_LENGTH);
 // The whole export, before any of it is uploaded. Page numbers have to be
 // 1..n exactly once each: the run's page count is the length of this list, and
 // finishing checks that count rather than enumerating what landed.
+// A page id the source has of its own. Absent for a ZIP, which knows only what
+// its entry names say; present for the Canva app, which read the design. It is
+// an opaque string from another system, so it is bounded and screened for
+// control characters and otherwise taken exactly as given.
+const sourcePageId = stringWithLength(1, IMPORT_PAGE_ID_MAX_LENGTH);
+
 export const importRunPageInputSchema = type({
   page_number: `1 <= number.integer <= ${MAX_DECK_CARDS}`,
   'title?': importTitle,
+  'page_id?': sourcePageId,
 });
 
 export const startImportRunRequestSchema = type({
@@ -143,7 +160,7 @@ export const importPlanPageSchema = type({
   page_number: 'number',
   title: 'string | null',
   action: "'add' | 'update'",
-  matched_by: 'string | null',
+  matched_by: matchedBy,
   // The card this page matched, as it is named right now, and null for a page
   // the plan calls new. What the file will be called afterwards is the page's
   // own title, which the caller already has.

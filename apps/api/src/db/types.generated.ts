@@ -107,6 +107,7 @@ export interface DeckImportCard {
   identity_key: string;
   import_id: string;
   page_number: number;
+  source_page_id: string | null;
 }
 
 export interface File {
@@ -188,6 +189,7 @@ export interface ImportRunPage {
   matched_by: string | null;
   page_number: number;
   run_id: string;
+  source_page_id: string | null;
 }
 
 export interface PersonalAccessToken {

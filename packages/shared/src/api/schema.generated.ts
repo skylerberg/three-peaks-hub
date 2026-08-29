@@ -1344,7 +1344,7 @@ export interface components {
     ImportPageResult: {
       file_id: string | null;
       file_version_number: number | null;
-      matched_by: string | null;
+      matched_by: 'identity' | 'page_id' | 'page_number' | null;
       name: string;
       outcome: string;
       page_number: number;
@@ -1404,7 +1404,7 @@ export interface components {
       cards: {
         file_id: string | null;
         file_version_number: number | null;
-        matched_by: string | null;
+        matched_by: 'identity' | 'page_id' | 'page_number' | null;
         name: string;
         outcome: string;
         page_number: number | null;
@@ -1509,7 +1509,7 @@ export interface components {
         pages: {
           /** @enum {unknown} */
           action: 'add' | 'update';
-          matched_by: string | null;
+          matched_by: 'identity' | 'page_id' | 'page_number' | null;
           name: string | null;
           page_number: number;
           title: string | null;
@@ -5354,6 +5354,7 @@ export interface operations {
         'application/json': {
           pages: {
             page_number: number;
+            page_id?: string;
             title?: string;
           }[];
           id?: components['schemas']['Uuid'];

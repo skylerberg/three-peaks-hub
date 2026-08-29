@@ -485,11 +485,25 @@ freshly published package anyway.
   directory.** The local header is consulted for one thing only, where the data
   begins: the two records disagree about how long the extra field is, and macOS
   `ditto` leaves the sizes to a data descriptor it never writes into the header.
+- **A page is matched on three tiers, strongest first**: the page's own id, then
+  its title, then its number. `planPages` runs them as three passes rather than
+  one interleaved walk, because a weaker claim walked earlier would take the card
+  a later page names outright. The plan says per row which tier caught it.
+- **The page id is a column, not a fourth prefix on `identity_key`.** The two
+  answer different questions and a card wants both: an id survives a rename and a
+  reorder, a title survives a design being copied, which gives every page in it a
+  new id. Folded into one column, adopting the id would throw the title away.
+  `deck_import_card.source_page_id` is written by finishing, coalesced so a ZIP
+  run — which knows no ids — cannot strip the ones an app run wrote.
+- **Only `identity_key` is parked before it is rewritten.** A title moves between
+  cards, so `applyPlannedIdentities` needs its two statements; a page id cannot,
+  because the tier matching on it runs first and takes whatever card already
+  holds it, leaving no other row wanting that id.
 - **Page numbers are reassigned before the manifest goes up.** A deleted Canva
   page leaves a gap, and the run refuses anything but a contiguous list. The cost
   lands on untitled pages, which are identified by number: one after the gap
-  moves onto the card the page before it made. A titled page is unaffected, and
-  the plan says per row which of the two matched it.
+  moves onto the card the page before it made. A titled page is unaffected — and
+  a page carrying its own id is unaffected by either.
 - **The plan names the cards it is about to remove**: `removed` is
   `{ file_id, name }[]` rather than a count, and each page carries the name of
   the card it matched. Tombstoning artwork is the destructive half of a

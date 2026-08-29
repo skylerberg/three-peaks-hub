@@ -105,6 +105,19 @@ describe('What one import changed', () => {
     expect(headings[1]).toBe('Added (1)');
   });
 
+  it('names the tier each card was matched on, the strongest included', async () => {
+    cards = [
+      card({ name: 'Ace of coins', matched_by: 'page_id' }),
+      card({ name: 'Two of cups', file_id: FILE_B, matched_by: 'identity' }),
+      card({ name: 'Three of swords', file_id: FILE_C, matched_by: 'page_number' }),
+    ];
+    open();
+
+    await waitFor(() => expect(screen.getByText('matched by Canva page')).toBeInTheDocument());
+    expect(screen.getByText('matched by page name')).toBeInTheDocument();
+    expect(screen.getByText('matched by page number')).toBeInTheDocument();
+  });
+
   it('collapses unchanged rows behind a summary', async () => {
     cards = [
       card({ outcome: 'unchanged', name: 'Two of cups', file_id: FILE_B }),

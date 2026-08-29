@@ -23,6 +23,9 @@ const poker = cardPreset('poker')!;
 interface Page {
   title?: string | null;
   bytes: Buffer;
+  // What the source calls the page. Absent is a ZIP, which has only its entry
+  // names; present is the Canva app, which read the design itself.
+  pageId?: string;
 }
 
 interface PageResult {
@@ -163,9 +166,11 @@ describe('deck imports', () => {
       page_count: pageCount,
       pages: Array.from({ length: pageCount }, (_, index) => {
         const title = pages[index]?.title;
+        const pageId = pages[index]?.pageId;
         return {
           page_number: index + 1,
           ...(title === undefined || title === null ? {} : { title }),
+          ...(pageId === undefined ? {} : { page_id: pageId }),
         };
       }),
     });
@@ -1271,6 +1276,192 @@ describe('deck imports', () => {
 
       expect((await runDetailRes(deckId, first.run.id, viewer)).status).toBe(200);
       expect((await runDetailRes(deckId, first.run.id, stranger)).status).toBe(404);
+    });
+  });
+
+  describe('a source that names its own pages', () => {
+    // Opaque, and deliberately not sorted, spelled or lengthed like anything
+    // this repo generates: a page id is another system's string and nothing
+    // here parses one.
+    const P1 = 'MAGtjPqGmnQ';
+    const P2 = 'MAFxKk2p0lE';
+    const P3 = 'MAEwYt7RbcU';
+
+    const matches = (pages: Map<number, PageResult>) =>
+      [...pages.entries()].sort(([a], [b]) => a - b).map(([, result]) => result.matched_by);
+
+    it('adopts a deck built from ZIPs, and matches on the id from then on', async () => {
+      const { deckId } = await scenario('canva-adoption');
+
+      const zip = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+
+      // The first export that knows its page ids meets cards keyed on titles,
+      // so it matches on those -- and tombstones nothing, which is the whole
+      // point of the fallback.
+      const adopting = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      expect(matches(adopting.pages)).toEqual(['identity', 'identity']);
+      expect(adopting.run.counts).toMatchObject({ added: 0, removed: 0, unchanged: 2 });
+      expect(adopting.pages.get(1)!.file_id).toBe(zip.pages.get(1)!.file_id);
+
+      // Finishing wrote the ids onto those cards, so the next run reaches them
+      // by the strongest tier there is.
+      const settled = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      expect(matches(settled.pages)).toEqual(['page_id', 'page_id']);
+      expect(settled.run.counts).toMatchObject({ added: 0, removed: 0 });
+      expect(settled.pages.get(1)!.file_id).toBe(zip.pages.get(1)!.file_id);
+    });
+
+    it('keeps every card through a rename and a reorder at once', async () => {
+      const { deckId } = await scenario('canva-rename-reorder');
+
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+        { title: 'Gamma', bytes: png('gamma'), pageId: P3 },
+      ]);
+      // Adopted on the run after the one that created them, exactly as above.
+      await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+        { title: 'Gamma', bytes: png('gamma'), pageId: P3 },
+      ]);
+
+      // Every title is new and every page has moved. Nothing but the id could
+      // place these: matching by title finds nothing, and matching by number
+      // would put each card's artwork on its neighbour.
+      const shuffled = await importPages(deckId, [
+        { title: 'Third', bytes: png('gamma'), pageId: P3 },
+        { title: 'First', bytes: png('alpha'), pageId: P1 },
+        { title: 'Second', bytes: png('beta'), pageId: P2 },
+      ]);
+
+      expect(matches(shuffled.pages)).toEqual(['page_id', 'page_id', 'page_id']);
+      expect(shuffled.run.counts).toMatchObject({ added: 0, removed: 0 });
+      expect(shuffled.pages.get(1)!.file_id).toBe(first.pages.get(3)!.file_id);
+      expect(shuffled.pages.get(2)!.file_id).toBe(first.pages.get(1)!.file_id);
+      expect(shuffled.pages.get(3)!.file_id).toBe(first.pages.get(2)!.file_id);
+    });
+
+    it('places untitled pages through a reorder, which their numbers could not', async () => {
+      const { deckId } = await scenario('canva-untitled-reorder');
+
+      const first = await importPages(deckId, [
+        { bytes: png('one'), pageId: P1 },
+        { bytes: png('two'), pageId: P2 },
+      ]);
+      await importPages(deckId, [
+        { bytes: png('one'), pageId: P1 },
+        { bytes: png('two'), pageId: P2 },
+      ]);
+
+      const swapped = await importPages(deckId, [
+        { bytes: png('two'), pageId: P2 },
+        { bytes: png('one'), pageId: P1 },
+      ]);
+
+      expect(matches(swapped.pages)).toEqual(['page_id', 'page_id']);
+      expect(swapped.run.counts).toMatchObject({ added: 0, removed: 0, unchanged: 2 });
+      expect(swapped.pages.get(1)!.file_id).toBe(first.pages.get(2)!.file_id);
+      expect(swapped.pages.get(2)!.file_id).toBe(first.pages.get(1)!.file_id);
+    });
+
+    it('falls back to titles for a design somebody copied', async () => {
+      const { deckId } = await scenario('canva-copied-design');
+
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+
+      // A copy in Canva is a new design, and every page in it is a new page.
+      // The titles came along, and they are what keeps the deck.
+      const copied = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: 'MAHcopy0001' },
+        { title: 'Beta', bytes: png('beta'), pageId: 'MAHcopy0002' },
+      ]);
+
+      expect(matches(copied.pages)).toEqual(['identity', 'identity']);
+      expect(copied.run.counts).toMatchObject({ added: 0, removed: 0 });
+      expect(copied.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
+    });
+
+    it('keeps the ids through a ZIP re-import, so the app still places the deck', async () => {
+      const { deckId } = await scenario('canva-then-zip');
+
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+
+      // A ZIP knows no page ids, and must not take away the ones these cards
+      // already carry -- clearing them would leave the next app import matching
+      // on titles again, which is the tier this one exists to get above.
+      const zip = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha') },
+        { title: 'Beta', bytes: png('beta') },
+      ]);
+      expect(matches(zip.pages)).toEqual(['identity', 'identity']);
+
+      const back = await importPages(deckId, [
+        { title: 'Renamed Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Renamed Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      expect(matches(back.pages)).toEqual(['page_id', 'page_id']);
+      expect(back.run.counts).toMatchObject({ added: 0, removed: 0 });
+      expect(back.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
+    });
+
+    it('refuses a manifest that gives two pages one id', async () => {
+      const { deckId } = await scenario('canva-duplicate-ids');
+      const res = await startRun(deckId, 2, owner, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P1 },
+      ]);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatch(/page id/iu);
+    });
+
+    it('lets a page id outrank a title another page holds', async () => {
+      const { deckId } = await scenario('canva-id-outranks-title');
+
+      const first = await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+      await importPages(deckId, [
+        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
+        { title: 'Beta', bytes: png('beta'), pageId: P2 },
+      ]);
+
+      // The two titles have been swapped between the pages. Ids settle first,
+      // so each card stays with the page it has always been, and the titles
+      // follow the artwork rather than dragging it.
+      const swapped = await importPages(deckId, [
+        { title: 'Beta', bytes: png('alpha'), pageId: P1 },
+        { title: 'Alpha', bytes: png('beta'), pageId: P2 },
+      ]);
+
+      expect(matches(swapped.pages)).toEqual(['page_id', 'page_id']);
+      expect(swapped.run.counts).toMatchObject({ added: 0, removed: 0 });
+      expect(swapped.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
+      expect(swapped.pages.get(2)!.file_id).toBe(first.pages.get(2)!.file_id);
     });
   });
 
