@@ -58,6 +58,9 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 try {
   migrate();
+  // Two steps: 0010 finishes what 0009 starts, and rehearsing one without the
+  // other would rehearse a state no environment ever sits in for long.
+  migrate('down');
   migrate('down');
   await client.connect();
 
@@ -138,7 +141,7 @@ try {
     'a deck card is owned by its deck',
     card.deck_id === '55555555-5555-4555-8555-555555555555'
   );
-  check('its folder is left alone for the previous release', card.folder_id === CARDS);
+  check('its folder is cleared, so it is in one place and not two', card.folder_id === null);
 
   const back = byId.get('a0000000-0000-4000-8000-000000000003');
   check(
@@ -176,6 +179,37 @@ try {
 
   const loose = byId.get('a0000000-0000-4000-8000-000000000005');
   check('an unowned file stays an asset', loose.deck_id === null && loose.component_id === null);
+  check('and keeps the folder it was in', loose.folder_id === MORE);
+
+  // 0010 deletes the dial-ins 0009 copied onto a component, and only those: the
+  // one on a file that turned out to be a card was never copied, so the card
+  // still has the settings somebody gave it.
+  const dialIns = (await after.query(`select source_file_id from component_model`)).rows;
+  check(
+    'the superseded dial-in is gone and the card’s own survives',
+    dialIns.length === 1 && dialIns[0].source_file_id === 'a0000000-0000-4000-8000-000000000006',
+    JSON.stringify(dialIns)
+  );
+
+  const twoHomes = await after
+    .query(`update file set folder_id = $1 where id = 'a0000000-0000-4000-8000-000000000001'`, [
+      CARDS,
+    ])
+    .then(() => null)
+    .catch((error: Error) => error);
+  check(
+    'a row claiming two homes is refused',
+    twoHomes !== null,
+    'the CHECK let a deck card keep a folder'
+  );
+
+  const dropped = (
+    await after.query(
+      `select column_name from information_schema.columns
+      where table_name = 'deck_import' and column_name = 'folder_id'`
+    )
+  ).rows;
+  check('the import row has no folder column left', dropped.length === 0);
 
   await after.end();
 } finally {

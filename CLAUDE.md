@@ -216,8 +216,9 @@ gave it.
 **Every file has exactly one home**, and it is one of three: a deck, which owns
 its cards and its back; a `component`, which owns its own source images; or the
 folder tree, which is what belongs to neither. `file.deck_id`,
-`file.component_id` and `file.folder_id` are the three columns, and a CHECK
-holds at most one owner. Assets is the owner-less case and is defined by it —
+`file.component_id` and `file.folder_id` are the three columns, and two CHECKs
+hold the rule: at most one owner, and no folder on a row that has one. Assets is
+the owner-less case and is defined by it —
 `unowned` in `apps/api/src/services/fileHome.ts` is the whole filter, and it is
 why a three-hundred-card deck is no longer three hundred rows of the explorer.
 
@@ -225,6 +226,14 @@ why a three-hundred-card deck is no longer three hundred rows of the explorer.
 folder is now about a home: what a name has to be unique within, what a tombstone
 above it hides, which listing shows it. `resolveHome` is the one place a request
 names a destination, and it answers 404 for one the caller cannot see.
+
+It took two migrations to get here, and the split is the rolling-deploy rule
+rather than a change of mind. 0009 gave every file an owner and deliberately
+left `file.folder_id` populated, `deck_import.folder_id` in place and the copied
+`component_model` rows alone, because the release it deployed beside read all
+three. 0010 cleared them once that release was gone.
+`pnpm --filter @three-peaks/api run verify:backfill` rehearses both against rows
+shaped like the ones a project held before either, on a scratch database.
 
 **A component is an owner; `component_model` is a property.** The `component`
 table is the thing a person creates and names — a wooden piece, a box, a board, a

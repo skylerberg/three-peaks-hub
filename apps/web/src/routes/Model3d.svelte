@@ -7,7 +7,7 @@
   import { models } from '../lib/model3d.svelte.ts';
   import type { ModelSources } from '../lib/model3d/index.ts';
   import { realtime } from '../lib/realtime.svelte.ts';
-  import { link } from '../lib/router.svelte.ts';
+  import { link, router } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
   import { assertUploadSize, readUploadResponse } from '../lib/upload.ts';
@@ -32,6 +32,10 @@
 
   const file = $derived(models.file);
   const settings = $derived(models.settings);
+  // This screen is one card of one deck. A file that is neither belongs to
+  // somebody else's screen, and dialling it in here would write settings no
+  // screen ever reads back.
+  const stranded = $derived(file !== null && file.deck_id === null && file.component_id === null);
   const canEdit = $derived(project?.role === 'editor');
   const backChoices = $derived(siblings.filter((sibling) => sibling.id !== fileId));
   const sources = $derived(artwork ? { artwork, back } : null);
@@ -47,6 +51,14 @@
           ? 'That image does not exist, or you do not have access to it.'
           : apiMessage(caught);
     });
+  });
+
+  // A component's artwork has a studio of its own, and this is the URL an old
+  // bookmark or a cached bundle points at. Sending it on beats showing a
+  // dial-in that saves into a row nothing reads.
+  $effect(() => {
+    const componentId = file?.component_id;
+    if (componentId) router.redirect(`/projects/${projectId}/components/${componentId}`);
   });
 
   $effect(() => {
@@ -189,6 +201,12 @@
     <a class="focus-ring rounded underline" href="/projects/{projectId}">Back to the project</a>
   {:else if models.loading || !file}
     <Spinner label="Loading image" />
+  {:else if stranded}
+    <p role="alert" class="rounded-md border border-edge p-4 text-sm">
+      {file.filename} is not a card in a deck. Move it into one to dial it in, or make a component out
+      of it.
+    </p>
+    <a class="focus-ring rounded underline" href="/projects/{projectId}/assets">Back to Assets</a>
   {:else if !isModelSource(file.content_type)}
     <p role="alert" class="rounded-md border border-edge p-4 text-sm">
       {file.filename} is a {file.content_type}. A 3D model can be made from
