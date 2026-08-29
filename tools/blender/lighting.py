@@ -11,6 +11,8 @@ the rig grabbable afterwards -- drag a light anywhere and it stays pointed at th
 subject, which is the first thing anyone does to a preset they nearly like.
 """
 
+import math
+
 import bpy
 from mathutils import Vector
 
@@ -35,6 +37,15 @@ _MIN_RADIUS = 0.015
 
 # How many frames across the range the subject is measured at.
 _BOUNDS_SAMPLES = 5
+
+# The least a lamp pulled out from behind a backdrop is left standing above the
+# subject, as a fraction of how far away it was: one brought forward onto the
+# table is a light in shot.
+_MIN_LIFT = 0.35
+
+# How far in front of the backdrop such a lamp stops, in subject radii. Flush
+# with it would light one patch of wall rather than the scene.
+_SWEEP_CLEARANCE = 0.5
 
 
 class _Lamp:
@@ -186,15 +197,52 @@ def _world(spec, preset):
     return world
 
 
-def _floor(spec, center, radius, floor_z, collection, engine):
+def _in_front_of(offset, limit, distance):
+    """A lamp brought out from behind the sweep, over the top of it instead.
+
+    A backdrop is a wall, and a lamp behind one lights the wall. The rim of the
+    standard rig sits well back, and the sweep the scene brought stands nearer
+    than that -- so it comes forward to the wall and rises by whatever keeps it
+    the distance from the subject it was placed at, which is what a photographer
+    does with a back light on a cyclorama and what leaves the exposure alone.
+    """
+    if offset.y <= limit:
+        return offset
+    remaining = distance * distance - offset.x * offset.x - limit * limit
+    height = math.sqrt(max(remaining, (distance * _MIN_LIFT) ** 2))
+    return Vector((offset.x, limit, math.copysign(height, offset.z or 1.0)))
+
+
+def _backdrop_limit(surface, center, radius):
+    """How far back a lamp may stand, or None where nothing stands in its way.
+
+    A table whose top is the whole of it has no wall to be behind, so its far
+    edge is not a limit on anything. Whether it rises is read off the object
+    rather than passed in: the tabletop is the z = 0 plane, so anything above
+    that is the sweep.
+    """
+    if surface is None:
+        return None
+    corners = [surface.matrix_world @ Vector(corner) for corner in surface.bound_box]
+    if max(corner.z for corner in corners) <= 1e-4:
+        return None
+    behind = max(corner.y for corner in corners)
+    return behind - center.y - max(radius * _SWEEP_CLEARANCE, 0.02)
+
+
+def _floor(spec, center, radius, floor_z, collection, engine, has_surface):
     """A shadow catcher under the subject, so it sits on something.
+
+    The stand-in for a table, and skipped where the scene brought a real one --
+    a catcher under a tabletop would take the shadow the table is there to
+    receive and hand it to a plane nobody can see or light.
 
     Only under Cycles, which is the engine carrying the flag, and only over an
     opaque film. A catcher on a transparent one writes its shadow into the alpha,
     and the plate that footage gets composited over is not there to be shadowed
     yet -- so all it would do is punch a dark patch through the gameplay behind.
     """
-    if engine != 'CYCLES' or spec.background == 'transparent':
+    if has_surface or engine != 'CYCLES' or spec.background == 'transparent':
         return None
     mesh = bpy.data.meshes.new('Floor')
     extent = max(radius * 24.0, 0.5)
@@ -216,15 +264,21 @@ def _floor(spec, center, radius, floor_z, collection, engine):
     return floor
 
 
-def apply(spec, subjects, collection, engine):
-    """Light `subjects`, putting the rig in `collection`."""
+def apply(spec, subjects, collection, engine, surface=None):
+    """Light `subjects`, putting the rig in `collection`.
+
+    `surface` is the table the scene brought, where it brought one: what it
+    stands on needs no shadow catcher, and what rises off the back of it is a
+    wall no lamp may end up behind.
+    """
     preset = spec.preset
     center, radius, floor_z = _bounds(subjects, bpy.context.scene)
     standoff = max(radius * _STANDOFF, 0.12)
     strength = max(spec.strength, 0.0)
 
     _world(spec, preset)
-    _floor(spec, center, radius, floor_z, collection, engine)
+    _floor(spec, center, radius, floor_z, collection, engine, surface is not None)
+    backdrop = _backdrop_limit(surface, center, radius)
 
     aim = bpy.data.objects.new('LightTarget', None)
     aim.empty_display_type = 'PLAIN_AXES'
@@ -237,7 +291,10 @@ def apply(spec, subjects, collection, engine):
         data.shape = 'SQUARE'
         data.size = max(radius * lamp.size, 0.02)
         data.color = lamp.color
-        position = center + lamp.offset * standoff
+        offset = lamp.offset * standoff
+        if backdrop is not None:
+            offset = _in_front_of(offset, backdrop, offset.length)
+        position = center + offset
         distance = max((position - center).length, 0.05)
         data.energy = _WATTS_AT_ONE_METRE * lamp.watts * strength * distance * distance
         light = bpy.data.objects.new(lamp.name, data)

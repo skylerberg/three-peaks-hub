@@ -5,6 +5,8 @@ import {
   DEFAULT_SCENE_CAMERA,
   DEFAULT_SCENE_LIGHTING,
   DEFAULT_SHOT_PARAMS,
+  DEFAULT_SURFACE_CHOICE,
+  DEFAULT_SURFACE_COLORS,
   LIBRARY_PIECES,
   LIBRARY_PIECE_LABELS,
   SCENE_FORMAT,
@@ -12,6 +14,7 @@ import {
   SCENE_TARGET,
   SHOT_KINDS,
   SHOT_LIMITS,
+  SURFACE_FINISHES,
   buildScene,
   defaultShot,
   frameForSeconds,
@@ -27,6 +30,8 @@ import {
   type SceneDocument,
   type SceneInstance,
   type Shot,
+  type SurfaceFinish,
+  type SurfaceSpec,
 } from './scenes.ts';
 
 function cardAsset(id: string): SceneAsset {
@@ -41,6 +46,17 @@ function cardInstance(id: string, assetId: string, group: string | null): SceneI
     group,
     position_mm: [0, 0, 0],
     rotation_deg: [0, 0, 0],
+  };
+}
+
+function table(): SurfaceSpec {
+  return {
+    finish: 'wood',
+    color: '#6b4a2f',
+    width_mm: 900,
+    depth_mm: 600,
+    thickness_mm: 18,
+    sweep_height_mm: 300,
   };
 }
 
@@ -263,6 +279,65 @@ describe('validateScene', () => {
     const scene = sampleScene();
     scene.lighting.background_color = 'red';
     expect(paths(scene)).toContain('lighting.background_color');
+  });
+
+  it('reports a table cut past what the importer will build', () => {
+    const scene = sampleScene();
+    scene.surface = { ...table(), width_mm: 90000 };
+    expect(paths(scene)).toContain('surface.width_mm');
+  });
+
+  it('reports a finish nothing knows how to make', () => {
+    const scene = sampleScene();
+    scene.surface = { ...table(), finish: 'marble' as SurfaceFinish };
+    expect(paths(scene)).toContain('surface.finish');
+  });
+
+  it('says nothing about a table that is not there', () => {
+    const scene = sampleScene();
+    scene.surface = null;
+    expect(paths(scene)).toEqual([]);
+  });
+});
+
+describe('the table', () => {
+  it('is absent unless the export asked for one', () => {
+    expect(sampleScene().surface).toBeNull();
+  });
+
+  it('is carried through as the export sized it', () => {
+    const scene = buildScene({
+      project_name: 'Villagers',
+      generated_at: '2026-08-27T10:00:00.000Z',
+      assets: [cardAsset('card-a')],
+      instances: [cardInstance('i1', 'card-a', null)],
+      shots: [],
+      surface: table(),
+    });
+    expect(scene.surface).toEqual(table());
+    expect(validateScene(scene)).toEqual([]);
+  });
+
+  it('is neither an asset nor an instance, so no shot can be aimed at it', () => {
+    const scene = buildScene({
+      project_name: 'Villagers',
+      generated_at: '2026-08-27T10:00:00.000Z',
+      assets: [cardAsset('card-a')],
+      instances: [cardInstance('i1', 'card-a', null)],
+      shots: [],
+      surface: table(),
+    });
+    expect(scene.assets).toHaveLength(1);
+    expect(scene.instances).toHaveLength(1);
+    expect(instancesForTarget(scene.instances, SCENE_TARGET)).toHaveLength(1);
+  });
+
+  it('starts from a finish that has a colour of its own', () => {
+    expect(SURFACE_FINISHES).toContain(DEFAULT_SURFACE_CHOICE.finish);
+    expect(DEFAULT_SURFACE_CHOICE.color).toBe(
+      DEFAULT_SURFACE_COLORS[DEFAULT_SURFACE_CHOICE.finish]
+    );
+    expect(DEFAULT_SURFACE_CHOICE.width_mm).toBeNull();
   });
 });
 

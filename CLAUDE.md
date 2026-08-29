@@ -594,7 +594,7 @@ What comes out is where the trailer shot starts, not where it finishes; the
 whole feature exists so the manual half is arranging, not rebuilding.
 
 The screen is a picker and stops there: tick decks and components, add library
-pieces, choose a shot template and a renderer, export. Components are picked by
+pieces, choose a shot template, what it all stands on and a renderer, export. Components are picked by
 name out of their sections rather than by browsing to the file underneath one,
 and a component still waiting for its artwork is not offered — a tick that
 cannot be built is only a failure deferred to Export. Every arrangement control
@@ -611,10 +611,10 @@ geometry, reached the way the studio reaches it — `apps/web/src/lib/scene/rend
 is the only module here that touches `three`, and only `await import()` reaches
 that, so ticking a component costs nothing until Export is pressed.
 
-**Nothing about a scene is stored.** No table, no route, no migration, and
-nothing in `apps/api` that knows the word: the exported bundle is the record,
-and it is a pure function of what was ticked, the settings each of those already
-has, and one shot template. Two exports of one selection
+**Nothing about a scene is stored.** No database table, no route, no migration,
+and nothing in `apps/api` that knows the word: the exported bundle is the
+record, and it is a pure function of what was ticked, the settings each of those
+already has, one shot template and one setting to stand it in. Two exports of one selection
 differ in `generated_at` and in nothing else, which is what lets a test compare
 two archives byte for byte.
 
@@ -661,6 +661,33 @@ else from its settings alone.
 cylinder are built by `pieces.py` from a name, a size and a colour, so they cost
 the bundle no bytes and stay editable as geometry rather than arriving as a
 mesh.
+
+**The table is scenery, and is the one thing in the document that is neither an
+asset nor an instance.** `surface` names a finish, a colour and its millimetres,
+and `tools/blender/stage.py` extrudes the profile — so it costs the bundle no
+bytes either. It is kept out of the instances for two reasons that both bite:
+a shot aimed at `scene` reaches every one of them, so a turntable would swing
+the table under the cards; and `lighting.py` sizes the entire rig on what it is
+handed, and a table is several times wider than anything standing on it, which
+would push every lamp out of the room. Its top face is z = 0 — the plane every
+piece already rests on — so a scene that gains one moves nothing that was in it.
+
+**The backdrop is the table, curved.** `sweep_height_mm` rises off the far edge
+through a fillet, one continuous surface, which is why nothing shows the corner
+behind a component. `surfaceFor` in `apps/web/src/lib/scene/layout.ts` sizes it,
+because that is the only end knowing both what was picked and where the template
+left the camera: a backdrop has to fill the frame at its own distance, which is
+further off than the subject and therefore wider than the subject's own span.
+Two consequences are worth knowing before touching it. An orbit is given a flat
+table, because the camera it circles on would otherwise pass behind the wall.
+And a rim lamp would stand behind that wall, so `lighting.py` brings one forward
+to it and lifts it by as much as holds its distance — which is where a back
+light belongs on a sweep, and leaves the exposure it was given alone.
+
+**Four finishes, because what tells a table from a coloured plane is how it
+takes a light.** They live in `materials.py` beside the profiles the imported
+components get, and only wood is given a grain: at the size of a tabletop the
+other three are flat to the eye, and noise on them reads as dirt.
 
 **A template frames its own camera**, through `frameCamera` in
 `apps/web/src/lib/scene/layout.ts`, because only the template knows whether its

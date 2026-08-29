@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_CARD_SETTINGS, SCENE_FILE_NAME, validateScene } from '@three-peaks/shared';
+import {
+  DEFAULT_CARD_SETTINGS,
+  DEFAULT_SURFACE_CHOICE,
+  SCENE_FILE_NAME,
+  SCENE_TARGET,
+  instancesForTarget,
+  validateScene,
+} from '@three-peaks/shared';
 import { readZip } from '../canva/zip.ts';
 import { buildSceneBundle, SceneExportError, type SceneBundleRequest } from './bundle.ts';
 import type { SceneSelection } from './assets.ts';
@@ -127,6 +134,66 @@ describe('buildSceneBundle', () => {
     await expect(
       buildSceneBundle(request({ selection: { files: [], decks: [], library: [] } }))
     ).rejects.toThrow(/Nothing is selected/);
+  });
+
+  it('stands the scene on a table nobody had to ask for', async () => {
+    const { document } = await buildSceneBundle(request());
+
+    expect(document.surface?.finish).toBe(DEFAULT_SURFACE_CHOICE.finish);
+    expect(document.surface?.sweep_height_mm).toBeGreaterThan(0);
+  });
+
+  it('leaves the table out of the assets and the instances', async () => {
+    const { document } = await buildSceneBundle(request());
+
+    // Scenery, not a piece: a shot aimed at the whole scene reaches every
+    // instance, and a turntable that turned the table would take the cards with
+    // it.
+    expect(document.assets.every((asset) => asset.label !== 'Table')).toBe(true);
+    expect(instancesForTarget(document.instances, SCENE_TARGET)).toHaveLength(
+      document.instances.length
+    );
+    expect(document.instances).toHaveLength(8);
+  });
+
+  it('exports onto nothing when the table is refused outright', async () => {
+    const { document } = await buildSceneBundle(request({ surface: null }));
+
+    expect(document.surface).toBeNull();
+  });
+
+  it('flattens the backdrop for a shot that circles the table', async () => {
+    // The camera goes round behind a sweep, so an orbit gets a plain table:
+    // passing through the backdrop is worse than not having one.
+    const orbit = await buildSceneBundle(request({ template: 'orbit' }));
+    const still = await buildSceneBundle(request({ template: 'turntable' }));
+
+    expect(orbit.document.surface?.sweep_height_mm).toBe(0);
+    expect(still.document.surface?.sweep_height_mm).toBeGreaterThan(0);
+  });
+
+  it('cuts the table to what the shots reach, not only to where the pieces stand', async () => {
+    // A parade files every instance past the camera along a line several times
+    // wider than the table they were standing on.
+    const parade = await buildSceneBundle(request({ template: 'parade' }));
+    const still = await buildSceneBundle(request({ template: 'turntable' }));
+
+    expect(parade.document.surface!.width_mm).toBeGreaterThan(still.document.surface!.width_mm);
+  });
+
+  it('takes the backdrop from the export rather than from the template', async () => {
+    const { document } = await buildSceneBundle(
+      request({
+        template: 'hero-reveal',
+        backdrop: { background: 'solid', background_color: '#223344' },
+      })
+    );
+
+    // The template still picks its own light rig; only what is behind the
+    // scene came from the person exporting it.
+    expect(document.lighting.background).toBe('solid');
+    expect(document.lighting.background_color).toBe('#223344');
+    expect(document.lighting.preset).toBe('dramatic');
   });
 
   it('refuses a document the importer would refuse, before it builds a single file', async () => {

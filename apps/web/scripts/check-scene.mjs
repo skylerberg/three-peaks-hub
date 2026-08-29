@@ -63,6 +63,9 @@ const COPIES = 6;
 const DICE = 2;
 const FPS = 24;
 const TEMPLATE = 'fan-out';
+// Not the default, so a table in the document can only have come from the
+// control on the screen.
+const FINISH = 'slate';
 
 // Deliberately not the defaults, so what the .glb measures can only have come
 // from the row the screen read back rather than from a constant.
@@ -422,6 +425,7 @@ async function run() {
     await browser.page.getByLabel('How many D6 die').press('Tab');
 
     await browser.page.getByLabel('Shot', { exact: true }).selectOption(TEMPLATE);
+    await browser.page.getByLabel('Table', { exact: true }).selectOption(FINISH);
     await browser.page.getByLabel('Frame rate value').fill(String(FPS));
     await browser.page.getByLabel('Frame rate value').press('Tab');
 
@@ -578,6 +582,28 @@ async function run() {
       }
       console.log(`  ..   unpacked into ${keep}`);
     }
+
+    // The table is the one thing in the document that is neither an asset nor an
+    // instance, and the archive is where that can actually be seen: it changes
+    // what the render stands on and costs the bundle no bytes doing it.
+    check(
+      'the table finish picked on the screen is the one it wrote',
+      document.surface?.finish === FINISH,
+      JSON.stringify(document.surface)
+    );
+    check(
+      'the table is scenery: no asset, no instance, no file in the archive',
+      document.assets.every((asset) => asset.label !== 'Table') &&
+        document.instances.every((row) => row.label !== 'Table') &&
+        entries.every((entry) => !entry.name.toLowerCase().includes('table')),
+      `${document.assets.length} assets, ${entries.length} entries`
+    );
+    check(
+      'the table is cut larger than the cards standing on it',
+      (document.surface?.width_mm ?? 0) > CARD_WIDTH_MM &&
+        (document.surface?.depth_mm ?? 0) > CARD_HEIGHT_MM,
+      `${document.surface?.width_mm} x ${document.surface?.depth_mm} mm`
+    );
 
     // The frame rate is the one render setting that changes the numbers rather
     // than the picture, because a keyframe is written at a frame.

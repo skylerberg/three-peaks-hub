@@ -87,10 +87,17 @@ def _build(args):
             frame = args.frame if args.frame is not None else built.scene.frame_start
             scene_builder.render_still(built, os.path.join(target, f'frame_{frame:04d}'), frame)
 
+    surface = document.surface
+    standing = (
+        'no table'
+        if surface is None
+        else f'a {surface.finish} table'
+        + (f' sweeping up {surface.sweep_height_mm:g} mm' if surface.sweep_height_mm > 0 else '')
+    )
     print(
         f'import_scene: built {len(document.instances)} instances from '
         f'{len(document.assets)} assets, {len(document.shots)} shots, frames '
-        f'{built.scene.frame_start}-{built.scene.frame_end}'
+        f'{built.scene.frame_start}-{built.scene.frame_end}, on {standing}'
     )
 
 

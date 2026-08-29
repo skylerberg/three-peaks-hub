@@ -178,6 +178,14 @@ json.dump(
             'background': 'gradient',
             'background_color': '#101418',
         },
+        'surface': {
+            'finish': 'wood',
+            'color': '#6b4a2f',
+            'width_mm': 900,
+            'depth_mm': 500,
+            'thickness_mm': 18,
+            'sweep_height_mm': 320,
+        },
         'render': {
             'engine': 'CYCLES',
             'resolution': [640, 360],
