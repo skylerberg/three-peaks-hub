@@ -1161,7 +1161,8 @@ export interface components {
       deck_id: string;
       id: string;
       open_run_id: string | null;
-      source_kind: string;
+      /** @enum {unknown} */
+      source_kind: 'canva' | 'zip';
       source_label: string | null;
       updated_at: string;
     };

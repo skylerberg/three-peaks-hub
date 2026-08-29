@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { IMPORT_TITLE_MAX_LENGTH, MAX_DECK_CARDS, cardPreset } from '@three-peaks/shared';
+import {
+  IMPORT_SOURCE_KINDS,
+  IMPORT_TITLE_MAX_LENGTH,
+  MAX_DECK_CARDS,
+  cardPreset,
+} from '@three-peaks/shared';
 import { db } from '../../src/db/index.ts';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
@@ -343,6 +348,29 @@ describe('deck imports', () => {
       // pause rather than the end of the deck's history.
       expect((await owner.api.post(`/api/decks/${deckId}/restore`)).status).toBe(200);
       expect((await startRun(deckId, 1)).status).toBe(201);
+    });
+
+    // The constraint, not the writer: nothing routes a source kind yet, and a
+    // typo in the widened CHECK would otherwise sit undiscovered until the
+    // Canva app tried to open a run.
+    it('accepts every source kind the shared list names, and no other', async () => {
+      const deckId = await makeDeck('source-kinds');
+
+      for (const kind of IMPORT_SOURCE_KINDS) {
+        await db
+          .insertInto('deck_import')
+          .values({ id: randomUUID(), deck_id: deckId, source_kind: kind })
+          .onConflict((oc) => oc.column('deck_id').doUpdateSet({ source_kind: kind }))
+          .execute();
+      }
+
+      await expect(
+        db
+          .updateTable('deck_import')
+          .set({ source_kind: 'figma' })
+          .where('deck_id', '=', deckId)
+          .execute()
+      ).rejects.toThrow(/deck_import_source_kind_known/u);
     });
   });
 

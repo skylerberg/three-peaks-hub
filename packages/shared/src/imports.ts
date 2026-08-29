@@ -3,7 +3,9 @@
 // read here so the browser and the API agree on what a page is called and which
 // card it is, rather than each folding a title its own way.
 
-export const IMPORT_SOURCE_KINDS = ['zip'] as const;
+// What an export came out of. 'zip' is a file somebody downloaded and dropped;
+// 'canva' is the Canva app pushing the design it is open on.
+export const IMPORT_SOURCE_KINDS = ['zip', 'canva'] as const;
 
 export const IMPORT_OUTCOMES = ['added', 'updated', 'unchanged', 'removed'] as const;
 
