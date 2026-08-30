@@ -20,6 +20,15 @@
     },
     "packages/shared": {
       "project": ["src/**/*.ts"]
+    },
+    "apps/canva": {
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": [
+        "@canva/app-scripts",
+        "@rspack/core",
+        "@swc/core",
+        "@swc/plugin-formatjs"
+      ]
     }
   }
 }

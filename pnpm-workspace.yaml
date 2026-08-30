@@ -47,8 +47,11 @@ allowBuilds:
   esbuild: true # downloads its platform binary
 
   unrs-resolver: true # eslint-plugin-import-x's resolver; prebuilt binary
+
+  # Canva's app toolchain compiles with swc. Native Rust binary, fetched by its
+  # own install script; without it @canva/app-scripts cannot build apps/canva.
+  '@swc/core': true
   '@scarf/scarf': false # telemetry; scarfSettings.enabled already neuters it
-  sharp: set this to true or false
 
 # Off, for one measured reason: under `CI` pnpm computes a different
 # `enableGlobalVirtualStore` default than the value an install without it

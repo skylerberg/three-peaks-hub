@@ -10,7 +10,10 @@
 # pnpm rewrites pnpm-lock.yaml on every dependency change in a shape prettier
 # disagrees with. Left out, adding one dependency fails format:check with
 # nothing in the repo able to fix it.
-files=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\.(ts|mjs|svelte|json|css|ya?ml)$')
+# tsx is here because apps/canva is React. `prettier --check .` covers the whole
+# tree, so a extension the hook does not format is one nothing can fix — which
+# is how the first .tsx file in the repo failed a gate it could not pass.
+files=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -E '\.(tsx?|mjs|svelte|json|css|ya?ml)$')
 [ -z "$files" ] && exit 0
 
 # Skip files carrying unstaged work, so the amend cannot swallow it.
