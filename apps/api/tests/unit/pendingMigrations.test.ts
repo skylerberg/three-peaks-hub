@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { pendingMigrations } from '../../src/db/migrate.ts';
@@ -10,6 +10,41 @@ const scratch = mkdtempSync(join(process.cwd(), 'scripts', 'tmp-migrations-'));
 
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
+});
+
+// Kysely orders migrations by filename and refuses one that sorts before a
+// migration the database has already run. Two branches numbering their
+// migrations the same is what produces that: the names differ, so git merges
+// them without a conflict, and CI migrates a database with nothing applied yet,
+// where all of them are pending and the order is whatever sorting says. Only a
+// database that has already run the later one refuses -- which in practice
+// means production, at deploy time, with the rollout behind it.
+describe('migration numbering', () => {
+  const numbered = readdirSync(join(process.cwd(), 'src', 'db', 'migrations'))
+    .filter((name) => name.endsWith('.ts'))
+    .map((name) => ({ name, order: Number(name.slice(0, 4)) }));
+
+  it('reads a number off every migration', () => {
+    expect(numbered.filter((entry) => !Number.isInteger(entry.order))).toEqual([]);
+  });
+
+  it('gives each migration a number no other one has', () => {
+    const seen = new Map<number, string[]>();
+    for (const entry of numbered) {
+      seen.set(entry.order, [...(seen.get(entry.order) ?? []), entry.name]);
+    }
+    const shared = [...seen.entries()].filter(([, names]) => names.length > 1);
+    expect(shared.map(([order, names]) => `${order}: ${names.join(', ')}`)).toEqual([]);
+  });
+
+  // Sorting by name and sorting by number have to agree, or a file whose name
+  // sorts differently from its number lands in a place the runner will not
+  // accept later.
+  it('sorts the same by name as by number', () => {
+    const byName = [...numbered].sort((a, b) => a.name.localeCompare(b.name));
+    const byNumber = [...numbered].sort((a, b) => a.order - b.order);
+    expect(byName.map((entry) => entry.name)).toEqual(byNumber.map((entry) => entry.name));
+  });
 });
 
 describe('pendingMigrations', () => {
