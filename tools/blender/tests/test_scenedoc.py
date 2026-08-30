@@ -108,6 +108,14 @@ def scene_dict() -> dict:
             'background': 'transparent',
             'background_color': '#101418',
         },
+        'surface': {
+            'finish': 'wood',
+            'color': '#6b4a2f',
+            'width_mm': 1600,
+            'depth_mm': 1200,
+            'thickness_mm': 18,
+            'sweep_height_mm': 500,
+        },
         'render': {
             'engine': 'CYCLES',
             'resolution': [1920, 1080],
@@ -132,6 +140,15 @@ class ParsingAWholeDocument(unittest.TestCase):
         self.assertEqual(scene.shots[0].spread_deg, 40.0)
         self.assertEqual(scene.camera.dof.focus_target, 'deck:villagers')
         self.assertEqual(scene.render.frame_range, (1, 301))
+        self.assertEqual(scene.surface.finish, 'wood')
+        self.assertEqual(scene.surface.sweep_height_mm, 500.0)
+
+    def test_a_document_with_no_table_stands_on_nothing(self) -> None:
+        # Every bundle written before there was a table to stand on says this,
+        # and so does one exported without one. Both mean the same scene.
+        data = scene_dict()
+        del data['surface']
+        self.assertIsNone(parse_scene(data).surface)
 
     def test_lengths_stay_in_millimetres(self) -> None:
         # The conversion belongs to whoever builds geometry. A parser that
@@ -277,6 +294,24 @@ class RefusingABadDocument(unittest.TestCase):
             data['camera']['dof']['focus_target'] = 'deck:absent'
 
         self.rejects(swap, 'camera.dof.focus_target')
+
+    def test_an_unknown_table_finish(self) -> None:
+        def swap(data: dict) -> None:
+            data['surface']['finish'] = 'marble'
+
+        self.rejects(swap, 'surface.finish', 'wood')
+
+    def test_a_table_cut_past_its_bound(self) -> None:
+        def widen(data: dict) -> None:
+            data['surface']['width_mm'] = 90000
+
+        self.rejects(widen, 'surface.width_mm')
+
+    def test_a_table_missing_a_field_it_needs(self) -> None:
+        def drop(data: dict) -> None:
+            del data['surface']['thickness_mm']
+
+        self.rejects(drop, 'surface.thickness_mm', 'is missing')
 
     def test_an_unknown_render_engine(self) -> None:
         def swap(data: dict) -> None:

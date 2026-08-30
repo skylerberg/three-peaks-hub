@@ -4,9 +4,13 @@
 
 import {
   CAMERA_LIMITS,
+  DEFAULT_SURFACE_THICKNESS_MM,
   SCENE_LIMITS,
+  SURFACE_LIMITS,
   type CameraSpec,
   type ModelKind,
+  type SurfaceChoice,
+  type SurfaceSpec,
   type Vec3,
 } from '@three-peaks/shared';
 
@@ -339,5 +343,119 @@ export function frameCamera(camera: CameraSpec, extent: Volume, aspect: number):
       target_mm.map((axis, index) => axis + direction[index] * framing.distance_mm) as Vec3
     ),
     dof: { ...camera.dof, f_stop: apertureFor(camera, framing) },
+  };
+}
+
+// --- the table ---------------------------------------------------------------
+
+// How much table there is around what stands on it, and the least it adds. The
+// multiple alone leaves a single card on a coaster; the border alone leaves a
+// dozen boards on a place mat.
+const SURFACE_SPREAD = 2.6;
+const SURFACE_BORDER_MM = 400;
+
+// A sweep is a different object from a table, and is sized like one: a
+// photographer's stands just behind the subject, because a wall across the room
+// is out of frame in every shot that looks down at all. So it takes the gap
+// rather than the spread, and never less than this.
+const SWEEP_GAP = 0.75;
+const MIN_SWEEP_GAP_MM = 150;
+
+// A backdrop shorter than this beside its subject reads as a kerb at the back
+// of the table rather than as the wall behind it.
+const MIN_SWEEP_RISE = 3;
+const MIN_SWEEP_HEIGHT_MM = 150;
+
+// Slack on a backdrop that has to fill the frame: one cut to the arithmetic
+// shows its own edge the moment a turntable swings a corner.
+const SWEEP_SLACK = 1.12;
+
+// Whole millimetres, and rounded before it is held inside the bound. These are
+// numbers somebody reads in scene.json and types over; a table cut to a
+// ten-thousandth of a millimetre is noise in the one place this feature asks a
+// person to look.
+function wholeMm(value: number, [min, max]: readonly [number, number]): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * Where the frame's top edge and its side cross a plane at the back of the
+ * table, in the millimetres everything here is measured in.
+ *
+ * Exact rather than fitted at the subject's distance: a ray off the axis
+ * reaches a plane further along than the axis does, by exactly the amount its
+ * own direction was lengthened, so the two cancel and the spread at the plane
+ * is the tangent times the axial reach. halfFields holds FRAMING_MARGIN back to
+ * keep the subject clear of the edges; a backdrop has the opposite job, so the
+ * margin goes back in.
+ */
+function backdropReach(
+  camera: CameraSpec,
+  aspect: number,
+  wall_mm: number
+): { half_width_mm: number; top_mm: number } {
+  const forward = normalized(
+    camera.target_mm.map((axis, index) => axis - camera.position_mm[index]) as Vec3
+  );
+  const sideways = cross(forward, UP);
+  const right = normalized(Math.hypot(...sideways) < 1e-6 ? ([1, 0, 0] as Vec3) : sideways);
+  const up = cross(right, forward);
+  const field = halfFields(camera.focal_length_mm, aspect);
+  const reach = forward[1] > 1e-6 ? Math.max((wall_mm - camera.position_mm[1]) / forward[1], 0) : 0;
+  return {
+    half_width_mm: field.h * FRAMING_MARGIN * reach,
+    top_mm: camera.position_mm[2] + (forward[2] + field.v * FRAMING_MARGIN * up[2]) * reach,
+  };
+}
+
+/**
+ * The table under a selection, and the sweep behind it.
+ *
+ * Sized here rather than in the importer because only this end knows what was
+ * picked and where the template put the camera -- and the backdrop is the half
+ * that needs both. It has to fill the frame at its own distance, which is
+ * further off than the subject and therefore wider than anything the subject's
+ * own span would give; a wall cut to the arrangement shows the world either
+ * side of it.
+ */
+export function surfaceFor(
+  choice: SurfaceChoice,
+  camera: CameraSpec,
+  aspect: number,
+  covers: Volume
+): SurfaceSpec {
+  const spread = (span: number): number =>
+    Math.max(span * SURFACE_SPREAD, span + SURFACE_BORDER_MM);
+  const gap = Math.max(covers.depth_mm * SWEEP_GAP, MIN_SWEEP_GAP_MM);
+  const depth_mm = wholeMm(
+    choice.depth_mm ?? (choice.sweep ? covers.depth_mm + 2 * gap : spread(covers.depth_mm)),
+    SURFACE_LIMITS.depth_mm
+  );
+
+  const reach = backdropReach(camera, aspect, depth_mm / 2);
+  // Wide enough to fill the frame at the back edge whether or not it rises
+  // there: a table with its own sides in shot reads as a plinth.
+  const width_mm = wholeMm(
+    choice.width_mm ?? Math.max(spread(covers.width_mm), 2 * reach.half_width_mm * SWEEP_SLACK),
+    SURFACE_LIMITS.width_mm
+  );
+  const sweep_height_mm = choice.sweep
+    ? wholeMm(
+        Math.max(
+          reach.top_mm * SWEEP_SLACK,
+          covers.height_mm * MIN_SWEEP_RISE,
+          MIN_SWEEP_HEIGHT_MM
+        ),
+        SURFACE_LIMITS.sweep_height_mm
+      )
+    : 0;
+
+  return {
+    finish: choice.finish,
+    color: choice.color,
+    width_mm,
+    depth_mm,
+    thickness_mm: DEFAULT_SURFACE_THICKNESS_MM,
+    sweep_height_mm,
   };
 }

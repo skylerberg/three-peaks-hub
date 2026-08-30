@@ -7,11 +7,15 @@ import {
   DEFAULT_SCENE_RENDER,
   SCENE_FILE_NAME,
   validateScene,
+  DEFAULT_SURFACE_CHOICE,
+  type LightingSpec,
   type RenderSpec,
   type SceneDocument,
   type SceneIssue,
+  type SurfaceChoice,
 } from '@three-peaks/shared';
 import { planScene, type SceneSelection } from './assets.ts';
+import { surfaceFor } from './layout.ts';
 import { DEFAULT_SCENE_TEMPLATE_ID, sceneTemplate } from './templates.ts';
 import type { SceneAssetRenderer } from './render.ts';
 import { writeZip, ZIP_EPOCH, type ZipInput } from './zip.ts';
@@ -43,6 +47,12 @@ export interface SceneBundleRequest {
   selection: SceneSelection;
   template?: string;
   render?: Omit<RenderSpec, 'frame_range'>;
+  // What is behind the scene. A template picks the light rig, because that is
+  // part of its own look; what the shot is set on is the person's, and is
+  // folded over whatever the template asked for.
+  backdrop?: Pick<LightingSpec, 'background' | 'background_color'>;
+  // Left out for the default table; null for a scene standing on nothing.
+  surface?: SurfaceChoice | null;
   onProgress?: (progress: SceneBundleProgress) => void;
   // Injected by the tests. Left out, the real one is loaded below.
   renderAsset?: SceneAssetRenderer;
@@ -82,12 +92,29 @@ export async function buildSceneBundle(request: SceneBundleRequest): Promise<Sce
 
   const render = request.render ?? DEFAULT_SCENE_RENDER;
   const [frameWidth, frameHeight] = render.resolution;
+  const aspect = frameHeight > 0 ? frameWidth / frameHeight : 1;
   const shots = template.build({
     groups: plan.groups,
     instances: plan.instances,
     extent: plan.extent,
-    aspect: frameHeight > 0 ? frameWidth / frameHeight : 1,
+    aspect,
   });
+
+  // A sweep stands behind the subject, and an orbit takes the camera round
+  // behind it. So the one template that circles gets a flat table: a backdrop
+  // the camera passes through is worse than none.
+  const circles = shots.shots.some((shot) => shot.kind === 'orbit');
+  const choice = request.surface === undefined ? DEFAULT_SURFACE_CHOICE : request.surface;
+  const surface =
+    choice === null
+      ? null
+      : surfaceFor(
+          { ...choice, sweep: choice.sweep && !circles },
+          shots.camera,
+          aspect,
+          shots.covers ?? plan.extent
+        );
+
   const document = buildScene({
     project_name: request.project_name,
     generated_at: request.generated_at,
@@ -95,8 +122,9 @@ export async function buildSceneBundle(request: SceneBundleRequest): Promise<Sce
     instances: plan.instances,
     shots: shots.shots,
     camera: shots.camera,
-    lighting: shots.lighting,
+    lighting: { ...shots.lighting, ...request.backdrop },
     render,
+    surface,
   });
 
   // Before a single .glb is built. Exporting a deck is a minute of geometry and

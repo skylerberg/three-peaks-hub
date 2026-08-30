@@ -66,7 +66,8 @@ quality for time; `SMOKE_KEEP=DIR` keeps the image it rendered.
 ## What is in a bundle
 
 ```
-scene.json          the whole scene: assets, instances, shots, camera, lighting, render
+scene.json          the whole scene: assets, instances, shots, camera, lighting,
+                    the table it stands on, and render
 assets/*.glb        one file per distinct component, however many instances use it
 ```
 
@@ -87,17 +88,28 @@ A **shot** names a target — a group like `deck:villagers`, a single instance i
 or `scene` — and carries parameters rather than keyframes. `shots.py` expands
 those into the curves.
 
+The **surface** is the table, and it is neither an asset nor an instance: no
+shot can be aimed at it and the light rig is not sized on it. `stage.py` builds
+it from a finish, a colour and its millimetres, so it costs the bundle no bytes
+either. Its top face is `z = 0`, the plane every instance already rests on, and
+`sweep_height_mm` is how far it curves up into a seamless backdrop at the far
+edge — `0` for a plain slab. A document without one is a scene standing on
+nothing, which is what a transparent film for compositing wants.
+
 ## What the importer builds
 
 ```
 Components/
   deck:villagers/   one collection per group, so a shot's target can be
   Ungrouped/        hidden, soloed or moved as a unit
+Stage/
+  Table             the surface, and the backdrop it sweeps up into
 Rig/
   Camera            keyframed by an orbit or reveal; otherwise still
   CameraTarget      where the camera is aimed, and the default focus for DoF
   Key / Fill / Rim  area lights, aimed by Track To at LightTarget
-  Floor             a shadow catcher, on an opaque film under Cycles only
+  Floor             a shadow catcher, standing in for a table the scene has
+                    not got, on an opaque film under Cycles only
 ```
 
 Each instance object carries `instance_id`, `asset_id` and `group` as custom
@@ -122,7 +134,13 @@ the shape.
   keyframed the camera — an orbit writes its own aim, and its rotation keys win.
 - **Relight**: every lamp is aimed by a constraint, so drag one anywhere and it
   stays pointed at the subject. Wattages are set for the size of what was
-  imported; change `strength` in the document to move all of them together.
+  imported; change `strength` in the document to move all of them together. A
+  backdrop is a wall, so a lamp that would have stood behind one is brought
+  forward to it and raised by as much as keeps its distance — which is where a
+  back light belongs on a sweep anyway.
+- **Redress the set**: `Table` is an ordinary mesh with an ordinary material.
+  Swap the material for a scanned one, or delete the object outright for a
+  render on nothing.
 - **Roll the camera**: `rotation_euler[1]` is deliberately left unkeyed, so a
   dutch angle added by hand survives a re-import of the same shot.
 
@@ -137,10 +155,11 @@ save to a `.blend` before spending real time in one.
 | `scenedoc.py`     | reads and checks `scene.json`               |
 | `shots.py`        | shot parameters into keyframe tracks        |
 | `pieces.py`       | parametric geometry for the library pieces  |
+| `stage.py`        | the table's profile and the sweep behind it |
 | `scene.py`        | builds the Blender scene                    |
 | `lighting.py`     | the four lighting presets and the world     |
 | `materials.py`    | the production pass over imported materials |
 
-`scenedoc.py`, `shots.py` and `pieces.py` import no `bpy` and run under plain
-`python3`. `tests/` covers those three; run them with
+`scenedoc.py`, `shots.py`, `pieces.py` and `stage.py` import no `bpy` and run
+under plain `python3`. `tests/` covers those four; run them with
 `pnpm run check:scene-shots`.

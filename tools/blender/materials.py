@@ -19,6 +19,7 @@ Transmission input any more; asking for one raises KeyError.
 import bpy
 
 import pieces
+from scenedoc import SceneError
 
 # The four MODEL_KINDS, plus the library pieces, which have no imported material
 # and get one built from their own colour.
@@ -59,6 +60,45 @@ _LIBRARY_PROFILE = {
     'Coat Weight': 0.1,
     'Coat Roughness': 0.25,
 }
+
+# The four finishes a table may be cut in. What separates them is how each takes
+# a light rather than what colour it is: felt swallows a highlight, slate throws
+# one back, and paper is the seamless a product sits on.
+_SURFACE_PROFILES = {
+    'wood': {
+        'Roughness': 0.45,
+        'Metallic': 0.0,
+        'Specular IOR Level': 0.5,
+        'Coat Weight': 0.12,
+        'Coat Roughness': 0.35,
+    },
+    'felt': {
+        'Roughness': 0.94,
+        'Metallic': 0.0,
+        'Specular IOR Level': 0.25,
+        'Sheen Weight': 0.6,
+        'Sheen Roughness': 0.3,
+    },
+    'slate': {
+        'Roughness': 0.52,
+        'Metallic': 0.0,
+        'Specular IOR Level': 0.45,
+        'Coat Weight': 0.05,
+        'Coat Roughness': 0.5,
+    },
+    'paper': {
+        'Roughness': 0.86,
+        'Metallic': 0.0,
+        'Specular IOR Level': 0.35,
+        'Sheen Weight': 0.08,
+        'Sheen Roughness': 0.5,
+    },
+}
+
+# How dark the grain runs against the plank it is in. Wood is the one finish
+# given any: felt, slate and paper are flat to the eye at a table's size, and
+# noise on them reads as dirt rather than as material.
+_WOOD_GRAIN_SHADE = 0.55
 
 # A pip has to read against whatever colour the body was given, so it is picked
 # off the body rather than fixed: white pips vanish on a white die.
@@ -104,22 +144,28 @@ def _set(node, name, value):
     socket.default_value = value
 
 
-def _wood_grain(material, node, base_roughness):
+def _wood_grain(material, node, base_roughness, scale=14.0, stretch=26.0):
     """Drift roughness across the piece, so the whole face does not flash at once.
 
     The grain is stretched hard along one axis because a plank's is: an
     unstretched noise reads as damp stone. Object coordinates rather than UVs,
-    so a token with no unwrap still gets it.
+    so a token with no unwrap still gets it -- and because they are the object's
+    own metres, a table asks for a coarser scale than a token rather than
+    getting a token's grain blown up.
+
+    The noise node comes back, so a caller wanting the same grain in a second
+    channel hangs it off this one rather than building a second that drifts
+    against it.
     """
     tree = material.node_tree
     coord = tree.nodes.new('ShaderNodeTexCoord')
     coord.location = (-900, -320)
     mapping = tree.nodes.new('ShaderNodeMapping')
     mapping.location = (-720, -320)
-    mapping.inputs['Scale'].default_value = (1.0, 26.0, 1.0)
+    mapping.inputs['Scale'].default_value = (1.0, stretch, 1.0)
     noise = tree.nodes.new('ShaderNodeTexNoise')
     noise.location = (-540, -320)
-    noise.inputs['Scale'].default_value = 14.0
+    noise.inputs['Scale'].default_value = scale
     noise.inputs['Detail'].default_value = 5.0
     noise.inputs['Roughness'].default_value = 0.6
     ramp = tree.nodes.new('ShaderNodeMapRange')
@@ -134,6 +180,7 @@ def _wood_grain(material, node, base_roughness):
     tree.links.new(mapping.outputs['Vector'], noise.inputs['Vector'])
     tree.links.new(noise.outputs['Factor'], ramp.inputs[0])
     tree.links.new(ramp.outputs['Result'], node.inputs['Roughness'])
+    return noise
 
 
 def upgrade(meshes, component):
@@ -156,15 +203,49 @@ def upgrade(meshes, component):
                 _wood_grain(material, node, profile['Roughness'])
 
 
-def _library_material(name, rgb):
+def _solid_material(name, rgb, profile):
+    """One colour under one profile, for anything the importer built itself."""
     material = bpy.data.materials.new(name)
     material.use_nodes = True
     node = _principled(material)
     if node is None:
         return material
     _set(node, 'Base Color', (*rgb, 1.0))
-    for socket, value in _LIBRARY_PROFILE.items():
+    for socket, value in profile.items():
         _set(node, socket, value)
+    return material
+
+
+def _library_material(name, rgb):
+    return _solid_material(name, rgb, _LIBRARY_PROFILE)
+
+
+def surface_material(finish, color):
+    """What the table is made of.
+
+    The grain is the only part that is not a socket value: a tabletop is the
+    largest flat thing in the frame, and one the same shade corner to corner is
+    the one thing that reads as a rendered plane rather than as furniture.
+    """
+    profile = _SURFACE_PROFILES.get(finish)
+    if profile is None:
+        raise SceneError(f'no table finish named "{finish}"')
+    rgb = hex_to_linear(color)
+    material = _solid_material(f'Table {finish}', rgb, profile)
+    node = _principled(material)
+    if finish != 'wood' or node is None or node.inputs['Roughness'].is_linked:
+        return material
+
+    # A plank's own metres: the grain runs the width of the table rather than
+    # the width of a token, so the scale is coarse and the stretch is smaller.
+    noise = _wood_grain(material, node, profile['Roughness'], scale=3.2, stretch=16.0)
+    tree = material.node_tree
+    grain = tree.nodes.new('ShaderNodeValToRGB')
+    grain.location = (-340, -560)
+    grain.color_ramp.elements[0].color = (*(channel * _WOOD_GRAIN_SHADE for channel in rgb), 1.0)
+    grain.color_ramp.elements[1].color = (*rgb, 1.0)
+    tree.links.new(noise.outputs['Factor'], grain.inputs['Fac'])
+    tree.links.new(grain.outputs['Color'], node.inputs['Base Color'])
     return material
 
 

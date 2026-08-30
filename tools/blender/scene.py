@@ -23,6 +23,7 @@ import lighting
 import materials
 import pieces
 import shots
+import stage
 from scenedoc import MM, SceneError
 
 # Blender's own spelling for each engine the document is allowed to name. The
@@ -44,6 +45,7 @@ _VIEW_TRANSFORMS = ('Khronos PBR Neutral', 'Standard')
 _COMPONENTS = 'Components'
 _UNGROUPED = 'Ungrouped'
 _RIG = 'Rig'
+_STAGE = 'Stage'
 
 
 class Built:
@@ -110,24 +112,30 @@ def _import_glb(path):
     return parts
 
 
+def _mesh_data(name, source):
+    """One mesh datablock from the plain vertices and faces a builder handed back."""
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(
+        [list(vertex) for vertex in source.vertices],
+        [],
+        [list(face) for face in source.faces],
+    )
+    mesh.validate()
+    mesh.update()
+    # validate() may drop a degenerate face, which would slide every later flag
+    # onto the wrong polygon; a piece that lost one is better flat than wrongly
+    # creased.
+    if len(mesh.polygons) == len(source.smooth):
+        for polygon, smooth in zip(mesh.polygons, source.smooth):
+            polygon.use_smooth = smooth
+    return mesh
+
+
 def _library_parts(asset):
     palette = materials.library_materials(asset.label or asset.piece, asset.color)
     parts = []
     for source in pieces.build_piece(asset.piece, asset.size_mm):
-        mesh = bpy.data.meshes.new(f'{asset.id}.{source.name}')
-        mesh.from_pydata(
-            [list(vertex) for vertex in source.vertices],
-            [],
-            [list(face) for face in source.faces],
-        )
-        mesh.validate()
-        mesh.update()
-        # validate() may drop a degenerate face, which would slide every later
-        # flag onto the wrong polygon; a piece that lost one is better flat than
-        # wrongly creased.
-        if len(mesh.polygons) == len(source.smooth):
-            for polygon, smooth in zip(mesh.polygons, source.smooth):
-                polygon.use_smooth = smooth
+        mesh = _mesh_data(f'{asset.id}.{source.name}', source)
         mesh.materials.append(palette[source.material])
         parts.append((source.name, mesh, Matrix.Identity(4)))
     return parts
@@ -211,6 +219,23 @@ def _instances(document, protos, parent):
             groups[key] = _collection(key, parent)
         placed[instance.id] = _place(instance, proto, groups[key])
     return placed
+
+
+# --- the stage ---------------------------------------------------------------
+
+
+def _surface(spec, collection):
+    """The table, which is scenery rather than a piece.
+
+    It is not an instance and has no id, so no shot reaches it and the light rig
+    is not sized on it -- a table is several times wider than what stands on it,
+    and one measured into those bounds would push every lamp out of the room.
+    """
+    mesh = _mesh_data(stage.SURFACE_MESH_NAME, stage.build_surface(spec))
+    mesh.materials.append(materials.surface_material(spec.finish, spec.color))
+    table = bpy.data.objects.new(stage.SURFACE_MESH_NAME, mesh)
+    collection.objects.link(table)
+    return table
 
 
 # --- animation ---------------------------------------------------------------
@@ -393,13 +418,16 @@ def build(document, bundle_root, overrides=None):
 
     protos = _prototypes(document, bundle_root)
     placed = _instances(document, protos, _collection(_COMPONENTS))
+    table = None
+    if document.surface is not None:
+        table = _surface(document.surface, _collection(_STAGE))
 
     rig = _collection(_RIG)
     camera = _camera(document, placed, rig)
     _apply_plan(shots.plan_scene(document), placed, camera, document.render.fps)
 
     engine = _render_settings(scene, document, overrides or {})
-    lighting.apply(document.lighting, list(placed.values()), rig, engine)
+    lighting.apply(document.lighting, list(placed.values()), rig, engine, surface=table)
     return Built(scene, camera, placed)
 
 

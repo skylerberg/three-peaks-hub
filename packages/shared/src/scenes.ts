@@ -246,6 +246,73 @@ export interface RenderSpec {
   frame_range: [number, number];
 }
 
+// --- the surface -------------------------------------------------------------
+
+// What the components stand on. Four materials rather than a colour alone,
+// because what separates a table from a coloured plane is how it takes a light:
+// felt swallows a highlight the way slate throws one back.
+export const SURFACE_FINISHES = ['wood', 'felt', 'slate', 'paper'] as const;
+export type SurfaceFinish = (typeof SURFACE_FINISHES)[number];
+
+export const SURFACE_FINISH_LABELS: Record<SurfaceFinish, string> = {
+  wood: 'Wood',
+  felt: 'Felt',
+  slate: 'Slate',
+  paper: 'Paper',
+};
+
+// What each finish is usually cut in, so a table reads right before anyone
+// touches the colour -- the same reason DEFAULT_LIBRARY_SIZE_MM exists.
+export const DEFAULT_SURFACE_COLORS: Record<SurfaceFinish, string> = {
+  wood: '#6b4a2f',
+  felt: '#1f4d3a',
+  slate: '#3a3f45',
+  paper: '#e8e6e1',
+};
+
+export const DEFAULT_SURFACE_FINISH: SurfaceFinish = 'wood';
+
+// A tabletop's own thickness, seen only as the edge in a low shot.
+export const DEFAULT_SURFACE_THICKNESS_MM = 18;
+
+/**
+ * The table, and the seamless sweep that may rise off the back of it.
+ *
+ * It carries no position: its top is z = 0 and it is centred on the origin,
+ * which is where the arrangement is centred and the plane every piece already
+ * rests on. So adding one moves nothing that was already in the scene.
+ *
+ * It is deliberately neither an asset nor an instance. A shot aimed at
+ * SCENE_TARGET reaches every instance, and a turntable that turned the table
+ * under the components is not a shot anybody wants; the light rig is sized off
+ * the instances too, and a table is several times wider than what stands on it.
+ */
+/**
+ * What a person has chosen before anything has been sized: the look is theirs,
+ * and the millimetres are only theirs if they typed some.
+ *
+ * It is not the spec. Sizing a table needs the arrangement and the camera the
+ * template settled on, neither of which exists this side of an export.
+ */
+export interface SurfaceChoice {
+  finish: SurfaceFinish;
+  color: string;
+  sweep: boolean;
+  width_mm: number | null;
+  depth_mm: number | null;
+}
+
+export interface SurfaceSpec {
+  finish: SurfaceFinish;
+  color: string;
+  width_mm: number;
+  depth_mm: number;
+  thickness_mm: number;
+  // The rise at the far edge, curved into the tabletop the way a photographer's
+  // sweep is one continuous surface. 0 is a flat slab with a visible back edge.
+  sweep_height_mm: number;
+}
+
 // --- the document ------------------------------------------------------------
 
 export interface SceneDocument {
@@ -262,6 +329,9 @@ export interface SceneDocument {
   camera: CameraSpec;
   lighting: LightingSpec;
   render: RenderSpec;
+  // Null is a scene shot on nothing, which is what a transparent film over
+  // gameplay footage wants.
+  surface: SurfaceSpec | null;
 }
 
 // --- bounds ------------------------------------------------------------------
@@ -356,6 +426,16 @@ export const LIGHTING_LIMITS = {
   strength: [0, 20],
 } as const satisfies Record<string, readonly [number, number]>;
 
+// A table is centred on the origin, so half of each span has to stay inside
+// SCENE_LIMITS.position_mm -- and it is scenery rather than a piece, so it is
+// allowed to be far larger than anything standing on it.
+export const SURFACE_LIMITS = {
+  width_mm: [50, 20000],
+  depth_mm: [50, 20000],
+  thickness_mm: [1, 400],
+  sweep_height_mm: [0, 5000],
+} as const satisfies Record<string, readonly [number, number]>;
+
 export const RENDER_LIMITS = {
   resolution_px: [64, 7680],
   fps: [1, 120],
@@ -407,10 +487,23 @@ export const DEFAULT_SCENE_CAMERA: CameraSpec = {
 export const DEFAULT_SCENE_LIGHTING: LightingSpec = {
   preset: 'studio',
   strength: 1,
-  // Transparent by default because a trailer shot is composited over something
-  // else far more often than it is rendered onto a colour.
-  background: 'transparent',
+  // A backdrop by default, because the point of exporting a scene is to render
+  // it rather than to composite it: a promo shot wants a set, and a set is a
+  // table with something behind it. Transparent is one control away for the
+  // frames that do go over gameplay footage.
+  background: 'gradient',
   background_color: '#101418',
+};
+
+// A table by default, for the reason the backdrop is one: a scene is exported
+// to be rendered, and a render of a component standing on nothing is a picture
+// of a component rather than of a game.
+export const DEFAULT_SURFACE_CHOICE: SurfaceChoice = {
+  finish: DEFAULT_SURFACE_FINISH,
+  color: DEFAULT_SURFACE_COLORS[DEFAULT_SURFACE_FINISH],
+  sweep: true,
+  width_mm: null,
+  depth_mm: null,
 };
 
 export const DEFAULT_SCENE_RENDER: Omit<RenderSpec, 'frame_range'> = {
@@ -508,6 +601,7 @@ export interface SceneDraft {
   camera?: CameraSpec;
   lighting?: LightingSpec;
   render?: Omit<RenderSpec, 'frame_range'>;
+  surface?: SurfaceSpec | null;
 }
 
 // The one place a document is assembled, so frame_range is derived rather than
@@ -529,6 +623,7 @@ export function buildScene(draft: SceneDraft): SceneDocument {
       ...render,
       frame_range: sceneFrameRange(draft.shots, draft.instances, render.fps),
     },
+    surface: draft.surface ?? null,
   };
 }
 
@@ -653,6 +748,20 @@ function checkDeal(issues: SceneIssue[], shot: DealShot, at: string): void {
   }
 }
 
+function checkSurface(issues: SceneIssue[], surface: SurfaceSpec, at: string): void {
+  checkOneOf(issues, `${at}.finish`, surface.finish, SURFACE_FINISHES);
+  checkColor(issues, `${at}.color`, surface.color);
+  checkRange(issues, `${at}.width_mm`, surface.width_mm, SURFACE_LIMITS.width_mm);
+  checkRange(issues, `${at}.depth_mm`, surface.depth_mm, SURFACE_LIMITS.depth_mm);
+  checkRange(issues, `${at}.thickness_mm`, surface.thickness_mm, SURFACE_LIMITS.thickness_mm);
+  checkRange(
+    issues,
+    `${at}.sweep_height_mm`,
+    surface.sweep_height_mm,
+    SURFACE_LIMITS.sweep_height_mm
+  );
+}
+
 function targetExists(scene: SceneDocument, target: string): boolean {
   if (target === SCENE_TARGET) return true;
   return scene.instances.some((instance) => instance.id === target || instance.group === target);
@@ -748,6 +857,8 @@ export function validateScene(scene: SceneDocument): SceneIssue[] {
   checkRange(issues, 'lighting.strength', lighting.strength, LIGHTING_LIMITS.strength);
   checkOneOf(issues, 'lighting.background', lighting.background, SCENE_BACKGROUNDS);
   checkColor(issues, 'lighting.background_color', lighting.background_color);
+
+  if (scene.surface !== null) checkSurface(issues, scene.surface, 'surface');
 
   checkOneOf(issues, 'render.engine', render.engine, RENDER_ENGINES);
   checkRange(issues, 'render.resolution[0]', render.resolution[0], RENDER_LIMITS.resolution_px);

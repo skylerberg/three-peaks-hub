@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CAMERA_LIMITS, DEFAULT_SCENE_CAMERA, SCENE_LIMITS } from '@three-peaks/shared';
+import {
+  CAMERA_LIMITS,
+  DEFAULT_SCENE_CAMERA,
+  DEFAULT_SURFACE_CHOICE,
+  SCENE_LIMITS,
+  SURFACE_LIMITS,
+} from '@three-peaks/shared';
 import {
   blockOrigins,
   blocksExtent,
@@ -8,6 +14,7 @@ import {
   gridFootprint,
   gridOffsets,
   stackOffsets,
+  surfaceFor,
 } from './layout.ts';
 
 describe('stackOffsets', () => {
@@ -220,5 +227,130 @@ describe('frameCamera', () => {
     expect(framed.focal_length_mm).toBe(DEFAULT_SCENE_CAMERA.focal_length_mm);
     expect(framed.dof.enabled).toBe(DEFAULT_SCENE_CAMERA.dof.enabled);
     expect(framed.dof.focus_target).toBe(DEFAULT_SCENE_CAMERA.dof.focus_target);
+  });
+});
+
+describe('surfaceFor', () => {
+  const WIDE = 1920 / 1080;
+  const volume = (width_mm: number, depth_mm: number, height_mm = 0) => ({
+    width_mm,
+    depth_mm,
+    height_mm,
+  });
+  const card = volume(63, 88, 0.3);
+  const framed = (extent = card) => frameCamera(DEFAULT_SCENE_CAMERA, extent, WIDE);
+
+  // Where the frame stands at the plane the backdrop is on, worked out from the
+  // camera rather than from the sizing: the half-width it has to cover, and how
+  // high its top edge has run by then. Both are constant across the frame,
+  // because the camera has no roll and its right axis is level.
+  function frameAt(camera: ReturnType<typeof frameCamera>, wall_mm: number) {
+    const offset = camera.target_mm.map((axis, index) => axis - camera.position_mm[index]);
+    const length = Math.hypot(...offset);
+    const forward = offset.map((axis) => axis / length);
+    const up = [0, -forward[2], forward[1]];
+    const tan = 36 / (2 * camera.focal_length_mm);
+    const reach = (wall_mm - camera.position_mm[1]) / forward[1];
+    return {
+      half_width_mm: tan * reach,
+      top_mm: camera.position_mm[2] + (forward[2] + (tan / WIDE) * up[2]) * reach,
+    };
+  }
+
+  it('is bigger than what stands on it, in both directions', () => {
+    const surface = surfaceFor(DEFAULT_SURFACE_CHOICE, framed(), WIDE, card);
+
+    expect(surface.width_mm).toBeGreaterThan(card.width_mm);
+    expect(surface.depth_mm).toBeGreaterThan(card.depth_mm);
+    expect(surface.thickness_mm).toBeGreaterThan(0);
+  });
+
+  it('carries the finish and the colour it was handed', () => {
+    const surface = surfaceFor(
+      { ...DEFAULT_SURFACE_CHOICE, finish: 'felt', color: '#1f4d3a' },
+      framed(),
+      WIDE,
+      card
+    );
+
+    expect(surface.finish).toBe('felt');
+    expect(surface.color).toBe('#1f4d3a');
+  });
+
+  it('fills the frame where the backdrop stands, not merely where the cards do', () => {
+    // A long, narrow arrangement, which is the case that separates the two: the
+    // camera stands well back to hold its depth, so the frame at the backdrop
+    // is several times what the arrangement's own span would have given, and
+    // the frame is what has to win.
+    const strip = volume(60, 400, 0.3);
+    const camera = framed(strip);
+    const surface = surfaceFor(DEFAULT_SURFACE_CHOICE, camera, WIDE, strip);
+    const frame = frameAt(camera, surface.depth_mm / 2);
+
+    expect(surface.width_mm / 2).toBeGreaterThanOrEqual(frame.half_width_mm);
+    expect(surface.sweep_height_mm).toBeGreaterThanOrEqual(frame.top_mm);
+  });
+
+  it('widens with the distance the camera stands at, not only with the span', () => {
+    // Two arrangements the same width, one of them deep enough that the camera
+    // has to stand back for it. The frame at the backdrop is wider there, so
+    // the backdrop is too.
+    const strip = volume(60, 400, 0.3);
+    const stub = volume(60, 60, 0.3);
+
+    expect(surfaceFor(DEFAULT_SURFACE_CHOICE, framed(strip), WIDE, strip).width_mm).toBeGreaterThan(
+      surfaceFor(DEFAULT_SURFACE_CHOICE, framed(stub), WIDE, stub).width_mm
+    );
+  });
+
+  it('lies flat when no backdrop was asked for', () => {
+    const surface = surfaceFor({ ...DEFAULT_SURFACE_CHOICE, sweep: false }, framed(), WIDE, card);
+
+    expect(surface.sweep_height_mm).toBe(0);
+  });
+
+  it('stands the backdrop close behind the subject, and a plain table further out', () => {
+    const swept = surfaceFor(DEFAULT_SURFACE_CHOICE, framed(), WIDE, card);
+    const flat = surfaceFor({ ...DEFAULT_SURFACE_CHOICE, sweep: false }, framed(), WIDE, card);
+
+    // A wall across the room is out of frame in every shot that looks down at
+    // all, which is every shot here.
+    expect(swept.depth_mm).toBeLessThan(flat.depth_mm);
+  });
+
+  it('takes the millimetres somebody typed over the ones it worked out', () => {
+    const auto = surfaceFor(DEFAULT_SURFACE_CHOICE, framed(), WIDE, card);
+    const typed = surfaceFor(
+      { ...DEFAULT_SURFACE_CHOICE, width_mm: 1500, depth_mm: 1200 },
+      framed(),
+      WIDE,
+      card
+    );
+
+    expect(auto.width_mm).not.toBe(1500);
+    expect(typed.width_mm).toBe(1500);
+    expect(typed.depth_mm).toBe(1200);
+  });
+
+  it('holds a typed size inside what the importer will build', () => {
+    const surface = surfaceFor(
+      { ...DEFAULT_SURFACE_CHOICE, width_mm: 900000, depth_mm: 1 },
+      framed(),
+      WIDE,
+      card
+    );
+
+    expect(surface.width_mm).toBe(SURFACE_LIMITS.width_mm[1]);
+    expect(surface.depth_mm).toBe(SURFACE_LIMITS.depth_mm[0]);
+  });
+
+  it('grows with the selection rather than with the frame alone', () => {
+    const boards = volume(1200, 900, 40);
+    const small = surfaceFor(DEFAULT_SURFACE_CHOICE, framed(), WIDE, card);
+    const large = surfaceFor(DEFAULT_SURFACE_CHOICE, framed(boards), WIDE, boards);
+
+    expect(large.width_mm).toBeGreaterThan(small.width_mm);
+    expect(large.width_mm).toBeGreaterThan(boards.width_mm);
+    expect(large.depth_mm).toBeGreaterThan(boards.depth_mm);
   });
 });

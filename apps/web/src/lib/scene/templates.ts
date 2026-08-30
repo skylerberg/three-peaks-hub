@@ -46,6 +46,10 @@ interface SceneTemplateResult {
   shots: Shot[];
   camera: CameraSpec;
   lighting: LightingSpec;
+  // What the shots reach, where that is more than where the selection stands.
+  // The camera is framed on it here; the table is cut to it by the caller, so
+  // a shot that carries a piece past the edge of the table cannot happen.
+  covers?: Volume;
 }
 
 export interface SceneTemplate {
@@ -240,13 +244,15 @@ export const SCENE_TEMPLATES: readonly SceneTemplate[] = [
       // on. Framing on where they stand is what leaves the first and last
       // seconds of the pass outside the picture.
       const line = Math.max(1, context.instances.length) * shot.spacing_mm;
+      const covers: Volume = {
+        ...context.extent,
+        width_mm: Math.max(context.extent.width_mm, line),
+      };
       return {
         shots: sequenceShots([shot], context.instances),
-        camera: camera(context, [0, -500, 200], {
-          ...context.extent,
-          width_mm: Math.max(context.extent.width_mm, line),
-        }),
+        camera: camera(context, [0, -500, 200], covers),
         lighting: lighting('flat'),
+        covers,
       };
     },
   },

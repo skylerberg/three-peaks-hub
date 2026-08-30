@@ -1098,6 +1098,48 @@ export const guards = [
     runner: 'web',
   },
   {
+    // Everything in a scene rests on z = 0, and a table is the one thing built
+    // the other way up. Standing it on that plane is what every library piece
+    // does and is the natural slip -- and it buries the whole selection one
+    // tabletop deep.
+    name: 'the table hangs below the plane the pieces stand on',
+    package: 'blender',
+    file: 'stage.py',
+    find: '            [(-half, -thickness_m), (half, -thickness_m), (half, 0.0), (-half, 0.0)],',
+    replace: '            [(-half, 0.0), (half, 0.0), (half, thickness_m), (-half, thickness_m)],',
+    tests: ['tests/test_stage.py'],
+    testName: 'test_the_top_is_the_plane_the_pieces_already_rest_on',
+    runner: 'python',
+  },
+  {
+    // An orbit takes the camera round behind the subject, and a sweep is a
+    // wall. Leaving it standing is the version that reads fine until half the
+    // shot is a render of the back of a backdrop.
+    name: 'a shot that circles the table is given no backdrop to circle behind',
+    package: 'web',
+    file: 'src/lib/scene/bundle.ts',
+    find: "  const circles = shots.shots.some((shot) => shot.kind === 'orbit');",
+    replace: '  const circles = false;',
+    tests: ['src/lib/scene/bundle.test.ts'],
+    testName: 'flattens the backdrop for a shot that circles the table',
+    runner: 'web',
+  },
+  {
+    // The margin halfFields holds back is what keeps the subject clear of the
+    // frame edges; a backdrop has the opposite job. Sizing one through the
+    // same call without putting the margin back cuts it to the subject's
+    // frame, which is narrower than the real one by exactly that factor -- and
+    // the world shows either side of it.
+    name: 'a backdrop is cut to the whole frame, not to the subject-safe one',
+    package: 'web',
+    file: 'src/lib/scene/layout.ts',
+    find: '    half_width_mm: field.h * FRAMING_MARGIN * reach,',
+    replace: '    half_width_mm: field.h * reach,',
+    tests: ['src/lib/scene/layout.test.ts'],
+    testName: 'fills the frame where the backdrop stands, not merely where the cards do',
+    runner: 'web',
+  },
+  {
     // The one field in the central directory a reader cannot recompute. Every
     // other number in the record repeats one the local header already carries,
     // so a wrong offset is the single way to write an archive that looks

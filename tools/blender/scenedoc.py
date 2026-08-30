@@ -44,6 +44,7 @@ SCENE_TARGET = 'scene'
 
 LIGHTING_PRESETS = ('studio', 'softbox', 'dramatic', 'flat')
 SCENE_BACKGROUNDS = ('transparent', 'solid', 'gradient')
+SURFACE_FINISHES = ('wood', 'felt', 'slate', 'paper')
 RENDER_ENGINES = ('CYCLES', 'EEVEE')
 
 _START_S: Limit = (0, 600)
@@ -122,6 +123,12 @@ SCENE_LIMITS: Dict[str, Limit] = {
 
 CAMERA_LIMITS: Dict[str, Limit] = {'focal_length_mm': (8, 300), 'f_stop': (0.5, 128)}
 LIGHTING_LIMITS: Dict[str, Limit] = {'strength': (0, 20)}
+SURFACE_LIMITS: Dict[str, Limit] = {
+    'width_mm': (50, 20000),
+    'depth_mm': (50, 20000),
+    'thickness_mm': (1, 400),
+    'sweep_height_mm': (0, 5000),
+}
 RENDER_LIMITS: Dict[str, Limit] = {
     'resolution_px': (64, 7680),
     'fps': (1, 120),
@@ -273,6 +280,16 @@ class LightingSpec:
 
 
 @dataclass(frozen=True)
+class SurfaceSpec:
+    finish: str
+    color: str
+    width_mm: float
+    depth_mm: float
+    thickness_mm: float
+    sweep_height_mm: float
+
+
+@dataclass(frozen=True)
 class RenderSpec:
     engine: str
     resolution: Tuple[int, int]
@@ -291,6 +308,10 @@ class SceneDocument:
     camera: CameraSpec
     lighting: LightingSpec
     render: RenderSpec
+    # Absent in every bundle written before there was a table to stand things
+    # on, and absent again in one exported without one. Both mean the same
+    # scene the importer built then, so the default is not a substitution.
+    surface: Optional[SurfaceSpec] = None
 
     def asset(self, asset_id: str) -> SceneAsset:
         for asset in self.assets:
@@ -596,6 +617,30 @@ def _parse_lighting(value: Any, path: str) -> LightingSpec:
     )
 
 
+def _parse_surface(value: Any, path: str) -> SurfaceSpec:
+    data = _object(value, path)
+    return SurfaceSpec(
+        finish=_choice(_field(data, 'finish', path), f'{path}.finish', SURFACE_FINISHES),
+        color=_color(_field(data, 'color', path), f'{path}.color'),
+        width_mm=_number(
+            _field(data, 'width_mm', path), f'{path}.width_mm', SURFACE_LIMITS['width_mm']
+        ),
+        depth_mm=_number(
+            _field(data, 'depth_mm', path), f'{path}.depth_mm', SURFACE_LIMITS['depth_mm']
+        ),
+        thickness_mm=_number(
+            _field(data, 'thickness_mm', path),
+            f'{path}.thickness_mm',
+            SURFACE_LIMITS['thickness_mm'],
+        ),
+        sweep_height_mm=_number(
+            _field(data, 'sweep_height_mm', path),
+            f'{path}.sweep_height_mm',
+            SURFACE_LIMITS['sweep_height_mm'],
+        ),
+    )
+
+
 def _parse_render(value: Any, path: str) -> RenderSpec:
     data = _object(value, path)
     resolution = _array(_field(data, 'resolution', path), f'{path}.resolution')
@@ -637,6 +682,11 @@ def parse_scene(data: Any) -> SceneDocument:
     if _field(root, 'units', 'document') != 'mm':
         _fail('units', 'must be "mm"')
 
+    # The one optional block. Present and malformed is still refused: a table
+    # nobody asked for is a scene nobody meant, and so is a table somebody asked
+    # for in millimetres the importer cannot build.
+    surface_raw = root.get('surface')
+
     assets_raw = _array(_field(root, 'assets', 'document'), 'assets')
     instances_raw = _array(_field(root, 'instances', 'document'), 'instances')
     shots_raw = _array(_field(root, 'shots', 'document'), 'shots')
@@ -672,6 +722,7 @@ def parse_scene(data: Any) -> SceneDocument:
         camera=_parse_camera(_field(root, 'camera', 'document'), 'camera'),
         lighting=_parse_lighting(_field(root, 'lighting', 'document'), 'lighting'),
         render=_parse_render(_field(root, 'render', 'document'), 'render'),
+        surface=None if surface_raw is None else _parse_surface(surface_raw, 'surface'),
     )
 
     asset_ids = {asset.id for asset in assets}

@@ -2,19 +2,24 @@
   import {
     DEFAULT_LIBRARY_COLOR,
     DEFAULT_LIBRARY_SIZE_MM,
+    DEFAULT_SCENE_LIGHTING,
     DEFAULT_SCENE_RENDER,
+    DEFAULT_SURFACE_CHOICE,
     SCENE_LIMITS,
     SCENE_TEXT_LIMITS,
     type LibraryPiece,
     type ModelSettings,
     type PunchboardModelSettings,
     type RenderEngine,
+    type SceneBackground,
+    type SurfaceChoice,
   } from '@three-peaks/shared';
   import type { components } from '@three-peaks/shared/api';
   import ComponentChoices from '../components/scene/ComponentChoices.svelte';
   import LibraryPieces from '../components/scene/LibraryPieces.svelte';
   import RenderSettings from '../components/scene/RenderSettings.svelte';
   import ShotTemplate from '../components/scene/ShotTemplate.svelte';
+  import StageSettings from '../components/scene/StageSettings.svelte';
   import Button from '../components/ui/Button.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import { ApiError, api, assertOk } from '../api/client.ts';
@@ -66,6 +71,9 @@
   let engine = $state<RenderEngine>(DEFAULT_SCENE_RENDER.engine);
   let fps = $state(DEFAULT_SCENE_RENDER.fps);
   let samples = $state(DEFAULT_SCENE_RENDER.samples);
+  let surface = $state<SurfaceChoice | null>({ ...DEFAULT_SURFACE_CHOICE });
+  let background = $state<SceneBackground>(DEFAULT_SCENE_LIGHTING.background);
+  let backgroundColor = $state(DEFAULT_SCENE_LIGHTING.background_color);
   let exporting = $state(false);
   let progress = $state<SceneBundleProgress | null>(null);
 
@@ -330,6 +338,11 @@
         selection,
         template: templateId,
         render: { ...DEFAULT_SCENE_RENDER, engine, fps, samples },
+        // Read off the $state proxy rather than held from before the export
+        // started, so a colour changed while the picker was open is the one
+        // that lands in the document.
+        surface: surface === null ? null : { ...surface },
+        backdrop: { background, background_color: backgroundColor },
         onProgress: (update) => {
           progress = update;
         },
@@ -432,6 +445,20 @@
       <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
         <h2 class="text-lg font-semibold">Movement</h2>
         <ShotTemplate {templates} {templateId} onpick={(id) => (templateId = id)} />
+      </section>
+
+      <section class="flex flex-col gap-4 rounded-md border border-edge bg-surface p-4">
+        <h2 class="text-lg font-semibold">Setting</h2>
+        <StageSettings
+          {surface}
+          {background}
+          {backgroundColor}
+          onsurface={(next) => (surface = next)}
+          onbackdrop={(patch) => {
+            background = patch.background ?? background;
+            backgroundColor = patch.backgroundColor ?? backgroundColor;
+          }}
+        />
       </section>
 
       <section class="flex flex-col gap-4 rounded-md border border-edge bg-surface p-4">
