@@ -18,6 +18,20 @@
 
 export const guards = [
   {
+    // Measured against Canva: the export dialog lets a person pick a subset of
+    // pages, and an ExportBlob is a bare `{ url }` with nothing in it saying
+    // which page it holds. Without this check two blobs line up against the
+    // first two of 47 pages by position -- the wrong artwork on those cards,
+    // and the other 45 tombstoned -- and every step of it looks normal.
+    name: 'an export missing pages is refused before a run opens',
+    runner: 'canva',
+    file: 'src/design.ts',
+    find: '  if (result.exportBlobs.length !== pageCount) {',
+    replace: '  if (false) {',
+    tests: ['src/design.test.ts'],
+    testName: 'refuses an export holding fewer pages than the design',
+  },
+  {
     // The whole of what binds a Canva token to OUR app. Every app on Canva gets
     // tokens signed by the same JWKS, so dropping the audience leaves a check
     // that still verifies a real signature and still reads a real user id --

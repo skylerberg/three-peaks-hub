@@ -39,6 +39,7 @@ const RUNNERS = {
   api: { cwd: 'apps/api', env: ['--env-file=.env.test'] },
   web: { cwd: 'apps/web', env: [] },
   shared: { cwd: 'packages/shared', env: [] },
+  canva: { cwd: 'apps/canva', env: [] },
   // The importer's own suite, under plain python3. There is no Vite here to
   // transform a module on its way in, so the edit is made in a throwaway copy
   // of the tree instead -- the same promise kept a different way, because what

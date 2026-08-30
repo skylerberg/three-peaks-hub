@@ -168,6 +168,9 @@ importers:
       '@canva/app-ui-kit':
         specifier: ^5.14.0
         version: 5.14.0(@types/react@19.2.2)(mobx@6.16.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@canva/design':
+        specifier: ^2.12.0
+        version: 2.12.0(@canva/error@2.2.1)
       '@canva/intents':
         specifier: ^2.7.0
         version: 2.7.0(@canva/error@2.2.1)
@@ -220,6 +223,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.2.0)(jsdom@30.0.1)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
 
   apps/preview-edge:
     dependencies:
@@ -1377,6 +1383,14 @@ packages:
       }
     engines: { node: '>=22.0.0' }
     hasBin: true
+
+  '@canva/design@2.12.0':
+    resolution:
+      {
+        integrity: sha512-oR6b8avm6krC2VO/MPzVNvh7BfUSNhddyDFBhW9U3/kKCxWXV0Cnckd+FuB1JtpXc7F9lsfJQXYog3qapVmYSA==,
+      }
+    peerDependencies:
+      '@canva/error': ^2.0.0
 
   '@canva/error@2.2.1':
     resolution:
@@ -11926,6 +11940,10 @@ snapshots:
       - supports-color
       - utf-8-validate
       - zod
+
+  '@canva/design@2.12.0(@canva/error@2.2.1)':
+    dependencies:
+      '@canva/error': 2.2.1
 
   '@canva/error@2.2.1': {}
 
