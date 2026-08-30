@@ -499,11 +499,15 @@ freshly published package anyway.
   one interleaved walk, because a weaker claim walked earlier would take the card
   a later page names outright. The plan says per row which tier caught it.
 - **The page id is a column, not a fourth prefix on `identity_key`.** The two
-  answer different questions and a card wants both: an id survives a rename and a
-  reorder, a title survives a design being copied, which gives every page in it a
-  new id. Folded into one column, adopting the id would throw the title away.
-  `deck_import_card.source_page_id` is written by finishing, coalesced so a ZIP
-  run — which knows no ids — cannot strip the ones an app run wrote.
+  answer different questions and a card wants both. Folded into one column,
+  adopting the id would throw the title away — and a title is all a ZIP has, so a
+  deck built that way could never be picked up by the app without tombstoning
+  every card and adding it back. `deck_import_card.source_page_id` is written by
+  finishing, coalesced so a ZIP run cannot strip the ids an app run wrote.
+- **What a Canva page id survives was measured, not assumed**: a rename, a
+  reorder, and being carried into a duplicate of the whole design, which keeps
+  every id it copied. Duplicating a _page_ is what mints a new one, and the copy
+  keeps the title — two pages named alike that only the id can tell apart.
 - **Only `identity_key` is parked before it is rewritten.** A title moves between
   cards, so `applyPlannedIdentities` needs its two statements; a page id cannot,
   because the tier matching on it runs first and takes whatever card already

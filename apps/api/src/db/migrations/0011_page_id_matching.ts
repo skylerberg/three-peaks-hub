@@ -4,11 +4,10 @@ import { type Kysely, sql } from 'kysely';
 // the title it was imported under.
 //
 // A column of its own rather than a fourth prefix on identity_key, because the
-// two answer different questions and a card wants both: the id survives a
-// rename and a reorder, and the title survives a design being copied, which
-// gives every page in it a new id. Folded into one column, adopting the id
-// would throw the title away and the copy would be recognised by nothing but
-// its page numbers.
+// two answer different questions and a card wants both. Folded into one column,
+// adopting the id would throw the title away -- and the title is the only thing
+// a ZIP import has, so a deck built that way could never be picked up by the
+// app without tombstoning every card and adding it back.
 //
 // This ships alongside its writer rather than a release ahead, and the ordering
 // is what makes that safe: the migrate Job runs before the rollout, so the

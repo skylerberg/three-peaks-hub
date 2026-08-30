@@ -9,8 +9,14 @@
 //
 // A page id is not folded into the identity key, and that is the whole reason a
 // card can be matched two ways. It rides in a column of its own, so a card
-// keeps its title key as well -- and a design somebody copied, whose page ids
-// are all new, is still recognised by the titles that came with it.
+// keeps its title key as well -- which is what lets a deck built from ZIPs,
+// which have no page ids at all, be imported by the app afterwards without
+// every card being tombstoned and re-added.
+//
+// Measured against Canva rather than assumed: a page id survives a rename, a
+// reorder, and being carried into a duplicate of the whole design. What mints a
+// new one is duplicating a PAGE -- the copy gets its own id and keeps the
+// title, which is the case only the id can tell apart.
 
 // What an export came out of. 'zip' is a file somebody downloaded and dropped;
 // 'canva' is the Canva app pushing the design it is open on.
