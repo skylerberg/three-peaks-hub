@@ -90,7 +90,6 @@ export interface DeckCard {
 export interface DeckImport {
   created_at: Generated<Timestamp>;
   deck_id: string;
-  folder_id: string | null;
   id: string;
   source_kind: string;
   source_label: string | null;

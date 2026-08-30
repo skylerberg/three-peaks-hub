@@ -70,6 +70,21 @@ export const guards = [
     testName: 'sees 404, not 403, when reading',
   },
   {
+    // homeColumns writes all four columns every time, and the CHECK 0010 added
+    // is what turns a partial write into a refusal rather than a row that is in
+    // two places. Leaving the old folder behind is the way to write one.
+    name: 'a file arriving in a deck leaves its folder behind',
+    package: 'api',
+    file: 'src/services/fileHome.ts',
+    find:
+      '      return { folder_id: null, deck_id: home.deckId, ' +
+      'component_id: null, component_role: null };',
+    replace:
+      '      return { deck_id: home.deckId, component_id: null, component_role: null } as HomeColumns;',
+    tests: ['tests/e2e/fileHomes.test.ts'],
+    testName: 'leaves the folder behind when a file moves out of Assets into a deck',
+  },
+  {
     // The whole of what makes Assets the owner-less case. Dropping it puts every
     // card of every deck back in the explorer, which is the duplication the
     // sections exist to remove -- and it reads as a harmless filter to delete.

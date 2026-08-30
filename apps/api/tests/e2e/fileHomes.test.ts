@@ -45,6 +45,12 @@ describe('where a file lives', () => {
     return (await res.json()).id as string;
   }
 
+  async function makeFolder(name: string): Promise<string> {
+    const res = await owner.api.post('/api/files/folders', { project_id: projectId, name });
+    expect(res.status).toBe(201);
+    return (await res.json()).id as string;
+  }
+
   async function makeComponent(name: string, kind = 'wood'): Promise<string> {
     const res = await owner.api.post('/api/components', { project_id: projectId, kind, name });
     expect(res.status).toBe(201);
@@ -76,6 +82,21 @@ describe('where a file lives', () => {
     expect(await assetIds()).not.toContain(file);
     const back = await (await owner.api.get(`/api/decks/${deckId}`)).json();
     expect(back.cards.map((card: { file_id: string }) => card.file_id)).toEqual([file]);
+  });
+
+  // The Assets root has no folder to leave behind, so the case that matters is
+  // a file sitting in one: an owner and a folder on the same row is what the
+  // exclusivity CHECK refuses, and this is the write that would produce it.
+  it('leaves the folder behind when a file moves out of Assets into a deck', async () => {
+    const deckId = await makeDeck('Takes from a folder');
+    const folderId = await makeFolder('Reference');
+    const file = (await upload('sketch.png', { folder_id: folderId })).body.id as string;
+
+    expect((await move(file, { deck_id: deckId })).status).toBe(200);
+
+    const row = await (await owner.api.get(`/api/files/${file}`)).json();
+    expect(row.deck_id).toBe(deckId);
+    expect(row.folder_id).toBeNull();
   });
 
   it('renames on arrival rather than refusing a clash it cannot see', async () => {
