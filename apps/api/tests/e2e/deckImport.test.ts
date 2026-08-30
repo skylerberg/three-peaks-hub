@@ -1374,8 +1374,8 @@ describe('deck imports', () => {
       expect(swapped.pages.get(2)!.file_id).toBe(first.pages.get(1)!.file_id);
     });
 
-    it('falls back to titles for a design somebody copied', async () => {
-      const { deckId } = await scenario('canva-copied-design');
+    it('falls back to titles when the ids are new but the names came along', async () => {
+      const { deckId } = await scenario('canva-new-ids-same-titles');
 
       const first = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
@@ -1386,8 +1386,10 @@ describe('deck imports', () => {
         { title: 'Beta', bytes: png('beta'), pageId: P2 },
       ]);
 
-      // A copy in Canva is a new design, and every page in it is a new page.
-      // The titles came along, and they are what keeps the deck.
+      // Not what duplicating a design does -- that carries every page id across
+      // -- but what rebuilding the artwork somewhere else does: fresh ids under
+      // the names people already gave the cards. The titles are what keeps the
+      // deck, and a ZIP export is the same case with no ids at all.
       const copied = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha'), pageId: 'MAHcopy0001' },
         { title: 'Beta', bytes: png('beta'), pageId: 'MAHcopy0002' },
@@ -1396,6 +1398,37 @@ describe('deck imports', () => {
       expect(matches(copied.pages)).toEqual(['identity', 'identity']);
       expect(copied.run.counts).toMatchObject({ added: 0, removed: 0 });
       expect(copied.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
+    });
+
+    it('tells two pages with one title apart by their ids', async () => {
+      const { deckId } = await scenario('canva-duplicated-page');
+
+      // Duplicating a page in Canva mints a new id and keeps the title, so a
+      // deck really does end up holding two pages called the same thing. The
+      // title tier cannot separate them and the page-number tier only manages
+      // it while nobody reorders anything.
+      const first = await importPages(deckId, [
+        { title: 'Back', bytes: png('back'), pageId: P1 },
+        { title: 'Back', bytes: png('back alternate'), pageId: P2 },
+        { title: 'Red', bytes: png('red'), pageId: P3 },
+      ]);
+      await importPages(deckId, [
+        { title: 'Back', bytes: png('back'), pageId: P1 },
+        { title: 'Back', bytes: png('back alternate'), pageId: P2 },
+        { title: 'Red', bytes: png('red'), pageId: P3 },
+      ]);
+
+      // The two namesakes swap places. Only the id says which is which.
+      const swapped = await importPages(deckId, [
+        { title: 'Back', bytes: png('back alternate'), pageId: P2 },
+        { title: 'Back', bytes: png('back'), pageId: P1 },
+        { title: 'Red', bytes: png('red'), pageId: P3 },
+      ]);
+
+      expect(matches(swapped.pages)).toEqual(['page_id', 'page_id', 'page_id']);
+      expect(swapped.run.counts).toMatchObject({ added: 0, removed: 0, unchanged: 3 });
+      expect(swapped.pages.get(1)!.file_id).toBe(first.pages.get(2)!.file_id);
+      expect(swapped.pages.get(2)!.file_id).toBe(first.pages.get(1)!.file_id);
     });
 
     it('keeps the ids through a ZIP re-import, so the app still places the deck', async () => {
