@@ -171,6 +171,24 @@ Deploys are rolling and the migrate Job runs **before** the rollout, so old and
 new pods serve side by side. **Every migration must be backward-compatible with
 the previous release** — drop or rename a column in a follow-up release.
 
+**A migration's number has to be free on `main` when it merges, not when it was
+written.** Kysely orders them by filename and refuses one that sorts before a
+migration the database has already run, so two branches that both reach for the
+same number ship a deploy that dies on `corrupted migrations`. Nothing upstream
+of that catches it: the filenames differ, so the merge is clean, and every
+database CI builds is empty, where all of them are pending and sorting decides
+the order with nothing to contradict. The first database that has run the later
+one is production, at deploy time. Rebasing is when to look, and
+`tests/unit/pendingMigrations.test.ts` is what fails if you did not --
+it reads the numbers off the tree and needs no database at all.
+
+**A green CI run does not say the number is still free**, either: it was green
+against whatever `main` was when it ran, and the merge ref GitHub computes goes
+stale the moment `main` moves. The collision is semantic rather than textual, so
+`mergeStateStatus` reads CLEAN through it. Re-read the folder on `origin/main`
+immediately before merging -- this happened twice in a row on one branch, and
+the second time the number that had been free an hour earlier was not.
+
 `pnpm --filter @three-peaks/api run kysely-codegen` migrates a scratch database,
 introspects that and drops it. It never reads the database you develop against;
 introspecting that is how a column left behind by an abandoned branch gets

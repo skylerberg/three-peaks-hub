@@ -42,6 +42,35 @@ function migrate(direction: 'up' | 'down' = 'up') {
   if (result.status !== 0) throw new Error(`migrate ${direction} failed`);
 }
 
+// One connection of its own, opened and closed per question: the client below
+// is not connected yet while this runs.
+async function isApplied(name: string): Promise<boolean> {
+  const probe = new pg.Client({
+    host: env.db.hostname,
+    port: env.db.port,
+    user: env.db.user,
+    password: env.db.password,
+    database: scratch,
+  });
+  await probe.connect();
+  try {
+    const { rows } = await probe.query(`select 1 from kysely_migration where name = $1 limit 1`, [
+      name,
+    ]);
+    return rows.length > 0;
+  } finally {
+    await probe.end();
+  }
+}
+
+async function stepBackPast(name: string): Promise<void> {
+  for (let step = 0; step < 40; step += 1) {
+    if (!(await isApplied(name))) return;
+    migrate('down');
+  }
+  throw new Error(`could not step back past ${name} in 40 migrations`);
+}
+
 const client = new pg.Client({
   host: env.db.hostname,
   port: env.db.port,
@@ -58,10 +87,11 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 try {
   migrate();
-  // Two steps: 0010 finishes what 0009 starts, and rehearsing one without the
-  // other would rehearse a state no environment ever sits in for long.
-  migrate('down');
-  migrate('down');
+  // Down until 0009 itself is gone, rather than a fixed number of steps: the
+  // pair being rehearsed is no longer the last two, and counting was what made
+  // this script silently rehearse the wrong thing the moment another migration
+  // landed between them.
+  await stepBackPast('0009_component_homes');
   await client.connect();
 
   // A project as it stands before this change: two folders, a deck whose cards
