@@ -10,7 +10,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const dirs = ['apps/api'];
+// apps/canva is here because CLAUDE.md sends every checkout and every worktree
+// through this command, and `canva apps start` reads .env for its port and for
+// the API host. Without it the app serves on Canva's default 8080 and posts to
+// 3001 -- the port this repo's API container is pinned to in production, and
+// the collision the 173xx block exists to avoid.
+const dirs = ['apps/api', 'apps/canva'];
 
 // Homebrew's initdb makes the superuser the login name and creates no
 // `postgres` role at all, so the example's value is the one thing in it that
