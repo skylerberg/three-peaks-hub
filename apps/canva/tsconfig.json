@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // What Canva's own scaffold sets and the base does not: JSX, the DOM libs
+    // an app iframe has, and the path aliases its imports are written against.
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["@types/webpack-env"],
+    "noImplicitOverride": true,
+    // Canva's scaffold also sets noUncheckedIndexedAccess. Dropped rather than
+    // adopted: packages/shared is in this program and is written to the
+    // workspace's strictness, so the flag fails there rather than on anything
+    // here -- and one package holding the shared code to a stricter rule than
+    // the package that owns it is the wrong way round.
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "src/*": ["./src/*"],
+      "styles/*": ["./styles/*"]
+    }
+  },
+  // The base carries the rest, and `allowImportingTsExtensions` is the one that
+  // matters here: packages/shared is source-only and its imports name `.ts`
+  // outright, which is what keeps the generation cycle a plain file write.
+  "include": ["./src/**/*", "./declarations/declarations.d.ts", "./styles/**/*"]
+}

@@ -190,6 +190,21 @@ export default ts.config(
     },
   },
 
+  // --- The Canva app -------------------------------------------------------
+  // Linted by this config rather than by Canva's own preset. Theirs pulls
+  // eslint-plugin-react 7.x, which crashes outright under the eslint 10 the
+  // rest of the workspace is on -- and running two eslints at two majors to
+  // lint one repo is worse than losing their rules. What is lost is their
+  // submission checks, i18n above all; those matter only if this app is ever
+  // put to the marketplace, and that is a decision with its own scope.
+  {
+    files: ['apps/canva/**/*.tsx'],
+    languageOptions: {
+      globals: { ...globals.browser },
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+
   {
     files: ['**/*.mjs', 'scripts/**/*.mjs'],
     languageOptions: { globals: globals.node },
