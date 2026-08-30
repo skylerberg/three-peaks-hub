@@ -886,6 +886,86 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/canva-app/session': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Exchange a Canva app token for a session
+     * @description The Canva app proves which Canva user is running it and nothing more. Where that user has been linked to an account here, this answers with an ordinary session — the same credential login issues, so the app then uses the whole API as any other client does and needs no surface of its own. Where they have not, it answers 200 with a pairing code for somebody signed in here to spend, because a valid token belonging to a stranger is not an authentication failure. `switch_account` asks for a code regardless, which is how somebody signed into the wrong account fixes it without leaving Canva.
+     */
+    post: operations['postApiCanvaAppSession'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/canva-app/pair': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link the Canva app to this account
+     * @description Spends the code the app is showing. This is the one request in which both identities are present — the Canva user in the code, and the account in the token — which is the whole reason a person has to make it. A code that has expired, been spent, or never existed answers the same 404: eight characters of a small alphabet is worth guessing at if the response says which.
+     */
+    post: operations['postApiCanvaAppPair'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/canva-app/links': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The Canva accounts linked to this one
+     * @description Newest first. A link is a standing grant, so it is listable and revocable.
+     */
+    get: operations['getApiCanvaAppLinks'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/canva-app/links/{linkId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Unlink a Canva account
+     * @description The app falls back to asking for a pairing code the next time it is opened. Sessions it was already given are not revoked by this — those are ended from the sessions list, like any other.
+     */
+    delete: operations['deleteApiCanvaAppLinksByLinkId'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -900,6 +980,39 @@ export interface components {
         name: string;
       };
     };
+    CanvaAppLink: {
+      canva_brand_id: string | null;
+      created_at: string;
+      id: string;
+      last_used_at: string | null;
+    };
+    CanvaAppLinkList: {
+      links: {
+        canva_brand_id: string | null;
+        created_at: string;
+        id: string;
+        last_used_at: string | null;
+      }[];
+    };
+    CanvaAppSession:
+      | {
+          expires_at: string;
+          /** @constant */
+          linked: false;
+          pairing_code: string;
+        }
+      | {
+          expires_at: string;
+          /** @constant */
+          linked: true;
+          token: string;
+          user: {
+            email: string;
+            email_verified: boolean;
+            id: string;
+            name: string;
+          };
+        };
     Component: {
       created_at: string;
       created_by: string;
@@ -5884,6 +5997,239 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiCanvaAppSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          token: string;
+          switch_account?: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description A session, or the code that leads to one */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CanvaAppSession'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiCanvaAppPair: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          code: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Linked */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CanvaAppLink'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiCanvaAppLinks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The links */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CanvaAppLinkList'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiCanvaAppLinksByLinkId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        linkId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unlinked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

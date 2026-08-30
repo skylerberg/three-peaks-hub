@@ -106,6 +106,18 @@ export const env = {
     return process.env.EMAIL_TOKEN_SECRET || this.passwordResetSecret;
   },
 
+  canva: {
+    // The audience every app token carries, and the only thing binding one to
+    // OUR app rather than to any other app on Canva. Absent, the routes that
+    // read it answer 503 rather than verifying against nothing.
+    get appId(): string | undefined {
+      return process.env.CANVA_APP_ID || undefined;
+    },
+    get jwksUrl(): string {
+      return `https://api.canva.com/rest/v1/apps/${this.appId ?? ''}/jwks`;
+    },
+  },
+
   email: {
     get driver(): 'console' | 'ses' {
       return process.env.EMAIL_DRIVER === 'ses' ? 'ses' : 'console';

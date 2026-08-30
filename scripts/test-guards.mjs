@@ -18,6 +18,30 @@
 
 export const guards = [
   {
+    // The whole of what binds a Canva token to OUR app. Every app on Canva gets
+    // tokens signed by the same JWKS, so dropping the audience leaves a check
+    // that still verifies a real signature and still reads a real user id --
+    // and accepts a token minted for somebody else's app.
+    name: 'a Canva token issued to another app is refused',
+    package: 'api',
+    file: 'src/services/canvaApp.ts',
+    find: '      audience: appId,\n',
+    replace: '',
+    tests: ['tests/e2e/canvaApp.test.ts'],
+    testName: 'refuses one issued to another app',
+  },
+  {
+    // Expiry and reuse answering differently from a code nobody issued turns
+    // eight characters of a small alphabet into an oracle worth grinding.
+    name: 'a spent pairing code is not distinguishable from an invented one',
+    package: 'api',
+    file: 'src/services/canvaApp.ts',
+    find: "    .where('canva_app_pairing.claimed_at', 'is', null)\n",
+    replace: '',
+    tests: ['tests/e2e/canvaApp.test.ts'],
+    testName: 'refuses a second spend of one code',
+  },
+  {
     // The tiers exist in an order, and the order is the design: an id settles a
     // page before a title does. Running the title tier first is a one-line
     // reordering that reads as harmless and quietly hands each card to whatever

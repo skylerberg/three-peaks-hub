@@ -11,6 +11,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
 import { transactionMiddleware } from './middleware/transaction.ts';
 import { authRouter, publicAuthRouter } from './routes/auth.ts';
 import { componentsRouter } from './routes/components.ts';
+import { canvaAppRouter, publicCanvaAppRouter } from './routes/canvaApp.ts';
 import { deckImportsRouter } from './routes/deckImports.ts';
 import { decksRouter } from './routes/decks.ts';
 import { docsRouter } from './routes/docs.ts';
@@ -66,6 +67,8 @@ app.route('/api/components', componentsRouter);
 app.route('/api/models', modelsRouter);
 app.route('/api/decks', decksRouter);
 app.route('/api/decks', deckImportsRouter);
+app.route('/api/canva-app', publicCanvaAppRouter);
+app.route('/api/canva-app', canvaAppRouter);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);
