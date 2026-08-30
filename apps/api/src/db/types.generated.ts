@@ -42,6 +42,26 @@ export interface AppUser {
   updated_at: Generated<Timestamp>;
 }
 
+export interface CanvaAppLink {
+  canva_brand_id: string | null;
+  canva_user_id: string;
+  created_at: Generated<Timestamp>;
+  id: string;
+  last_used_at: Timestamp | null;
+  user_id: string;
+}
+
+export interface CanvaAppPairing {
+  canva_brand_id: string | null;
+  canva_user_id: string;
+  claimed_at: Timestamp | null;
+  claimed_by: string | null;
+  code_hash: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: string;
+}
+
 export interface Component {
   created_at: Generated<Timestamp>;
   created_by: string;
@@ -227,6 +247,8 @@ export interface Session {
 
 export interface DB {
   app_user: AppUser;
+  canva_app_link: CanvaAppLink;
+  canva_app_pairing: CanvaAppPairing;
   component: Component;
   component_model: ComponentModel;
   deck: Deck;

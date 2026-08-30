@@ -22,6 +22,9 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/auth/login',
   'POST /api/auth/forgot-password',
   'POST /api/auth/reset-password',
+  // Carries a Canva credential rather than one of ours, and answers with one of
+  // ours when it recognises the person behind it.
+  'POST /api/canva-app/session',
 ]);
 
 const OPTIONAL_AUTH_ROUTES = new Set<string>([]);
