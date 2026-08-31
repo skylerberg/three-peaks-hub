@@ -94,8 +94,10 @@ export async function exportPages(pageCount: number): Promise<ExportedPages | nu
   // would look entirely normal on the way through.
   if (result.exportBlobs.length !== pageCount) {
     throw new DesignError(
-      `That export has ${result.exportBlobs.length} of this design's ${pageCount} pages. ` +
-        'Export every page, so each one can be matched to the card it belongs to.'
+      `That export has ${result.exportBlobs.length} of this design's ${pageCount} pages, ` +
+        'and Canva does not say which ones. Choose every page in the export dialog.\n\n' +
+        'An import is the whole deck: pages it leaves out are cards it deletes, so there ' +
+        'is no safe way to read a partial export as an update to part of a deck.'
     );
   }
 
