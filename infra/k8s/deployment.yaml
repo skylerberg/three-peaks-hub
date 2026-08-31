@@ -94,14 +94,12 @@ spec:
             # boot asserts both rather than failing silently at send time.
             - name: EMAIL_DRIVER
               value: console
-            # Set when the Canva app ships, to the app's id from the Developer
-            # Portal. Not a secret -- it is the audience every app token
-            # carries and it is in the public JWKS URL. Left unset the routes
-            # under /api/canva-app answer 500, which is what they should do
-            # rather than verify a token against nothing, and every other route
-            # is unaffected.
-            # - name: CANVA_APP_ID
-            #   value: ''
+            # The Canva app's id from the Developer Portal. Not a secret: it
+            # is the audience every app token carries and it is in the public
+            # JWKS URL. It also decides the origin the app is served from, so
+            # CORS_ORIGINS above does not name it a second time.
+            - name: CANVA_APP_ID
+              value: AAHOGEdIZTQ
           readinessProbe:
             httpGet:
               path: /health

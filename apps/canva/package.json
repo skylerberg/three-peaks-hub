@@ -6,7 +6,8 @@
     "start": "canva apps start",
     "build": "canva apps build",
     "type-check": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:prod": "CANVA_BACKEND_HOST=https://tools.threepeaksgames.com canva apps build"
   },
   "dependencies": {
     "@canva/app-i18n-kit": "^1.3.0",

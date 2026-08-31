@@ -7,6 +7,7 @@ SPA, and a small Cloud Run edge that serves per-PR previews.
 ```
 apps/api            Hono + Kysely + Postgres        -> GKE
 apps/web            Svelte 5 runes + Vite SPA       -> GCS bucket behind a GCLB
+apps/canva          React app inside Canva's editor -> a bundle uploaded to Canva
 apps/preview-edge   Cloud Run static edge           -> Cloud Run
 packages/shared     generated API + realtime clients, and the constants both
                     sides must agree on
@@ -616,6 +617,49 @@ way to a deck: the local and central extra fields are deliberately different
 lengths, and the one non-ASCII entry name is UTF-8 with the flag left clear.
 Then it imports the same export twice, and the second pass must leave every card
 on the version it already had.
+
+# The Canva app
+
+`apps/canva` runs inside Canva's own editor and pushes the open design into a
+deck, so importing needs no ZIP downloaded and none uploaded. It is React and
+Canva's toolchain — the only package here that is neither Svelte nor Vite — and
+it ships by **uploading a bundle to the Developer Portal**, touching no image,
+no manifest and no Terraform. `pnpm --filter @three-peaks/canva run build:prod`
+is what produces the one to upload; the plain `build` bakes in whatever
+`CANVA_BACKEND_HOST` says, which locally is a localhost API.
+
+**It authenticates by exchanging Canva's word for ours.** The app can prove
+which Canva user is running it and nothing else, so somebody signed in here
+spends a pairing code once and `canva_app_link` remembers. What comes back is an
+ordinary session — the same credential login issues — which is why the app
+drives the whole existing API and has no route surface of its own. `aud` pinned
+to the app id is the only thing separating our tokens from any other Canva
+app's, since every app's are signed by the same JWKS.
+
+**The origin is derived from the app id**, not configured beside it:
+`CANVA_APP_ID` decides both the audience checked and the `app-<id>.canva-apps.com`
+origin CORS admits. Read off a running app rather than documented, so
+`CORS_ORIGINS` can still name one the pattern fails to predict.
+
+**Reading a design takes two APIs and neither answers alone.** `openDesign`
+gives the order but a `PageRef` carries no id — that is on the `AbsolutePage`
+its own helper dereferences one into — and `getDesignMetadata` gives ids with
+titles in an order the documentation refuses to guarantee. They are joined by
+id, never by position.
+
+**An export missing pages is refused before a run opens.** The dialog lets a
+person pick a subset and an `ExportBlob` is a bare `{ url }` naming no page, so
+two blobs would line up against the first two of forty-seven by position: the
+wrong artwork on those, the rest tombstoned, every step looking normal.
+
+Two SDK traps, both written beside the call that hits them: `zipped` belongs on
+the file type and is silently ignored on the request, and it is declared
+optional but `{ type: 'png' }` alone is refused at runtime.
+
+**The bytes never touch `apps/api`.** Canva's documentation says to download
+export blobs from a backend; measured against the real thing the iframe can
+fetch them, which is what keeps the API free of any outbound request and of the
+allowlist one would otherwise need.
 
 # The Blender scene
 

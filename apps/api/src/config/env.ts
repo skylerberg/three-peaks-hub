@@ -81,10 +81,17 @@ export const env = {
     return process.env.REDIS_URL || null;
   },
   get corsOrigins(): string[] {
-    return (process.env.CORS_ORIGINS ?? '')
+    const configured = (process.env.CORS_ORIGINS ?? '')
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean);
+    // Derived rather than configured a second time. The Canva app is served
+    // from an origin named after its own id, so listing it separately would be
+    // a second answer to which app this is -- free to disagree with the one the
+    // token audience is checked against. Union rather than replacement, so an
+    // origin this pattern does not predict is still reachable by config alone.
+    const canva = this.canva.appOrigin;
+    return canva === undefined || configured.includes(canva) ? configured : [...configured, canva];
   },
   get appUrlBase(): string {
     return process.env.APP_URL_BASE ?? 'http://localhost:17300';
@@ -115,6 +122,14 @@ export const env = {
     },
     get jwksUrl(): string {
       return `https://api.canva.com/rest/v1/apps/${this.appId ?? ''}/jwks`;
+    },
+    // Where Canva serves the app's iframe from: `app-` and the app id, lower
+    // cased, under canva-apps.com. Read off a running app rather than
+    // documented anywhere, so if Canva ever changes it the fix is one entry in
+    // CORS_ORIGINS rather than a release.
+    get appOrigin(): string | undefined {
+      const id = this.appId;
+      return id === undefined ? undefined : `https://app-${id.toLowerCase()}.canva-apps.com`;
     },
   },
 
