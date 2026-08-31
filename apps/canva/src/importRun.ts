@@ -1,7 +1,7 @@
 import { api, assertOk, postBytes } from 'src/api';
 import type { DesignPage } from 'src/design';
 
-interface PlanRow {
+export interface PlanRow {
   page_number: number;
   title: string | null;
   action: 'add' | 'update';

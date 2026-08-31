@@ -122,7 +122,12 @@ describe('exporting the pages', () => {
     // up against 47 pages by position would put the wrong artwork on the first
     // two cards and tombstone the other 45, and it would look entirely normal.
     await expect(exportPages(47)).rejects.toThrow(DesignError);
+    // The message says why, not just what. Canva offers no way to ask for
+    // specific pages and no way to learn which ones came back, so "export
+    // everything" is a constraint the person has to understand rather than a
+    // rule they have tripped over.
     await expect(exportPages(47)).rejects.toThrow(/2 of this design's 47 pages/u);
+    await expect(exportPages(47)).rejects.toThrow(/does not say which ones/u);
   });
 
   it('answers null when the dialog is closed, which is not a failure', async () => {

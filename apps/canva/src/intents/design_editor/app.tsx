@@ -3,7 +3,14 @@ import { auth } from '@canva/user';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiMessage, assertOk, setToken } from 'src/api';
 import { type Design, DesignError, exportPages, readDesign } from 'src/design';
-import { type RunCounts, type StartedRun, abandonRun, startRun, uploadPages } from 'src/importRun';
+import {
+  type PlanRow,
+  type RunCounts,
+  type StartedRun,
+  abandonRun,
+  startRun,
+  uploadPages,
+} from 'src/importRun';
 import * as styles from 'styles/components.css';
 
 interface HubUser {
@@ -31,6 +38,25 @@ type Stage =
   | { kind: 'uploading'; done: number; total: number }
   | { kind: 'done'; counts: RunCounts }
   | { kind: 'error'; message: string };
+
+// What each row of the plan did, said the way the deck's own import screen says
+// it. Which tier matched a card is worth showing rather than hiding: a page
+// matched by number is one a reorder could have placed wrongly, and a person
+// reading the plan is the only one who can tell.
+function rowDetail(page: PlanRow): string {
+  if (page.action === 'add') return 'New card';
+  const matched =
+    page.matched_by === 'page_id'
+      ? 'matched by Canva page'
+      : page.matched_by === 'identity'
+        ? 'matched by page name'
+        : 'matched by page number';
+  return page.name === null ? `Updates a card, ${matched}` : `Updates ${page.name}, ${matched}`;
+}
+
+function rowLabel(page: PlanRow): string {
+  return page.title === null ? `Page ${page.page_number}` : `${page.page_number}. ${page.title}`;
+}
 
 export const App = () => {
   const [stage, setStage] = useState<Stage>({ kind: 'checking' });
@@ -228,6 +254,16 @@ export const App = () => {
                 ))}
               </Rows>
             )}
+            {/* Every page, not just the destructive half. The counts alone
+                cannot say which card a page is about to land on, and matching
+                by page number is the tier worth noticing before it runs. */}
+            <Rows spacing="0.5u">
+              {stage.run.pages.map((page) => (
+                <Text key={page.page_number} size="small" tone="tertiary">
+                  {`${rowLabel(page)} — ${rowDetail(page)}`}
+                </Text>
+              ))}
+            </Rows>
             <Button
               variant="primary"
               onClick={() => void confirm(stage.design, stage.run)}
