@@ -1207,6 +1207,62 @@ export const guards = [
     runner: 'web',
   },
   {
+    // The list a deck answers with is the list its editor sends back, and a
+    // deleted card is in it. Filtering the tombstones out of what may be named
+    // reads like the liveness filter every other listing carries -- and it
+    // leaves a deck holding one deleted card unable to change any card's copy
+    // count at all, which is what it did.
+    name: 'a deck holding a deleted card can still be edited',
+    package: 'api',
+    file: 'src/services/decks.ts',
+    find: "    .where('file.deck_id', '=', deckId)\n",
+    replace: "    .where('file.deck_id', '=', deckId)\n    .where('file.deleted_at', 'is', null)\n",
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'takes the list the deck answers with, tombstone and all',
+  },
+  {
+    // The other half of the same asymmetry. An import takes a card out of the
+    // arrangement as it tombstones the artwork, so demanding a row it deleted
+    // jams the editor from the other side -- a list refused for leaving out a
+    // card the deck no longer shows anywhere.
+    name: 'only live artwork has to have a place in the deck',
+    package: 'api',
+    file: 'src/services/decks.ts',
+    find: '    (row) => row.deleted_at === null && !given.has(row.id) && row.id !== deck.back_file_id',
+    replace: '    (row) => !given.has(row.id) && row.id !== deck.back_file_id',
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'lets a list leave the tombstone out, and saves again after',
+  },
+  {
+    // The deck editor validates a whole list against the cap, so a deck any
+    // other arrival has pushed past it is one no hand edit can save again. The
+    // check reads like belt and braces beside the import's own, which is
+    // exactly why it goes missing.
+    name: 'an upload cannot push a deck past its card cap',
+    package: 'api',
+    file: 'src/routes/files.ts',
+    find:
+      "    if (home.kind === 'deck' && deckRole === 'card') {\n" +
+      '      await assertRoomForCard(db, home.deckId, id);\n' +
+      '    }\n',
+    replace: '',
+    tests: ['tests/e2e/fileHomes.test.ts'],
+    testName: 'refuses an upload of one more card, before the bytes go up',
+  },
+  {
+    // A restore is the one arrival that may find no place kept: an import's
+    // removal took the row with it. Leaving the file to come back on its own
+    // is the natural reading of a restore, and it puts live artwork in a deck
+    // that no list names -- which the deck editor then refuses to save.
+    name: 'a restored card is given a place in its deck again',
+    package: 'api',
+    file: 'src/routes/files.ts',
+    find: "    if (home.kind === 'deck') await rejoinDeck(c, access.projectId, home.deckId, id);\n",
+    replace: '',
+    tests: ['tests/e2e/decks.test.ts'],
+    testName: 'gives a restored card a new place at the end',
+  },
+  {
     // The one field in the central directory a reader cannot recompute. Every
     // other number in the record repeats one the local header already carries,
     // so a wrong offset is the single way to write an archive that looks

@@ -1,8 +1,9 @@
 /**
- * Runs migration 0009's backfill against rows shaped like the ones a project
- * held before it, on a scratch database of its own.
+ * Runs the migrations that rewrite existing rows against rows shaped like the
+ * ones a project holds, on a scratch database of its own: 0009's homes backfill
+ * and 0015's repair of deck cards that lost their place.
  *
- * Not a `check:*` script and not in the gate: the backfill runs once, against
+ * Not a `check:*` script and not in the gate: a backfill runs once, against
  * data no test fixture has. What this is for is the hour before that run --
  * point it at a restored dump's shape and see the answers it gives.
  *
@@ -242,6 +243,74 @@ try {
   check('the import row has no folder column left', dropped.length === 0);
 
   await after.end();
+
+  // 0015, rehearsed on its own: a deck holding artwork with no place in its
+  // list, which is what an import removal followed by a hand restore used to
+  // leave behind. Planted after the whole set has run, then stepped back over
+  // and run forward again -- the state it repairs cannot exist in the schema
+  // 0009's fixture is written in.
+  const planted = new pg.Client({
+    host: env.db.hostname,
+    port: env.db.port,
+    user: env.db.user,
+    password: env.db.password,
+    database: scratch,
+  });
+  await planted.connect();
+
+  const DECK = '55555555-5555-4555-8555-555555555555';
+  const owned = async (id: string, filename: string, deletedAt: string | null) => {
+    await planted.query(
+      `insert into file (id, project_id, deck_id, filename, storage_key, content_type, byte_size, uploaded_by, deleted_at)
+       values ($1, '22222222-2222-4222-8222-222222222222', $2, $3, gen_random_uuid(), 'image/png', 10,
+               '11111111-1111-4111-8111-111111111111', $4)`,
+      [id, DECK, filename, deletedAt]
+    );
+  };
+  await owned('b0000000-0000-4000-8000-000000000001', 'stranded.png', null);
+  await owned(
+    'b0000000-0000-4000-8000-000000000002',
+    'removed-by-import.png',
+    new Date().toISOString()
+  );
+  await planted.end();
+
+  await stepBackPast('0015_deck_card_places');
+  migrate();
+
+  const repaired = new pg.Client({
+    host: env.db.hostname,
+    port: env.db.port,
+    user: env.db.user,
+    password: env.db.password,
+    database: scratch,
+  });
+  await repaired.connect();
+
+  const cards = (
+    await repaired.query(
+      `select file_id, position, quantity from deck_card where deck_id = $1 order by position`,
+      [DECK]
+    )
+  ).rows;
+  const strandedCard = cards.find((row) => row.file_id === 'b0000000-0000-4000-8000-000000000001');
+  check('live artwork with no place is given one', strandedCard !== undefined);
+  check(
+    'at the end of the list, one copy',
+    strandedCard?.position === 3 && strandedCard?.quantity === 1,
+    JSON.stringify(strandedCard)
+  );
+  check(
+    'a tombstoned card the import removed is left out of the deck',
+    !cards.some((row) => row.file_id === 'b0000000-0000-4000-8000-000000000002')
+  );
+  check(
+    'the back is still not a card',
+    !cards.some((row) => row.file_id === 'a0000000-0000-4000-8000-000000000003')
+  );
+  check('and nothing else was added', cards.length === 4, JSON.stringify(cards));
+
+  await repaired.end();
 } finally {
   const teardown = maintenance();
   await teardown.connect();

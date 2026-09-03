@@ -264,10 +264,20 @@ partial unique index so a component holds at most one of each.
 
 **A deck's cards are exactly its own live images**, bar a back that is not itself
 a card. `assertCardFiles` refuses both halves: a file the deck does not own would
-be a card Assets still lists, and a file left out would be artwork in the deck
+be a card Assets still lists, and a live one left out would be artwork in the deck
 with no place in it — a third state this arrangement has none of. That is also
-why an upload into a deck writes its `deck_card` row, and why an imported page
-joins the deck as its bytes land rather than at finish.
+why an upload into a deck writes its `deck_card` row, why an imported page joins
+the deck as its bytes land rather than at finish, and why a restore gives a card
+back a place through `ensureDeckCard` when the one it had is gone.
+
+**A tombstoned card is one the deck may name and need not.** Deleting the image
+keeps its `deck_card` row so a restore is exact, and the editor sends back the
+list it was answered with — so refusing a tombstone there left a deck holding one
+deleted card unable to change any card's copy count at all. An import removal is
+the other direction: it takes the row as it tombstones the artwork, so a list
+that cannot name that row has to be allowed to leave it out. Both jam the same
+editor, from opposite sides, and 0015 is the repair for the decks that were
+already stranded.
 
 Moving is `POST /api/files/:id/move`, and it is the only way a home changes. The
 name is re-deduplicated against wherever it arrives with `freeFilename`, because

@@ -1,4 +1,6 @@
+import { MAX_DECK_CARDS } from '@three-peaks/shared';
 import { AppError } from '../utils/errors.ts';
+import { newId } from '../utils/uuid.ts';
 import { FILE_COLUMNS, serializeFile } from './files.ts';
 import type { AppContext, Connection } from '../types/index.ts';
 
@@ -101,16 +103,106 @@ export async function readDeckCards(c: Pick<AppContext, 'get'>, deckId: string) 
   }));
 }
 
+export async function countDeckCards(db: Connection, deckId: string): Promise<number> {
+  const row = await db
+    .selectFrom('deck_card')
+    .select((eb) => eb.fn.countAll<string>().as('count'))
+    .where('deck_card.deck_id', '=', deckId)
+    .executeTakeFirst();
+  return Number(row?.count ?? 0);
+}
+
 /**
- * Refuses a card list that is not exactly the deck's own live artwork, bar a
- * back image that is not itself a card.
+ * Gives one of a deck's images a place in its arrangement, at the end, and says
+ * whether it had to. Every arrival at a single `deck_card` row comes through
+ * here -- an upload, a move in, an import page and a restore -- because the
+ * rule all four are keeping is the same one, that a deck's live artwork is
+ * always somewhere in its own list.
+ *
+ * Idempotent, because two of the four arrive at a row that may already be
+ * there. A card deleted by hand kept its row and its copy count, and a restore
+ * taking a second one would raise a unique violation and lose the place the
+ * person is expecting back. The cap belongs to the caller: what to say when a
+ * deck is full depends on what it was being asked to do.
+ */
+export async function ensureDeckCard(
+  db: Connection,
+  deckId: string,
+  fileId: string
+): Promise<boolean> {
+  const top = await db
+    .selectFrom('deck_card')
+    .select((eb) => eb.fn.max('deck_card.position').as('position'))
+    .where('deck_card.deck_id', '=', deckId)
+    .executeTakeFirst();
+
+  const inserted = await db
+    .insertInto('deck_card')
+    .values({
+      id: newId(),
+      deck_id: deckId,
+      file_id: fileId,
+      quantity: 1,
+      position: (top?.position ?? -1) + 1,
+    })
+    .onConflict((oc) => oc.columns(['deck_id', 'file_id']).doNothing())
+    .returning(['deck_card.id as id'])
+    .executeTakeFirst();
+
+  return inserted !== undefined;
+}
+
+/**
+ * Refuses to put a card back into a deck that has no room for it. A file that
+ * still holds its place needs none, so restoring one a person deleted by hand
+ * is never refused.
+ *
+ * The cap is what the deck editor validates a saved list against, so a deck
+ * pushed past it is one no hand edit can save again. Refusing the restore is
+ * the one moment a person can still choose otherwise.
+ */
+export async function assertRoomForCard(
+  db: Connection,
+  deckId: string,
+  fileId: string
+): Promise<void> {
+  const held = await db
+    .selectFrom('deck_card')
+    .select(['deck_card.id as id'])
+    .where('deck_card.deck_id', '=', deckId)
+    .where('deck_card.file_id', '=', fileId)
+    .executeTakeFirst();
+  if (held) return;
+
+  const total = await countDeckCards(db, deckId);
+  if (total >= MAX_DECK_CARDS) {
+    throw new AppError(
+      422,
+      `That deck already holds ${MAX_DECK_CARDS} cards, which is as many as a deck holds. Take one out of it first.`,
+      { cards: total, limit: MAX_DECK_CARDS }
+    );
+  }
+}
+
+/**
+ * Refuses a card list that is not exactly the deck's own artwork, bar a back
+ * image that is not itself a card.
  *
  * Both halves matter. A file the deck does not own would be a card that Assets
  * still lists, which is the duplication owning artwork exists to remove; and a
- * file left out would be artwork in the deck that no list names, which is a
+ * live one left out would be artwork in the deck that no list names, which is a
  * third place for an image to be and the one state this arrangement has none
  * of. Removing a card means deleting it or moving it to Assets, and the message
  * says so, because there is no other way to say it from here.
+ *
+ * The two halves read different sets, deliberately. What may be named is
+ * anything the deck owns, tombstone or not: deleting a card keeps its
+ * `deck_card` row so a restore lands back where it was, the deck answers with
+ * that row, and the list sent back is the list that was read -- refusing it
+ * left a deck holding one deleted card unable to change any card's copies at
+ * all. What must be named is only the live artwork, because an import takes a
+ * card out of the arrangement as it tombstones it, and demanding the row it
+ * deleted would jam the same editor from the other side.
  */
 export async function assertCardFiles(
   c: Pick<AppContext, 'get'>,
@@ -126,9 +218,8 @@ export async function assertCardFiles(
 
   const owned = await db
     .selectFrom('file')
-    .select(['file.id as id', 'file.filename as filename'])
+    .select(['file.id as id', 'file.filename as filename', 'file.deleted_at as deleted_at'])
     .where('file.deck_id', '=', deckId)
-    .where('file.deleted_at', 'is', null)
     .orderBy('file.filename', 'asc')
     .execute();
 
@@ -144,7 +235,9 @@ export async function assertCardFiles(
     }
   }
 
-  const stranded = owned.filter((row) => !given.has(row.id) && row.id !== deck.back_file_id);
+  const stranded = owned.filter(
+    (row) => row.deleted_at === null && !given.has(row.id) && row.id !== deck.back_file_id
+  );
   if (stranded.length > 0) {
     const rest = stranded.length === 1 ? '' : ` and ${stranded.length - 1} more`;
     throw new AppError(

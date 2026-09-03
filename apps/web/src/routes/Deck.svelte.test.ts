@@ -110,6 +110,52 @@ function stubDeckWithCards(backFileId: string | null = null): void {
   });
 }
 
+// One live card and one whose image has been deleted, which is a deck the
+// editor has to keep working in: the row stays in the list, marked.
+function stubDeckWithDeletedCard(backFileId: string | null = null): void {
+  const live = cardFile(1);
+  const gone = { ...cardFile(2), deleted_at: '2026-02-01T00:00:00.000Z' };
+  const payload = JSON.stringify({
+    deck: { ...DECK_ROW, back_file_id: backFileId },
+    cards: [live, gone].map((file, index) => ({
+      file_id: file.id,
+      quantity: 1,
+      position: index,
+      file,
+    })),
+  });
+
+  fetchMock.mockImplementation(async (input) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    if (url.includes('/download')) {
+      return new Response('bytes', { status: 200, headers: { 'Content-Type': 'image/png' } });
+    }
+    if (url.includes(`/api/decks/${DECK}/import`)) {
+      return jsonResponse(404, { error: 'This deck has no import' });
+    }
+    if (backFileId && url.endsWith(`/api/files/${backFileId}`)) {
+      return jsonResponse(200, gone);
+    }
+    if (url.includes(`/api/decks/${DECK}`)) {
+      return new Response(payload, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes(`/api/projects/${PROJECT}`)) {
+      return jsonResponse(200, {
+        id: PROJECT,
+        name: 'Colori',
+        description: null,
+        role: 'editor',
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      });
+    }
+    return jsonResponse(404, { error: `nothing stubbed for ${url}` });
+  });
+}
+
 function urlsRequested(): string[] {
   return fetchMock.mock.calls.map((call) =>
     typeof call[0] === 'string' ? call[0] : (call[0] as Request).url
@@ -301,6 +347,38 @@ describe('Deck editor', () => {
     await wait(SETTLE_MS);
 
     expect(fileRowReads(BACK)).toBe(1);
+  });
+
+  // Deleted artwork prints nothing, so it is not a back anyone can newly pick.
+  it('leaves a deleted card out of the back picker', async () => {
+    stubDeckWithDeletedCard();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    const picker = await screen.findByLabelText("Use one of this deck's images");
+
+    expect([...(picker as HTMLSelectElement).options].map((option) => option.text)).toEqual([
+      'No back',
+      'card-1.png',
+    ]);
+  });
+
+  // Unless it is the back already: dropping it would leave the picker reading
+  // "No back" over a deck that has one.
+  it('keeps a deleted back listed while it is the back', async () => {
+    const BACK = '1111111a-2222-4333-8444-000000000002';
+    stubDeckWithDeletedCard(BACK);
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    const picker = (await screen.findByLabelText(
+      "Use one of this deck's images"
+    )) as HTMLSelectElement;
+
+    expect([...picker.options].map((option) => option.text)).toEqual([
+      'No back',
+      'card-1.png',
+      'card-2.png',
+    ]);
+    expect(picker.value).toBe(BACK);
   });
 
   // The whole point of putting the rows on the event: the screen learns what

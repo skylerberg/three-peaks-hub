@@ -93,6 +93,10 @@
   // row on every copy count edit.
   const backFileId = $derived(decks.deck?.back_file_id ?? null);
 
+  const backChoices = $derived(
+    cards.filter((card) => card.file.deleted_at === null || card.file_id === backFileId)
+  );
+
   // The back is named by id only, so its row has to be read to draw it.
   $effect(() => {
     const id = backFileId;
@@ -420,7 +424,10 @@
               onchange={(event) => patch({ back_file_id: event.currentTarget.value || null })}
             >
               <option value="">No back</option>
-              {#each cards as card (card.file_id)}
+              <!-- Deleted artwork prints nothing, so it is not offered -- but the
+                   one already chosen stays listed, or the select would read "No
+                   back" over a deck that has one. -->
+              {#each backChoices as card (card.file_id)}
                 <option value={card.file_id}>{card.file.filename}</option>
               {/each}
             </select>

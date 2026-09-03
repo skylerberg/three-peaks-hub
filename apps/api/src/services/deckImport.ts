@@ -26,7 +26,7 @@ import {
   storeUpload,
   type StoredUpload,
 } from './files.ts';
-import { readDeck, readDeckCards } from './decks.ts';
+import { countDeckCards, ensureDeckCard, readDeck, readDeckCards } from './decks.ts';
 import { type FileHome, homeColumns } from './fileHome.ts';
 import { blockedMessage } from './folderTree.ts';
 import { publishAfterCommit } from './realtime/index.ts';
@@ -737,20 +737,12 @@ function cardCapError(total: number): AppError {
   );
 }
 
-async function countDeckCards(db: Connection, deckId: string): Promise<number> {
-  const row = await db
-    .selectFrom('deck_card')
-    .select((eb) => eb.fn.countAll<string>().as('count'))
-    .where('deck_card.deck_id', '=', deckId)
-    .executeTakeFirst();
-  return Number(row?.count ?? 0);
-}
-
-// PUT /api/decks/:deckId/cards caps a deck, and it is the only other writer of
-// deck_card: a deck the import has pushed past that bound is one the deck
-// editor can never save again, because every hand edit then fails validation on
-// a list the import wrote. Refused here rather than only at finish so a person
-// learns it before uploading the export instead of after.
+// PUT /api/decks/:deckId/cards validates a whole list against the cap, and
+// every other arrival checks it one row at a time: a deck the import has pushed
+// past that bound is one the deck editor can never save again, because every
+// hand edit then fails validation on a list the import wrote. Refused here
+// rather than only at finish so a person learns it before uploading the export
+// instead of after.
 async function assertPlanWithinCap(
   db: Connection,
   deckId: string,
@@ -955,21 +947,7 @@ async function placeCardInDeck(
     const held = await countDeckCards(db, deckId);
     if (held + 1 > MAX_DECK_CARDS) throw cardCapError(held + 1);
 
-    const top = await db
-      .selectFrom('deck_card')
-      .select((eb) => eb.fn.max('deck_card.position').as('position'))
-      .where('deck_card.deck_id', '=', deckId)
-      .executeTakeFirst();
-    await db
-      .insertInto('deck_card')
-      .values({
-        id: newId(),
-        deck_id: deckId,
-        file_id: fileId,
-        quantity: 1,
-        position: (top?.position ?? -1) + 1,
-      })
-      .execute();
+    await ensureDeckCard(db, deckId, fileId);
   }
 
   await db

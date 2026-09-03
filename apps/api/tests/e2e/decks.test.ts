@@ -276,6 +276,132 @@ describe('decks', () => {
     });
   });
 
+  // What may be named and what must be named are two different sets, and this
+  // is where they come apart.
+  describe('editing a deck that holds a deleted card', () => {
+    let deckId: string;
+    let doomed: string;
+    let survivor: string;
+
+    beforeAll(async () => {
+      deckId = (await createDeck('Holds a tombstone')).body.id;
+      [doomed, survivor] = await Promise.all([
+        uploadTo(owner, projectId, 'tombstoned.png', { deck_id: deckId }),
+        uploadTo(owner, projectId, 'still-here.png', { deck_id: deckId }),
+      ]);
+      await owner.api.delete(`/api/files/${doomed}`);
+    });
+
+    // The list the deck answers with is the list the editor sends back, so a
+    // copy count carries every tombstone in it. Refusing them left a deck
+    // holding one deleted card unable to change any card's copies at all.
+    it('takes the list the deck answers with, tombstone and all', async () => {
+      const res = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: doomed, quantity: 1 },
+          { file_id: survivor, quantity: 4 },
+        ],
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.cards.map((card: { file_id: string }) => card.file_id)).toEqual([
+        doomed,
+        survivor,
+      ]);
+      expect(body.cards[1].quantity).toBe(4);
+    });
+
+    // The other side of it: an import takes a card out of the arrangement as it
+    // tombstones the artwork, so a list that cannot name the row it deleted has
+    // to be allowed to leave it out -- and the deck stays editable afterwards.
+    it('lets a list leave the tombstone out, and saves again after', async () => {
+      const dropped = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [{ file_id: survivor, quantity: 2 }],
+      });
+      expect(dropped.status).toBe(200);
+      expect((await dropped.json()).cards).toHaveLength(1);
+
+      const again = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [{ file_id: survivor, quantity: 3 }],
+      });
+      expect(again.status).toBe(200);
+    });
+
+    // And once its place is gone, restoring the image is what gives it one --
+    // a live image the deck owns that no list names is a deck no edit can save.
+    it('gives a restored card a new place at the end', async () => {
+      // The state an import removal leaves, made here rather than inherited
+      // from the test above: a guard runs one case on its own, and a fixture
+      // built by its neighbours is one that measures nothing when it does.
+      const dropped = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [{ file_id: survivor, quantity: 3 }],
+      });
+      expect(dropped.status).toBe(200);
+
+      expect((await owner.api.post(`/api/files/${doomed}/restore`)).status).toBe(200);
+
+      const body = await (await owner.api.get(`/api/decks/${deckId}`)).json();
+      expect(body.cards.map((card: { file_id: string }) => card.file_id)).toEqual([
+        survivor,
+        doomed,
+      ]);
+      expect(body.cards[1].quantity).toBe(1);
+
+      const saved = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: survivor, quantity: 3 },
+          { file_id: doomed, quantity: 1 },
+        ],
+      });
+      expect(saved.status).toBe(200);
+    });
+  });
+
+  // A card deleted by hand keeps its row, so a restore is exact rather than a
+  // second arrival at the end of the list.
+  describe('restoring a card that kept its place', () => {
+    it('leaves its position and its copy count alone', async () => {
+      const deckId = (await createDeck('Keeps its order')).body.id as string;
+      const [first, second] = await Promise.all([
+        uploadTo(owner, projectId, 'order-first.png', { deck_id: deckId }),
+        uploadTo(owner, projectId, 'order-second.png', { deck_id: deckId }),
+      ]);
+      await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: first, quantity: 5 },
+          { file_id: second, quantity: 1 },
+        ],
+      });
+
+      await owner.api.delete(`/api/files/${first}`);
+      expect((await owner.api.post(`/api/files/${first}/restore`)).status).toBe(200);
+
+      const body = await (await owner.api.get(`/api/decks/${deckId}`)).json();
+      expect(body.cards.map((card: { file_id: string }) => card.file_id)).toEqual([first, second]);
+      expect(body.cards[0].quantity).toBe(5);
+    });
+  });
+
+  // A back is a pointer, not a card. Restoring one must not put it in the list
+  // as well, or it would print as a front too.
+  describe('restoring a back image', () => {
+    it('leaves it out of the card list', async () => {
+      const deckId = (await createDeck('Back comes back')).body.id as string;
+      const card = await uploadTo(owner, projectId, 'front.png', { deck_id: deckId });
+      const back = await uploadTo(owner, projectId, 'the-back.png', {
+        deck_id: deckId,
+        role: 'back',
+      });
+
+      await owner.api.delete(`/api/files/${back}`);
+      expect((await owner.api.post(`/api/files/${back}/restore`)).status).toBe(200);
+
+      const body = await (await owner.api.get(`/api/decks/${deckId}`)).json();
+      expect(body.cards.map((entry: { file_id: string }) => entry.file_id)).toEqual([card]);
+      expect(body.deck.back_file_id).toBe(back);
+    });
+  });
+
   describe('a back image that is purged', () => {
     it('leaves the deck standing with no back', async () => {
       const deckId = (await createDeck('Loses its back')).body.id as string;
