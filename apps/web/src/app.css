@@ -91,9 +91,20 @@ body {
     sans-serif;
 }
 
+/* Selected text is the accent at full strength. accent-soft is within a few
+   percent of the canvas in both schemes, so a selection drawn in it read as
+   nothing having happened. */
 ::selection {
-  background: var(--tph-accent-soft);
-  color: var(--tph-ink);
+  background: var(--tph-accent);
+  color: var(--tph-on-accent);
+}
+
+/* The accent is the one surface that highlight cannot be seen against -- the
+   primary button and the badges are painted in it -- so there it inverts. */
+.bg-accent::selection,
+.bg-accent ::selection {
+  background: var(--tph-on-accent);
+  color: var(--tph-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
