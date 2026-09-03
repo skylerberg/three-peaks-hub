@@ -313,6 +313,14 @@ describe('decks', () => {
     // And once its place is gone, restoring the image is what gives it one --
     // a live image the deck owns that no list names is a deck no edit can save.
     it('gives a restored card a new place at the end', async () => {
+      // The state an import removal leaves, made here rather than inherited
+      // from the test above: a guard runs one case on its own, and a fixture
+      // built by its neighbours is one that measures nothing when it does.
+      const dropped = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [{ file_id: survivor, quantity: 3 }],
+      });
+      expect(dropped.status).toBe(200);
+
       expect((await owner.api.post(`/api/files/${doomed}/restore`)).status).toBe(200);
 
       const body = await (await owner.api.get(`/api/decks/${deckId}`)).json();
