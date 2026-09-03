@@ -555,6 +555,19 @@ which both ends of that arrangement rest on.
   checks the count rather than enumerating what landed. The app numbers them off
   the design's own page order, so a page deleted in Canva leaves no gap to
   reassign around.
+- **A page titled "Back" is the deck's back rather than a card of it.**
+  `isDeckBackTitle` in `packages/shared/src/imports.ts` folds the title the way
+  an identity key is folded, so such a page is still matched, renamed and
+  versioned like any other -- only the arrangement it lands in differs. It keeps
+  a `deck_card` row, held at zero copies, rather than having none: the deck
+  screen's back picker offers exactly the images the card list names, so a back
+  with no row is one nobody could choose again. `is_back` rides on the plan,
+  because taking a card's copies to zero is a change to the arrangement and the
+  plan the app shows before uploading is where it has to be visible.
+- **Nothing turns a back back into a card.** A page that stops being titled Back
+  keeps its card and the deck goes on pointing at it. This end cannot tell a
+  back the import set from one somebody chose on the deck screen, and undoing
+  the first would be the same statement about the second.
 - **The plan names the cards it is about to remove**: `removed` is
   `{ file_id, name }[]` rather than a count, and each page carries the name of
   the card it matched. Tombstoning artwork is the destructive half of a

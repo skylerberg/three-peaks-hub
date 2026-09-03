@@ -7,6 +7,7 @@ import {
   deckIdentityKey,
   deckPageFilename,
   extensionForImageType,
+  isDeckBackTitle,
   type ImportRunSummary,
 } from '@three-peaks/shared';
 import { AppError, isUniqueViolation } from '../utils/errors.ts';
@@ -504,6 +505,7 @@ interface RunPlanPage {
   action: 'add' | 'update';
   matched_by: string | null;
   name: string | null;
+  is_back: boolean;
 }
 
 // Named, not counted: the confirmation step exists to say which artwork a
@@ -716,6 +718,7 @@ function summarizePlan(planned: PlannedPage[], mapping: MappingRow[]): RunPlan {
       action: page.matchedBy === null ? 'add' : 'update',
       matched_by: page.matchedBy,
       name: page.name,
+      is_back: isDeckBackTitle(page.title),
     })),
   };
 }
@@ -914,18 +917,52 @@ const CARD_FILE_COLUMNS = [
   'file.deleted_at as deleted_at',
 ] as const;
 
+// What the import puts in the copies column of a row it is creating. A back is
+// not a face and prints none of itself: the page an export titles Back, and a
+// file this deck already points at as its back -- which is a back that has no
+// card row at all, and handing that one a copy would print the back on the
+// front of a sheet.
+async function copiesForNewCard(
+  db: Connection,
+  deckId: string,
+  fileId: string,
+  isBack: boolean
+): Promise<number> {
+  if (isBack) return 0;
+  const deck = await db
+    .selectFrom('deck')
+    .select(['deck.back_file_id as back_file_id'])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirst();
+  return deck?.back_file_id === fileId ? 0 : 1;
+}
+
 // Idempotent in both halves: a page re-imported onto a card the deck already
 // holds must not add a second row, and a card restored after a finish took it
 // out needs its place back.
+//
+// A page titled Back is the deck's back, and this is where that takes effect --
+// the moment its bytes land, beside the row saying where the artwork sits, for
+// the reason the caller gives for placing it here at all. The copy count is
+// forced to zero even on a row that already existed, which is the one place the
+// import overrules a count somebody could have typed: a back has no faces to
+// print, so there is no count there to preserve. It is also what lets this
+// reach a deck imported before any of it existed, where the back is sitting in
+// the run as an ordinary card at one copy.
+//
+// Two pages of one export titled Back is a mistake rather than a deck with two
+// backs. Both become zero-copy cards and the last to land is the one the deck
+// points at.
 async function placeCardInDeck(
   db: Connection,
   deckId: string,
   cardId: string,
-  fileId: string
+  fileId: string,
+  isBack: boolean
 ): Promise<void> {
   const existing = await db
     .selectFrom('deck_card')
-    .select(['deck_card.id as id'])
+    .select(['deck_card.id as id', 'deck_card.quantity as quantity'])
     .where('deck_card.deck_id', '=', deckId)
     .where('deck_card.file_id', '=', fileId)
     .executeTakeFirst();
@@ -938,7 +975,21 @@ async function placeCardInDeck(
     const held = await countDeckCards(db, deckId);
     if (held + 1 > MAX_DECK_CARDS) throw cardCapError(held + 1);
 
-    await ensureDeckCard(db, deckId, fileId);
+    await ensureDeckCard(db, deckId, fileId, await copiesForNewCard(db, deckId, fileId, isBack));
+  } else if (isBack && existing.quantity !== 0) {
+    await db
+      .updateTable('deck_card')
+      .set({ quantity: 0 })
+      .where('deck_card.id', '=', existing.id)
+      .execute();
+  }
+
+  if (isBack) {
+    await db
+      .updateTable('deck')
+      .set({ back_file_id: fileId, updated_at: new Date() })
+      .where('deck.id', '=', deckId)
+      .execute();
   }
 
   await db
@@ -1179,7 +1230,7 @@ async function landPage(
   // way now, and artwork a deck holds with no place in its arrangement is the
   // one state owning it is meant not to have -- which an abandoned run would
   // otherwise leave behind for every page that got through.
-  await placeCardInDeck(db, run.deckId, planned.card_id, file.id);
+  await placeCardInDeck(db, run.deckId, planned.card_id, file.id, isDeckBackTitle(input.title));
 
   const previousName = file.filename;
   const finalName = createdFile
@@ -1612,8 +1663,8 @@ async function tombstoneUnmatched(c: Ctx, access: ImportRunAccess): Promise<Tomb
 
 // The import owns membership only where it created it: it hands over a card it
 // has never handed over, and takes back one it has just tombstoned. It never
-// reorders, never touches a copy count, and never puts back a card somebody
-// took out of the deck by hand.
+// reorders, and never puts back a card somebody took out of the deck by hand.
+// It leaves a copy count alone as well, bar the one case placeCardInDeck names.
 async function syncDeckMembership(
   c: Ctx,
   access: ImportRunAccess,

@@ -160,6 +160,11 @@ export const importPlanPageSchema = type({
   // the plan calls new. What the file will be called afterwards is the page's
   // own title, which the caller already has.
   name: 'string | null',
+  // Whether this page is the deck's back rather than a card of it. On the plan
+  // because turning a card into the back and taking its copies to zero is a
+  // change to the arrangement, and the confirmation step is the only place it
+  // can be seen coming.
+  is_back: 'boolean',
 });
 
 // A card the export has stopped having, named rather than counted: this is the

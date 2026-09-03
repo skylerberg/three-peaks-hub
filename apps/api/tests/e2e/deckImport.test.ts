@@ -62,6 +62,7 @@ interface PlanPage {
   action: string;
   matched_by: string | null;
   name: string | null;
+  is_back: boolean;
 }
 
 interface StartedRun extends Run {
@@ -250,7 +251,7 @@ describe('deck imports', () => {
     const res = await owner.api.get(`/api/decks/${deckId}`);
     expect(res.status).toBe(200);
     return (await res.json()) as {
-      deck: { id: string };
+      deck: { id: string; back_file_id: string | null };
       cards: {
         file_id: string;
         quantity: number;
@@ -830,6 +831,189 @@ describe('deck imports', () => {
       expect(await versionCount(beta)).toBe(1);
       expect((await readFile(beta)).body.deleted_at).toBeNull();
       expect((await readFile(beta)).body.deck_id).toBeNull();
+    });
+  });
+
+  describe('a page titled Back', () => {
+    it('becomes the deck\u2019s back, held at no copies, and leaves the rest alone', async () => {
+      const { deckId } = await scenario('an-export-with-a-back');
+      const run = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+        { title: 'Dragon', bytes: png('dragon') },
+      ]);
+      const back = run.pages.get(2)!.file_id!;
+
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(back);
+      expect(deck.cards.find((card) => card.file_id === back)!.quantity).toBe(0);
+      // Still a row, still in page order: the deck editor draws it, and the
+      // back picker offers only images the card list names.
+      expect(deck.cards.map((card) => card.file_id)).toEqual([
+        run.pages.get(1)!.file_id,
+        back,
+        run.pages.get(3)!.file_id,
+      ]);
+      expect(
+        deck.cards.filter((card) => card.file_id !== back).map((card) => card.quantity)
+      ).toEqual([1, 1]);
+    });
+
+    it('reads the title the way an identity key does', async () => {
+      const { deckId } = await scenario('a-back-spelled-loudly');
+      const run = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: '  BACK ', bytes: png('the back') },
+      ]);
+      expect((await readDeck(deckId)).deck.back_file_id).toBe(run.pages.get(2)!.file_id);
+    });
+
+    it('leaves a card that merely mentions a back as a card', async () => {
+      const { deckId } = await scenario('a-back-of-beyond');
+      await importPages(deckId, [
+        { title: 'Back of beyond', bytes: png('beyond') },
+        { title: 'Player backs', bytes: png('players') },
+      ]);
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBeNull();
+      expect(deck.cards.map((card) => card.quantity)).toEqual([1, 1]);
+    });
+
+    it('says so on the plan, before a page goes up', async () => {
+      const { deckId } = await scenario('a-back-on-the-plan');
+      const run = await openRun(deckId, 2, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      expect(run.plan.pages.map((page) => page.is_back)).toEqual([false, true]);
+      expect((await abandon(run.id)).status).toBe(200);
+    });
+
+    it('takes an existing card to no copies, so a deck imported before this catches up', async () => {
+      const { deckId } = await scenario('a-back-that-was-a-card');
+      const first = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      const back = first.pages.get(2)!.file_id!;
+
+      // The deck a release before this one would have left: the back is an
+      // ordinary card at a copy, and nothing points at it.
+      const arranged = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: first.pages.get(1)!.file_id!, quantity: 1 },
+          { file_id: back, quantity: 1 },
+        ],
+      });
+      expect(arranged.status).toBe(200);
+      expect((await owner.api.patch(`/api/decks/${deckId}`, { back_file_id: null })).status).toBe(
+        200
+      );
+
+      await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(back);
+      expect(deck.cards.find((card) => card.file_id === back)!.quantity).toBe(0);
+    });
+
+    it('keeps the back and its zero across a re-import that changes nothing else', async () => {
+      const { deckId } = await scenario('a-back-imported-twice');
+      const first = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      const back = first.pages.get(2)!.file_id!;
+
+      const second = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      expect(second.pages.get(2)!.outcome).toBe('unchanged');
+
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(back);
+      expect(deck.cards.find((card) => card.file_id === back)!.quantity).toBe(0);
+      expect(deck.cards).toHaveLength(2);
+    });
+
+    it('hands a back with no card row back to the deck at no copies', async () => {
+      const { deckId } = await scenario('a-back-taken-off-the-list');
+      const first = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Hero', bytes: png('hero') },
+      ]);
+      const [goblin, hero] = [1, 2].map((number) => first.pages.get(number)!.file_id!);
+
+      // A back may be left off the card list -- it is the one image a deck can
+      // hold with no place in the arrangement -- so this is a back with no row
+      // of its own, reached without a page ever being titled Back.
+      expect((await owner.api.patch(`/api/decks/${deckId}`, { back_file_id: hero })).status).toBe(
+        200
+      );
+      expect(
+        (
+          await owner.api.put(`/api/decks/${deckId}/cards`, {
+            cards: [{ file_id: goblin, quantity: 1 }],
+          })
+        ).status
+      ).toBe(200);
+      expect((await readDeck(deckId)).cards).toHaveLength(1);
+
+      await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Hero', bytes: png('hero') },
+      ]);
+
+      // A copy here would print this deck's back on the front of a sheet.
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(hero);
+      expect(deck.cards.find((card) => card.file_id === hero)!.quantity).toBe(0);
+      expect(deck.cards.find((card) => card.file_id === goblin)!.quantity).toBe(1);
+    });
+
+    it('leaves a back alone once the export has stopped calling a page Back', async () => {
+      const { deckId } = await scenario('a-back-renamed');
+      const first = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      const back = first.pages.get(2)!.file_id!;
+
+      // The page keeps its card -- it is matched by page number -- and the
+      // import asserts what the export says rather than undoing what it once
+      // did. A back somebody chose by hand is indistinguishable from this one,
+      // and clearing it would be the same statement about both.
+      await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Hero', bytes: png('the back') },
+      ]);
+
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(back);
+      expect(deck.cards.find((card) => card.file_id === back)!.quantity).toBe(0);
+    });
+
+    it('takes the back out of the deck when the export stops having one', async () => {
+      const { deckId } = await scenario('a-back-dropped');
+      const first = await importPages(deckId, [
+        { title: 'Goblin', bytes: png('goblin') },
+        { title: 'Back', bytes: png('the back') },
+      ]);
+      const back = first.pages.get(2)!.file_id!;
+
+      await importPages(deckId, [{ title: 'Goblin', bytes: png('goblin') }]);
+
+      // Tombstoned like any card the export stopped having, and the pointer is
+      // left where it is: restoring the image is what puts the back back, the
+      // way restoring any tombstone is symmetric with deleting it.
+      expect((await readFile(back)).body.deleted_at).not.toBeNull();
+      const deck = await readDeck(deckId);
+      expect(deck.deck.back_file_id).toBe(back);
+      expect(deck.cards.map((card) => card.file_id)).toEqual([first.pages.get(1)!.file_id]);
     });
   });
 

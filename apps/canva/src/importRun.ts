@@ -7,6 +7,7 @@ export interface PlanRow {
   action: 'add' | 'update';
   matched_by: string | null;
   name: string | null;
+  is_back: boolean;
 }
 
 interface Removal {

@@ -1620,6 +1620,7 @@ export interface components {
         pages: {
           /** @enum {unknown} */
           action: 'add' | 'update';
+          is_back: boolean;
           matched_by: 'identity' | 'page_id' | 'page_number' | null;
           name: string | null;
           page_number: number;

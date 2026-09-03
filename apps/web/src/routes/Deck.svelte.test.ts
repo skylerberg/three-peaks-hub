@@ -400,6 +400,21 @@ describe('Deck editor', () => {
     expect((await savedCards())?.[0].quantity).toBe(0);
   });
 
+  // An import titles a page Back and the deck holds it at no copies. Without
+  // this the row reads as a card somebody set to zero by mistake, and the only
+  // thing saying otherwise is a picker further up the screen.
+  it('says which card in the list is the deck\u2019s back', async () => {
+    const BACK = '1111111a-2222-4333-8444-000000000002';
+    stubDeckWithCards(BACK);
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
+
+    expect(
+      await screen.findByText(/This deck.s back\. It prints on the reverse of every card/)
+    ).toBeInTheDocument();
+  });
+
   // The card back is named by id, so its row is a request of its own -- and the
   // save replaces decks.deck, which used to re-read that row every time even
   // though the id on it had not moved.
