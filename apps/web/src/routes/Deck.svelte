@@ -36,6 +36,7 @@
   let canEdit = $state(false);
   let picking = $state<'cards' | null>(null);
   let uploading = $state(false);
+  let discarding = $state(false);
   let name = $state('');
   let backFile = $state<File | null>(null);
 
@@ -47,11 +48,16 @@
 
   const presetId = $derived(deck ? (matchingCardPreset(deckCardSize(deck))?.id ?? '') : '');
   const totalCopies = $derived(cards.reduce((sum, card) => sum + card.quantity, 0));
+  // Scoped to this deck: the route block is not keyed, so walking from one
+  // deck to another swaps these props on the screen already mounted and the
+  // row read for the deck just left would otherwise be drawn under this name.
+  const binding = $derived(deckImports.bindingDeckId === deckId ? deckImports.binding : null);
+  const openRunId = $derived(binding?.open_run_id ?? null);
   const importStatus = $derived.by(() => {
-    if (deckImports.binding?.open_run_id) return 'An import is open.';
-    if (deckImports.binding?.source_label) {
-      return `Last imported from ${deckImports.binding.source_label}.`;
-    }
+    // Nothing at all until the row has landed, rather than "never imported
+    // into" for the moment before the answer arrives.
+    if (deckImports.loadingBinding || deckImports.bindingDeckId !== deckId) return null;
+    if (binding?.source_label) return `Last imported from ${binding.source_label}.`;
     // Nothing to set up: the artwork lands in this deck, so there is nowhere
     // else it could go and nothing to choose first.
     return 'Never imported into.';
@@ -186,6 +192,22 @@
     } catch (caught) {
       toasts.error(apiMessage(caught));
       await decks.refreshDeck().catch(() => {});
+    }
+  }
+
+  // Discarding is not undoing: the pages that landed keep the versions they
+  // wrote. It is here because the app that opened the run may be a tab someone
+  // has closed, and until the run is settled the deck refuses the next import.
+  async function discardImport() {
+    const runId = openRunId;
+    if (!runId || discarding) return;
+    discarding = true;
+    try {
+      await deckImports.abandon(runId);
+    } catch (caught) {
+      toasts.error(apiMessage(caught));
+    } finally {
+      discarding = false;
     }
   }
 
@@ -414,16 +436,29 @@
     {#if canEdit}
       <section class="flex flex-col gap-3 rounded-md border border-edge bg-surface p-4">
         <h2 class="text-lg font-semibold">Import from Canva</h2>
-        <p class="text-sm text-muted">{importStatus}</p>
-        <div>
-          <a
-            class="focus-ring inline-flex min-h-11 items-center rounded-md border border-edge px-4
-                   text-sm font-medium hover:bg-accent-soft"
-            href="/projects/{projectId}/decks/{deckId}/import"
-          >
-            Import from Canva
-          </a>
-        </div>
+        {#if importStatus}
+          <p class="text-sm text-muted">{importStatus}</p>
+        {/if}
+        <p class="text-sm text-muted">
+          Open the Three Peaks app in Canva and push the design you have open into this deck. It
+          asks for a code the first time; enter it on your
+          <a class="focus-ring rounded underline" href="/account">account page</a>.
+        </p>
+
+        {#if openRunId}
+          <div class="flex flex-col gap-2 rounded-md border border-warning p-3">
+            <p role="status" class="text-sm">
+              An import is open, so the next one will be refused until this is settled. Finishing it
+              is the Canva app's to do; discarding it here leaves every page that has already landed
+              in the deck and removes nothing.
+            </p>
+            <div>
+              <Button variant="danger" disabled={discarding} onclick={discardImport}>
+                {discarding ? 'Discarding…' : 'Discard this import'}
+              </Button>
+            </div>
+          </div>
+        {/if}
       </section>
     {/if}
 

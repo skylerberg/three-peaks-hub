@@ -81,25 +81,12 @@ describe('matchRoute', () => {
     });
   });
 
-  describe('the deck import screen', () => {
+  // The screen that read a downloaded export is gone; importing happens in the
+  // Canva app. A bookmark of it must not fall through to the deck editor, which
+  // its own path is a prefix of.
+  it('does not match the import screen that has been removed', () => {
     const DECK = '3c7f1b2e-9a4d-4c6b-8e1f-2a3b4c5d6e7f';
-
-    it('matches the deck import screen', () => {
-      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/import`)).toEqual({
-        name: 'deck-import',
-        params: { projectId: UUID, deckId: DECK },
-      });
-    });
-
-    it('is not found when either id is not a uuid', () => {
-      expect(matchRoute(`/projects/${UUID}/decks/nope/import`).name).toBe('not-found');
-      expect(matchRoute(`/projects/nope/decks/${DECK}/import`).name).toBe('not-found');
-    });
-
-    // The deck editor's own path is a prefix of this one.
-    it('does not fall through to the deck editor', () => {
-      expect(matchRoute(`/projects/${UUID}/decks/${DECK}/import`).name).not.toBe('deck');
-    });
+    expect(matchRoute(`/projects/${UUID}/decks/${DECK}/import`).name).toBe('not-found');
   });
 
   describe('the deck history screens', () => {

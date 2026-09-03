@@ -2,26 +2,19 @@ import { type } from 'arktype';
 import {
   IMPORT_MATCHED_BY,
   IMPORT_PAGE_ID_MAX_LENGTH,
-  IMPORT_SOURCE_KINDS,
   IMPORT_TITLE_MAX_LENGTH,
   MAX_DECK_CARDS,
 } from '@three-peaks/shared';
 import { optionalText, stringWithLength, uuid } from './common.ts';
 
-// Enumerated from the shared list rather than left a bare string, so widening
-// what a source may be shows up as a red diff in the generated client -- which
-// is the only place a consumer would otherwise meet a value it has no branch
-// for.
-const sourceKind = type.enumerated(...IMPORT_SOURCE_KINDS);
-
-// Enumerated for the same reason, and it earns it twice over: adding a tier is
-// exactly the change a client renders a blank cell for.
+// Enumerated rather than left a bare string, so adding a matching tier shows up
+// as a red diff in the generated client -- which is exactly the change a client
+// otherwise renders a blank cell for.
 const matchedBy = type.enumerated(...IMPORT_MATCHED_BY).or('null');
 
 export const deckImportSchema = type({
   id: 'string',
   deck_id: 'string',
-  source_kind: sourceKind,
   source_label: 'string | null',
   open_run_id: 'string | null',
   created_at: 'string',
@@ -133,16 +126,18 @@ const importTitle = stringWithLength(1, IMPORT_TITLE_MAX_LENGTH);
 // The whole export, before any of it is uploaded. Page numbers have to be
 // 1..n exactly once each: the run's page count is the length of this list, and
 // finishing checks that count rather than enumerating what landed.
-// A page id the source has of its own. Absent for a ZIP, which knows only what
-// its entry names say; present for the Canva app, which read the design. It is
-// an opaque string from another system, so it is bounded and screened for
-// control characters and otherwise taken exactly as given.
+// The page's own id in the design it came from, and the strongest thing said
+// about it. Required: the Canva app reads the design and always has one, and a
+// manifest without it can only be matched by title and number -- which is a
+// weaker import arriving silently rather than a caller being told. It is an
+// opaque string from another system, so it is bounded and screened for control
+// characters and otherwise taken exactly as given.
 const sourcePageId = stringWithLength(1, IMPORT_PAGE_ID_MAX_LENGTH);
 
 export const importRunPageInputSchema = type({
   page_number: `1 <= number.integer <= ${MAX_DECK_CARDS}`,
   'title?': importTitle,
-  'page_id?': sourcePageId,
+  page_id: sourcePageId,
 });
 
 export const startImportRunRequestSchema = type({

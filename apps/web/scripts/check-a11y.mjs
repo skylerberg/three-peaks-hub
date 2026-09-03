@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createBrowser } from './lib/browser.mjs';
-import { TINY_PNG, canvaZip, solidPng } from './lib/fixtures.mjs';
+import { TINY_PNG, solidPng } from './lib/fixtures.mjs';
 import { createProject, inspectApi, openAssets, signOut, signUp } from './lib/session.mjs';
 
 const require = createRequire(import.meta.url);
@@ -44,7 +44,6 @@ const SCREENS = [
   { name: 'file-versions', authed: true, reach: reachFileVersions },
   { name: 'deleted', authed: true, reach: reachDeleted },
   { name: 'deck-editor', authed: true, reach: reachDeckEditor },
-  { name: 'deck-import', authed: true, reach: reachDeckImport },
   { name: 'deck-history', authed: true, reach: reachDeckHistory },
   { name: 'deck-run', authed: true, reach: reachDeckRun },
   { name: 'deck-as-of', authed: true, reach: reachDeckAsOf },
@@ -164,41 +163,57 @@ async function reachDeckEditor(browser, base, scheme) {
   });
 }
 
-// The import screen: a labelled file input and a drop zone, on the screen from
-// the moment it opens because there is nothing to set up first.
-async function reachDeckImport(browser, base, scheme) {
-  await reachDeckEditor(browser, base, `import-${scheme}`);
-  await browser.click('a:has-text("Import from Canva")');
-  await browser.page.waitForSelector('h1:has-text("Import from Canva")', { timeout: 15_000 });
-  await browser.page.waitForSelector('input[type="file"]', { timeout: 15_000 });
-}
+// Two imports, driven against the API the way the Canva app drives it: the
+// first makes a two-card deck, the second drops one of its pages and repeats
+// the other byte for byte. What comes out is a run with something in every
+// group the history screens can draw -- removed, unchanged, and a card still
+// standing to photograph.
+//
+// Not through a screen, because there is none: importing happens inside Canva's
+// editor, which no probe can open. What this covers is the history screens the
+// runs leave behind, and those need a finished run rather than a way to make
+// one.
+const PAGES = [
+  { page_id: 'a11y-page-1', bytes: solidPng({ width: 24, rgb: [220, 40, 40] }) },
+  {
+    page_id: 'a11y-page-2',
+    title: 'Two of cups',
+    bytes: solidPng({ width: 24, rgb: [40, 180, 90] }),
+  },
+];
 
-// Two exports written to disk: the first makes a two-card deck, the second
-// drops one of its pages and repeats the other byte for byte. What comes out is
-// a run with something in every group the history screens can draw -- removed,
-// unchanged, and a card still standing to photograph.
-function writeExports(label) {
-  const dir = mkdtempSync(join(tmpdir(), `tph-a11y-${label}-`));
-  const first = join(dir, 'Deck export.zip');
-  const second = join(dir, 'Deck export 2.zip');
-  const kept = { name: '1.png', bytes: solidPng({ width: 24, rgb: [220, 40, 40] }) };
-  writeFileSync(
-    first,
-    canvaZip([
-      kept,
-      { name: '2 - Two of cups.png', bytes: solidPng({ width: 24, rgb: [40, 180, 90] }) },
-    ])
-  );
-  writeFileSync(second, canvaZip([kept]));
-  return { first, second };
-}
+async function importPages(token, deckId, pages) {
+  const authed = (extra = {}) => ({ Authorization: `Bearer ${token}`, ...extra });
+  const post = async (path, init) => {
+    const response = await fetch(`${API}${path}`, { method: 'POST', ...init });
+    if (!response.ok) {
+      throw new Error(`POST ${path} answered ${response.status}: ${await response.text()}`);
+    }
+    return response.json();
+  };
 
-async function importOne(browser, zipPath, pages) {
-  await browser.page.getByLabel('Canva export (.zip)').setInputFiles(zipPath);
-  const label = `Import ${pages} ${pages === 1 ? 'page' : 'pages'}`;
-  await browser.page.waitForSelector(`button:has-text("${label}")`, { timeout: 60_000 });
-  await browser.click(`button:has-text("${label}")`);
-  await browser.page.waitForSelector('h2:has-text("Imported")', { timeout: 120_000 });
+  const run = await post(`/api/decks/${deckId}/import/runs`, {
+    headers: authed({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      source_label: 'Proof design',
+      pages: pages.map((page, index) => ({
+        page_number: index + 1,
+        page_id: page.page_id,
+        ...(page.title === undefined ? {} : { title: page.title }),
+      })),
+    }),
+  });
+
+  for (const [index, page] of pages.entries()) {
+    const query = new URLSearchParams({ page_number: String(index + 1) });
+    if (page.title !== undefined) query.set('title', page.title);
+    await post(`/api/decks/import/runs/${run.id}/pages?${query}`, {
+      headers: authed({ 'Content-Type': 'image/png' }),
+      body: page.bytes,
+    });
+  }
+
+  await post(`/api/decks/import/runs/${run.id}/finish`, { headers: authed() });
 }
 
 // The history screens have nothing to say about a deck nothing has imported
@@ -206,13 +221,20 @@ async function importOne(browser, zipPath, pages) {
 async function reachImportedDeck(browser, base, scheme) {
   const deckName = `Proof history-${scheme}`;
   await reachDeckEditor(browser, base, `history-${scheme}`);
-  await browser.click('a:has-text("Import from Canva")');
-  await browser.page.waitForSelector('input[type="file"]', { timeout: 15_000 });
 
-  const exports = writeExports(scheme);
-  await importOne(browser, exports.first, 2);
-  await importOne(browser, exports.second, 1);
+  // The session the browser is already holding, so the runs belong to the
+  // signed-in account -- and the ids off the address bar, because the project
+  // and the deck were both made through the forms rather than named here.
+  const token = await browser.eval("localStorage.getItem('tph.token')");
+  const [, , projectId, , deckId] = await browser.eval('location.pathname.split("/")');
+  if (!token) throw new Error('the browser is holding no session token');
 
+  await importPages(token, deckId, PAGES);
+  await importPages(token, deckId, PAGES.slice(0, 1));
+
+  // Back in through the deck list, so the screen is drawn from the rows the
+  // imports left rather than from what it had already loaded.
+  await browser.goto(`${base}/projects/${projectId}/decks`, { wait: 250 });
   await browser.click(`a:has-text("${deckName}")`);
   await browser.page.waitForSelector('h2:has-text("Cards")', { timeout: 15_000 });
 }
@@ -293,7 +315,15 @@ async function run() {
   // authenticated screen cannot be reached without one, so those are skipped
   // rather than allowed to fail, except under CI where an absent API is a
   // broken gate rather than a local convenience.
-  const api = await inspectApi(API);
+  //
+  // The import routes are named alongside the shared list because the history
+  // screens are reached by driving them, and an API that does not serve them
+  // should say so here rather than inside a screen fifteen seconds later.
+  const api = await inspectApi(API, [
+    ['post', '/api/decks/{deckId}/import/runs'],
+    ['post', '/api/decks/import/runs/{runId}/pages'],
+    ['post', '/api/decks/import/runs/{runId}/finish'],
+  ]);
   // A server that is there but is not this build is a failure everywhere: the
   // screens behind the session cannot be reached, and saying so beats both
   // skipping them and letting them time out.

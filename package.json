@@ -42,7 +42,6 @@
     "check:model3d": "pnpm --filter @three-peaks/web run check:model3d",
     "check:print": "pnpm --filter @three-peaks/web run check:print",
     "check:scene": "pnpm --filter @three-peaks/web run check:scene",
-    "check:canva-import": "pnpm --filter @three-peaks/web run check:canva-import",
     "check:scene-shots": "node scripts/check-scene-shots.mjs",
     "blender:smoke": "tools/blender/smoke.sh",
     "check:scene-contract": "node scripts/check-scene-contract.mjs",

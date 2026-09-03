@@ -35,7 +35,7 @@ describe('deckIdentityKey', () => {
 });
 
 describe('deckPageFilename', () => {
-  it('reproduces the name the ZIP entry already has', () => {
+  it('names a card after the page number and the page title', () => {
     expect(deckPageFilename(3, 'Draft Deck Back', 'png')).toBe('3 - Draft Deck Back.png');
   });
 
@@ -54,16 +54,16 @@ describe('deckPageFilename', () => {
 });
 
 describe('normalizeSourceLabel', () => {
-  it('leaves an ordinary export name alone', () => {
-    expect(normalizeSourceLabel('Base game.zip')).toBe('Base game.zip');
+  it('leaves an ordinary design name alone', () => {
+    expect(normalizeSourceLabel('Base game')).toBe('Base game');
   });
 
   it('trims, so a padded name and the label stored from it are one value', () => {
-    expect(normalizeSourceLabel('  Base game.zip  ')).toBe('Base game.zip');
+    expect(normalizeSourceLabel('  Base game  ')).toBe('Base game');
   });
 
   it('truncates to the length the label column takes', () => {
-    const name = `${'a'.repeat(IMPORT_TITLE_MAX_LENGTH)}.zip`;
+    const name = `${'a'.repeat(IMPORT_TITLE_MAX_LENGTH)} and more`;
     expect(normalizeSourceLabel(name)).toBe(name.slice(0, IMPORT_TITLE_MAX_LENGTH));
   });
 

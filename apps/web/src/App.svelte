@@ -8,7 +8,6 @@
   import Deck from './routes/Deck.svelte';
   import DeckAsOf from './routes/DeckAsOf.svelte';
   import DeckHistory from './routes/DeckHistory.svelte';
-  import DeckImport from './routes/DeckImport.svelte';
   import DeckRun from './routes/DeckRun.svelte';
   import Decks from './routes/Decks.svelte';
   import Deleted from './routes/Deleted.svelte';
@@ -122,8 +121,6 @@
       <Decks projectId={route.params.projectId} />
     {:else if route.name === 'deck'}
       <Deck projectId={route.params.projectId} deckId={route.params.deckId} />
-    {:else if route.name === 'deck-import'}
-      <DeckImport projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'deck-history'}
       <DeckHistory projectId={route.params.projectId} deckId={route.params.deckId} />
     {:else if route.name === 'deck-run'}

@@ -230,7 +230,6 @@ jobs:
       # it. Every unit test of that path stubs the renderer out, because jsdom
       # has neither a canvas nor WebGL.
       - run: pnpm run check:scene
-      - run: pnpm run check:canva-import
       - run: pnpm run check:a11y
 
   # Mutation testing: every guard names a bug and the edit that puts it back,
