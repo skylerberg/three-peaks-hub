@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cardPreset } from '@three-peaks/shared';
+import { randomUUID } from 'node:crypto';
+import { MAX_DECK_CARDS, cardPreset } from '@three-peaks/shared';
+import { db } from '../../src/db/index.ts';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
 const PNG = Buffer.from([
@@ -163,6 +165,73 @@ describe('where a file lives', () => {
     const res = await move(loose, { component_id: componentId, role: 'artwork' });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/already has one of those/);
+  });
+
+  // Both ways in consult assertRoomForCard, where what the cap protects is
+  // written down.
+  describe('a deck already holding as many cards as a deck holds', () => {
+    let filler = 0;
+
+    // Rows rather than uploads: what this measures is the number of cards, and
+    // five hundred uploads measure the same thing far more slowly.
+    async function fillDeck(deckId: string, count: number): Promise<void> {
+      const rows = Array.from({ length: count }, () => {
+        filler += 1;
+        return { id: randomUUID(), filename: `filler-${filler}.png`, position: filler };
+      });
+
+      await db
+        .insertInto('file')
+        .values(
+          rows.map((row) => ({
+            id: row.id,
+            project_id: projectId,
+            deck_id: deckId,
+            filename: row.filename,
+            storage_key: randomUUID(),
+            content_type: 'image/png',
+            byte_size: '0',
+            uploaded_by: owner.id,
+          }))
+        )
+        .execute();
+
+      await db
+        .insertInto('deck_card')
+        .values(
+          rows.map((row) => ({
+            id: randomUUID(),
+            deck_id: deckId,
+            file_id: row.id,
+            quantity: 1,
+            position: row.position,
+          }))
+        )
+        .execute();
+    }
+
+    it('refuses an upload of one more card, before the bytes go up', async () => {
+      const deckId = await makeDeck('Full deck');
+      await fillDeck(deckId, MAX_DECK_CARDS);
+
+      const res = await upload('one-too-many.png', { deck_id: deckId });
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/as many as a deck holds/);
+    });
+
+    it('refuses a move in, and takes a back either way', async () => {
+      const deckId = await makeDeck('Full deck, moved into');
+      await fillDeck(deckId, MAX_DECK_CARDS);
+      const loose = (await upload('from-assets.png')).body.id as string;
+
+      const refused = await move(loose, { deck_id: deckId });
+      expect(refused.status).toBe(422);
+      expect((await refused.json()).error).toMatch(/as many as a deck holds/);
+
+      // A back is a pointer rather than a card, so the cap has nothing to say
+      // about it.
+      expect((await move(loose, { deck_id: deckId, role: 'back' })).status).toBe(200);
+    });
   });
 
   it('says where a deleted file came from, and what stands in its way', async () => {

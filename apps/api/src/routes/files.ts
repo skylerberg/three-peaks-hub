@@ -42,7 +42,7 @@ import {
   sameHome,
   unowned,
 } from '../services/fileHome.ts';
-import { readDeck, readDeckCards } from '../services/decks.ts';
+import { assertRoomForCard, ensureDeckCard, readDeck, readDeckCards } from '../services/decks.ts';
 import { deleteStoredObjectsAfterCommit, reclaim, storage } from '../services/storage/index.ts';
 import { publishAfterCommit } from '../services/realtime/index.ts';
 import { jsonValidator, queryValidator } from '../middleware/validators.ts';
@@ -230,27 +230,43 @@ async function placeInDeck(
     return;
   }
 
-  const top = await db
-    .selectFrom('deck_card')
-    .select((eb) => eb.fn.max('deck_card.position').as('position'))
-    .where('deck_card.deck_id', '=', deckId)
-    .executeTakeFirst();
-
-  await db
-    .insertInto('deck_card')
-    .values({
-      id: newId(),
-      deck_id: deckId,
-      file_id: fileId,
-      quantity: 1,
-      position: (top?.position ?? -1) + 1,
-    })
-    .execute();
+  await ensureDeckCard(db, deckId, fileId);
   await db
     .updateTable('deck')
     .set({ updated_at: new Date() })
     .where('deck.id', '=', deckId)
     .execute();
+}
+
+// Restoring is the third way to arrive, and the one that may find the place
+// already kept: a delete by hand leaves the `deck_card` row alone, so the card
+// comes back where it was, while an import's removal took the row with it and
+// there is nothing left to come back to. The deck's back is neither -- it is a
+// pointer rather than a card, and a row for it would print the back as a front
+// as well.
+async function rejoinDeck(
+  c: AppContext,
+  projectId: string,
+  deckId: string,
+  fileId: string
+): Promise<void> {
+  const db = c.get('db');
+  const deck = await db
+    .selectFrom('deck')
+    .select(['deck.back_file_id as back_file_id'])
+    .where('deck.id', '=', deckId)
+    .executeTakeFirstOrThrow();
+  if (deck.back_file_id === fileId) return;
+
+  await assertRoomForCard(db, deckId, fileId);
+  if (!(await ensureDeckCard(db, deckId, fileId))) return;
+
+  await db
+    .updateTable('deck')
+    .set({ updated_at: new Date() })
+    .where('deck.id', '=', deckId)
+    .execute();
+  await publishDeck(c, projectId, deckId);
 }
 
 async function removeFromDeck(c: AppContext, deckId: string, fileId: string): Promise<void> {
@@ -1030,6 +1046,13 @@ filesRouter.post(
     // previous release sends and what it has always meant.
     const { home, deckRole } = await resolveHome(db, projectId, query);
 
+    // Before the transfer, like the quota below and for the same kind of reason:
+    // a deck past the cap is one the deck editor can never save again, and
+    // finding that out after the bytes have gone up costs the upload as well.
+    if (home.kind === 'deck' && deckRole === 'card') {
+      await assertRoomForCard(db, home.deckId, id);
+    }
+
     // Checked before the transfer on what the client claims, and again below on
     // what actually arrived — the header is a hint, not a guarantee.
     const declaredLength = Number(c.req.header('content-length') ?? 0);
@@ -1553,6 +1576,10 @@ filesRouter.post(
     const { home: to, deckRole } = await resolveHome(db, access.projectId, body);
     if (sameHome(from, to)) return c.json(serializeFile(file));
 
+    // Before the move writes anything, for the reason the upload checks it
+    // before the transfer.
+    if (to.kind === 'deck' && deckRole === 'card') await assertRoomForCard(db, to.deckId, id);
+
     // Against the destination, which is a set of names this file has never been
     // compared with. Renaming on arrival beats refusing the move over a clash
     // nobody looking at either screen can see.
@@ -1708,7 +1735,7 @@ filesRouter.post(
   queryValidator(restoreFileQuerySchema),
   async (c) => {
     const id = c.req.param('id');
-    await assertFileAccess(c, id, 'write');
+    const access = await assertFileAccess(c, id, 'write');
     const query = c.req.valid('query') as { filename?: string };
 
     // A name typed into the Deleted view is a name a person chose, so it locks.
@@ -1716,6 +1743,9 @@ filesRouter.post(
       filename: query.filename,
       lockName: query.filename !== undefined,
     });
+
+    const home = parseHome(restored);
+    if (home.kind === 'deck') await rejoinDeck(c, access.projectId, home.deckId, id);
     return c.json(restored);
   }
 );
