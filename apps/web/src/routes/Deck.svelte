@@ -554,10 +554,18 @@
                 </p>
                 {#if card.file.deleted_at}
                   <p class="text-xs text-danger">Deleted. Restore it to print this card.</p>
-                {:else if dpi !== null && dpi < PRINT_DPI}
-                  <p class="text-xs text-warning">
-                    {Math.round(dpi)} DPI at this size — under the {PRINT_DPI} DPI a printer wants.
-                  </p>
+                {:else}
+                  {#if card.file_id === backFileId}
+                    <p class="text-xs text-accent">
+                      This deck’s back. It prints on the reverse of every card rather than as one,
+                      which is what no copies of it means.
+                    </p>
+                  {/if}
+                  {#if dpi !== null && dpi < PRINT_DPI}
+                    <p class="text-xs text-warning">
+                      {Math.round(dpi)} DPI at this size — under the {PRINT_DPI} DPI a printer wants.
+                    </p>
+                  {/if}
                 {/if}
               </div>
 

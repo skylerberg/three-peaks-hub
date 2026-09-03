@@ -124,11 +124,17 @@ export async function countDeckCards(db: Connection, deckId: string): Promise<nu
  * taking a second one would raise a unique violation and lose the place the
  * person is expecting back. The cap belongs to the caller: what to say when a
  * deck is full depends on what it was being asked to do.
+ *
+ * `copies` is what a row this creates is given, and only the import passes it:
+ * the back of a deck is in the arrangement and prints none of itself. A row
+ * that was already there keeps whatever count it has, whoever is calling --
+ * what to do about one is the caller's, the same way the cap is.
  */
 export async function ensureDeckCard(
   db: Connection,
   deckId: string,
-  fileId: string
+  fileId: string,
+  copies = 1
 ): Promise<boolean> {
   const top = await db
     .selectFrom('deck_card')
@@ -142,7 +148,7 @@ export async function ensureDeckCard(
       id: newId(),
       deck_id: deckId,
       file_id: fileId,
-      quantity: 1,
+      quantity: copies,
       position: (top?.position ?? -1) + 1,
     })
     .onConflict((oc) => oc.columns(['deck_id', 'file_id']).doNothing())

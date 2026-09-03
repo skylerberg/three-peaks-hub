@@ -1096,4 +1096,19 @@ export const guards = [
     testName: 'keeps every offset straight across an archive of many entries',
     runner: 'web',
   },
+  {
+    // The half of the rule that reaches a deck imported before any of it
+    // existed, where the back is already a card at one copy. Only the insert
+    // reads as load-bearing, and dropping this branch is the tidy-up somebody
+    // makes on the strength of the import never touching a copy count -- which
+    // leaves every deck that has ever been imported printing its own back on
+    // the front of a sheet, and nothing in the run saying so.
+    name: 'a page titled Back takes a card it already has to no copies',
+    package: 'api',
+    file: 'src/services/deckImport.ts',
+    find: '  } else if (isBack && existing.quantity !== 0) {',
+    replace: '  } else if (false) {',
+    tests: ['tests/e2e/deckImport.test.ts'],
+    testName: 'takes an existing card to no copies, so a deck imported before this catches up',
+  },
 ];

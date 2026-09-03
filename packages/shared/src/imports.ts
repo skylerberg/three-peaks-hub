@@ -70,6 +70,21 @@ export function deckIdentityKey(pageNumber: number, title?: string | null): stri
   return folded.length === 0 ? `n:${pageNumber}` : `t:${folded}`;
 }
 
+// The one page of an export that is not a card. A deck has one back and every
+// export carries it as an ordinary page, so its title is the only thing saying
+// which -- folded exactly the way an identity key is, so "BACK" and " Back "
+// name the back rather than two more cards.
+//
+// Not a tier of its own and not folded into the identity key: a back is matched,
+// renamed, versioned and carried forward like every other page. What it is not
+// is a face, which is why the import gives it no copies.
+const DECK_BACK_TITLE = 'back';
+
+export function isDeckBackTitle(title: string | null | undefined): boolean {
+  if (title === null || title === undefined) return false;
+  return foldTitle(title) === DECK_BACK_TITLE;
+}
+
 // Reserved so the suffix a taken name gets -- " (999)" -- never has to truncate
 // what is left.
 const SUFFIX_RESERVE = 6;

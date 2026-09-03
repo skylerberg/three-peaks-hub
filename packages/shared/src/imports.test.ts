@@ -3,6 +3,7 @@ import {
   IMPORT_TITLE_MAX_LENGTH,
   deckIdentityKey,
   deckPageFilename,
+  isDeckBackTitle,
   normalizeSourceLabel,
 } from './imports.ts';
 
@@ -31,6 +32,29 @@ describe('deckIdentityKey', () => {
   it('stays inside the bound even when lower-casing lengthens the title', () => {
     const key = deckIdentityKey(1, 'İ'.repeat(IMPORT_TITLE_MAX_LENGTH));
     expect(key.length).toBeLessThanOrEqual(IMPORT_TITLE_MAX_LENGTH + 2);
+  });
+});
+
+describe('isDeckBackTitle', () => {
+  it('reads the page an export names the back', () => {
+    expect(isDeckBackTitle('Back')).toBe(true);
+  });
+
+  it('folds case and spacing the way the identity key does', () => {
+    expect(isDeckBackTitle('BACK')).toBe(true);
+    expect(isDeckBackTitle('  back ')).toBe(true);
+  });
+
+  it('leaves a card that merely mentions a back alone', () => {
+    expect(isDeckBackTitle('Back of beyond')).toBe(false);
+    expect(isDeckBackTitle('Player back')).toBe(false);
+    expect(isDeckBackTitle('Backs')).toBe(false);
+  });
+
+  it('is false for a page with no title at all', () => {
+    expect(isDeckBackTitle(null)).toBe(false);
+    expect(isDeckBackTitle(undefined)).toBe(false);
+    expect(isDeckBackTitle('   ')).toBe(false);
   });
 });
 

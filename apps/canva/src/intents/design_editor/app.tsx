@@ -74,14 +74,20 @@ function Working({ label }: { label: string }) {
 // matched by number is one a reorder could have placed wrongly, and a person
 // reading the plan is the only one who can tell.
 function rowDetail(page: PlanRow): string {
-  if (page.action === 'add') return 'New card';
+  // Said here as well as on the deck's own screen: a person confirming from
+  // inside Canva sees this list and no other, and a page becoming the back is
+  // the one row whose copies the import decides rather than leaves alone.
+  const back = page.is_back ? '. The deck\u2019s back, 0 copies' : '';
+  if (page.action === 'add') return `New card${back}`;
   const matched =
     page.matched_by === 'page_id'
       ? 'matched by Canva page'
       : page.matched_by === 'identity'
         ? 'matched by page name'
         : 'matched by page number';
-  return page.name === null ? `Updates a card, ${matched}` : `Updates ${page.name}, ${matched}`;
+  const updates =
+    page.name === null ? `Updates a card, ${matched}` : `Updates ${page.name}, ${matched}`;
+  return `${updates}${back}`;
 }
 
 function rowLabel(page: PlanRow): string {
