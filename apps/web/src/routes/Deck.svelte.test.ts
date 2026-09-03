@@ -128,6 +128,15 @@ function fileRowReads(fileId: string): number {
   return urlsRequested().filter((url) => url.endsWith(`/api/files/${fileId}`)).length;
 }
 
+async function savedCards(): Promise<{ file_id: string; quantity: number }[] | null> {
+  const call = fetchMock.mock.calls.find(([input]) => {
+    const request = typeof input === 'string' ? null : (input as Request);
+    return request?.method === 'PUT' && request.url.includes(`/api/decks/${DECK}/cards`);
+  });
+  if (!call) return null;
+  return (await (call[0] as Request).clone().json()).cards;
+}
+
 function stubApi(): void {
   fetchMock.mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : (input as Request).url;
@@ -254,6 +263,23 @@ describe('Deck editor', () => {
     await wait(SETTLE_MS);
 
     expect(thumbnailReads()).toBe(3);
+  });
+
+  // The input's floor is the same constant the API and the CHECK are written
+  // from, so a card can be held in the deck at no copies at all. What used to
+  // happen to a typed zero was a silent clamp back up to one.
+  it('saves a copy count of zero as typed', async () => {
+    stubDeckWithCards();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
+
+    const copies = await screen.findAllByLabelText('Copies');
+    expect(copies[0]).toHaveAttribute('min', '0');
+    await fireEvent.change(copies[0], { target: { value: '0' } });
+
+    await waitFor(async () => expect(await savedCards()).not.toBeNull());
+    expect((await savedCards())?.[0].quantity).toBe(0);
   });
 
   // The card back is named by id, so its row is a request of its own -- and the

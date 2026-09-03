@@ -45,11 +45,14 @@ const DECK = {
 const BAKER = file('11111111-1111-4111-8111-111111111111', 'baker.png');
 const SMITH = file('22222222-2222-4222-8222-222222222222', 'smith.png');
 const GONE = file('33333333-3333-4333-8333-333333333333', 'gone.png', STAMP);
+// In the deck, and the deck holds none of it.
+const SPARE = file('88888888-8888-4888-8888-888888888888', 'spare.png');
 
 const CARDS = [
   { file: BAKER, file_id: BAKER.id, position: 0, quantity: 3 },
   { file: SMITH, file_id: SMITH.id, position: 1, quantity: 2 },
   { file: GONE, file_id: GONE.id, position: 2, quantity: 4 },
+  { file: SPARE, file_id: SPARE.id, position: 3, quantity: 0 },
 ];
 
 const FOLDER = {
@@ -165,9 +168,10 @@ describe('Scene export screen', () => {
     expect(screen.getByRole('button', { name: 'Export bundle' })).toBeDisabled();
   });
 
-  // A deck goes on the table as the stack it really is, and a card whose
-  // artwork is in the bin has no bytes to build from.
-  it('counts a deck by its copies, skipping a card with a deleted image', async () => {
+  // A deck goes on the table as the stack it really is: a card whose artwork is
+  // in the bin has no bytes to build from, and one the deck holds no copies of
+  // is no piece of card.
+  it('counts a deck by its copies, skipping a deleted image and a zeroed card', async () => {
     render(SceneExport, { projectId: PROJECT_ID });
     await settle();
 
@@ -175,6 +179,7 @@ describe('Scene export screen', () => {
     await settle();
 
     expect(readout()).toMatch(/5 pieces on the table/);
+    expect(screen.getByText('2 cards')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export bundle' })).toBeEnabled();
   });
 
@@ -230,7 +235,7 @@ describe('Scene export screen', () => {
 
   // Every component is built from the dial-in the studio already holds, and the
   // only place those are read is here.
-  it('reads each chosen image’s settings, and none for a card in the bin', async () => {
+  it('reads each chosen image’s settings, and none for a card nothing will build', async () => {
     render(SceneExport, { projectId: PROJECT_ID });
     await settle();
 

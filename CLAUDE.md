@@ -445,6 +445,14 @@ A deck stores its size as **millimetres and nothing else**. The named size is
 derived on read by matching those two numbers, for the same reason `file_version`
 has no pointer column.
 
+**A copy count may be zero**, and that is a third state beside taking the card
+out of the list and deleting its image: the row keeps its place and its artwork,
+and nothing physical is made of it. Every consumer that counts pieces rather than
+rows honours it — no slot on a sheet, not even under "one of each", and nothing
+on the Blender table, which means no `.glb` in the bundle either. The bound is
+`DECK_QUANTITY_LIMITS` in `packages/shared/src/decks.ts`, and the deck's own
+"N cards · M to print" is where the two numbers come apart on screen.
+
 **Deleting a deck is soft**, because a deck owns its artwork and so owns bytes.
 It is tombstoned like a folder, `?purge=true` is the only path that reclaims, and
 its cards are never marked — restoring the deck brings back exactly what was

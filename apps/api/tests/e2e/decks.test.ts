@@ -199,7 +199,24 @@ describe('decks', () => {
       expect(after.deck.back_file_id).toBeNull();
     });
 
-    it.each([0, 1000, 1.5])('refuses a quantity of %s', async (quantity) => {
+    it('keeps a card the deck prints none of, counting it once and printing it zero times', async () => {
+      const res = await owner.api.put(`/api/decks/${deckId}/cards`, {
+        cards: [
+          { file_id: cardA, quantity: 0 },
+          { file_id: cardB, quantity: 2 },
+        ],
+      });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(body.cards[0].quantity).toBe(0);
+      // Still a card of this deck, and still in its order: only the pieces of
+      // card behind it went away.
+      expect(body.deck.card_count).toBe(2);
+      expect(body.deck.total_copies).toBe(2);
+    });
+
+    it.each([-1, 1000, 1.5])('refuses a quantity of %s', async (quantity) => {
       const res = await owner.api.put(`/api/decks/${deckId}/cards`, {
         cards: [
           { file_id: cardA, quantity },
