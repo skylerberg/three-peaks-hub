@@ -253,6 +253,25 @@
     );
   }
 
+  // These fields are typed over rather than edited: whatever is in one is a
+  // whole number somebody is replacing, so focusing it selects what is there.
+  function selectAll(event: FocusEvent & { currentTarget: HTMLInputElement }) {
+    event.currentTarget.select();
+  }
+
+  // Tab walks the copy counts and nothing else. A sixty-card deck is sixty
+  // numbers to type, and the four buttons a row carries sit between every pair
+  // of them; they are reachable with the pointer.
+  function moveBetweenCopies(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (event.key !== 'Tab') return;
+    const row = event.currentTarget.closest('li');
+    const sibling = event.shiftKey ? row?.previousElementSibling : row?.nextElementSibling;
+    const next = sibling?.querySelector<HTMLInputElement>('input[data-copies]');
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  }
+
   function move(index: number, by: number) {
     const next = [...cards];
     const target = index + by;
@@ -353,6 +372,7 @@
             max={limits.width_mm[1]}
             step={0.5}
             disabled={!canEdit}
+            onfocus={selectAll}
             onchange={(event) => {
               const value = Number(event.currentTarget.value);
               if (Number.isFinite(value)) void patch({ card_width_mm: value });
@@ -368,6 +388,7 @@
             max={limits.height_mm[1]}
             step={0.5}
             disabled={!canEdit}
+            onfocus={selectAll}
             onchange={(event) => {
               const value = Number(event.currentTarget.value);
               if (Number.isFinite(value)) void patch({ card_height_mm: value });
@@ -502,12 +523,15 @@
                 <span class="text-muted">Copies</span>
                 <input
                   type="number"
+                  data-copies
                   class="focus-ring min-h-11 w-20 rounded-md border border-edge bg-surface px-2 text-sm"
                   value={card.quantity}
                   min={minQuantity}
                   max={maxQuantity}
                   step="1"
                   disabled={!canEdit}
+                  onfocus={selectAll}
+                  onkeydown={moveBetweenCopies}
                   onchange={(event) => setQuantity(card.file_id, Number(event.currentTarget.value))}
                 />
               </label>

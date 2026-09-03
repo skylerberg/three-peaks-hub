@@ -333,4 +333,45 @@ describe('Deck editor', () => {
     // And this deck is untouched by it.
     expect(screen.getByRole('heading', { name: 'Base game' })).toBeInTheDocument();
   });
+
+  // A copy count is replaced far more often than it is amended, and clicking
+  // into one used to leave a caret between the digits.
+  it('selects the copy count when it is focused', async () => {
+    stubDeckWithCards();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    // The copies inputs are disabled until the role has come back.
+    await screen.findByRole('button', { name: 'Move in from Assets' });
+
+    const copies = await screen.findAllByLabelText<HTMLInputElement>('Copies');
+    const selected = vi.spyOn(copies[0], 'select');
+    copies[0].focus();
+
+    expect(selected).toHaveBeenCalled();
+  });
+
+  // Every row carries four buttons between its count and the next one, and a
+  // deck is a column of numbers somebody is typing down.
+  it('tabs between the copy counts rather than through the row buttons', async () => {
+    stubDeckWithCards();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByRole('button', { name: 'Move in from Assets' });
+
+    const copies = await screen.findAllByLabelText<HTMLInputElement>('Copies');
+    copies[0].focus();
+
+    // False: the key was handled here, so the browser's own tab order never
+    // reaches the buttons.
+    expect(await fireEvent.keyDown(copies[0], { key: 'Tab' })).toBe(false);
+    expect(document.activeElement).toBe(copies[1]);
+
+    expect(await fireEvent.keyDown(copies[1], { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(copies[0]);
+
+    // At either end there is no count to move to, and Tab does what it always
+    // does.
+    expect(await fireEvent.keyDown(copies[0], { key: 'Tab', shiftKey: true })).toBe(true);
+    expect(await fireEvent.keyDown(copies[2], { key: 'Tab' })).toBe(true);
+  });
 });
