@@ -276,7 +276,7 @@ list it was answered with — so refusing a tombstone there left a deck holding 
 deleted card unable to change any card's copy count at all. An import removal is
 the other direction: it takes the row as it tombstones the artwork, so a list
 that cannot name that row has to be allowed to leave it out. Both jam the same
-editor, from opposite sides, and 0014 is the repair for the decks that were
+editor, from opposite sides, and 0015 is the repair for the decks that were
 already stranded.
 
 Moving is `POST /api/files/:id/move`, and it is the only way a home changes. The

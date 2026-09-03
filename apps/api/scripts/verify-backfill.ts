@@ -1,7 +1,7 @@
 /**
  * Runs the migrations that rewrite existing rows against rows shaped like the
  * ones a project holds, on a scratch database of its own: 0009's homes backfill
- * and 0014's repair of deck cards that lost their place.
+ * and 0015's repair of deck cards that lost their place.
  *
  * Not a `check:*` script and not in the gate: a backfill runs once, against
  * data no test fixture has. What this is for is the hour before that run --
@@ -244,7 +244,7 @@ try {
 
   await after.end();
 
-  // 0014, rehearsed on its own: a deck holding artwork with no place in its
+  // 0015, rehearsed on its own: a deck holding artwork with no place in its
   // list, which is what an import removal followed by a hand restore used to
   // leave behind. Planted after the whole set has run, then stepped back over
   // and run forward again -- the state it repairs cannot exist in the schema
@@ -275,7 +275,7 @@ try {
   );
   await planted.end();
 
-  await stepBackPast('0014_deck_card_places');
+  await stepBackPast('0015_deck_card_places');
   migrate();
 
   const repaired = new pg.Client({
