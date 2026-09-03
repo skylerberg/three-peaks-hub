@@ -55,7 +55,6 @@ type Ctx = Pick<AppContext, 'get'>;
 export interface SerializedImport {
   id: string;
   deck_id: string;
-  source_kind: string;
   source_label: string | null;
   open_run_id: string | null;
   created_at: string;
@@ -147,7 +146,6 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
     .select((eb) => [
       'deck_import.id as id',
       'deck_import.deck_id as deck_id',
-      'deck_import.source_kind as source_kind',
       'deck_import.source_label as source_label',
       'deck_import.created_at as created_at',
       'deck_import.updated_at as updated_at',
@@ -164,7 +162,6 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
   return {
     id: row.id,
     deck_id: row.deck_id,
-    source_kind: row.source_kind,
     source_label: row.source_label,
     open_run_id: row.open_run_id ?? null,
     created_at: new Date(row.created_at).toISOString(),
@@ -183,11 +180,7 @@ export async function readBinding(c: Ctx, deckId: string): Promise<SerializedImp
  * A row with no runs is indistinguishable from one that has never existed,
  * which is what makes this safe to call on every start.
  */
-export async function ensureImport(
-  c: Ctx,
-  deckId: string,
-  sourceKind = 'zip'
-): Promise<{ importId: string }> {
+export async function ensureImport(c: Ctx, deckId: string): Promise<{ importId: string }> {
   const db = c.get('db');
 
   const existing = await db
@@ -200,9 +193,13 @@ export async function ensureImport(
 
   const id = newId();
   try {
+    // source_kind is written because the column is NOT NULL and never read
+    // back: there is one source now, and a value nothing branches on says
+    // nothing. It goes in the release that drops the column, which cannot be
+    // this one -- the release beside it still writes the column itself.
     await db
       .insertInto('deck_import')
-      .values({ id, deck_id: deckId, source_kind: sourceKind })
+      .values({ id, deck_id: deckId, source_kind: 'canva' })
       .execute();
   } catch (error) {
     // Two first imports of one deck at once; the unique on deck_id refuses the
@@ -491,9 +488,8 @@ export async function readDeckAsOfRun(c: Ctx, importId: string, runId: string): 
 interface StartRunPage {
   pageNumber: number;
   title: string | null;
-  // What the source calls this page, when it has a name for it of its own. A
-  // ZIP never does; the Canva app always does.
-  pageId: string | null;
+  // The page's own id in the design it came from.
+  pageId: string;
 }
 
 export interface StartRunInput {
@@ -566,12 +562,10 @@ function orderedManifest(pages: StartRunPage[]): StartRunPage[] {
     // tier rests on that. Two pages claiming one id would have them contend for
     // a card the way two titles do -- which the tier has no tie-break for,
     // because it was built on there never being one.
-    if (page.pageId !== null) {
-      if (pageIds.has(page.pageId)) {
-        throw new AppError(422, "An export's pages each have their own page id");
-      }
-      pageIds.add(page.pageId);
+    if (pageIds.has(page.pageId)) {
+      throw new AppError(422, "An export's pages each have their own page id");
     }
+    pageIds.add(page.pageId);
   }
   return sorted;
 }
@@ -624,12 +618,10 @@ async function readLiveMapping(
  * than the export being refused. Page ids cannot contend like that -- they are
  * unique within the design they came from.
  *
- * A page carries its id onto whatever card it matched, by whichever tier. That
- * is the whole of adoption: a deck built from ZIPs is matched by title here,
- * and finishing writes the ids onto those cards, so the import after this one
- * survives a reorder that this one could not have. The title key is left
- * exactly where it was, which is what keeps the second tier alive for a design
- * somebody copies later.
+ * A page carries its id onto whatever card it matched, by whichever tier, and
+ * leaves the card's title key exactly where it was. That is what keeps the
+ * second tier alive: a page duplicated in Canva mints a new id and keeps the
+ * title, so the copy is placed by a title the id cannot speak for.
  */
 function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] {
   const byIdentity = new Map<string, MappingRow>();
@@ -641,6 +633,8 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
     else byPage.set(row.page_number, [row]);
   }
 
+  // A card written before the id was recorded has none, and null is not a key
+  // any page can name -- so it is left out rather than bucketed under one.
   const byPageId = new Map<string, MappingRow>();
   for (const row of mapping) {
     if (row.source_page_id !== null && !byPageId.has(row.source_page_id)) {
@@ -663,7 +657,7 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
   };
 
   for (const [index, page] of pages.entries()) {
-    if (page.pageId !== null) claim(index, byPageId.get(page.pageId), 'page_id');
+    claim(index, byPageId.get(page.pageId), 'page_id');
   }
 
   for (const [index, key] of keys.entries()) {
@@ -687,9 +681,6 @@ function planPages(pages: StartRunPage[], mapping: MappingRow[]): PlannedPage[] 
       cardId: match?.row.card_id ?? newId(),
       matchedBy: match?.matchedBy ?? null,
       identityKey: keys[index],
-      // Carried onto whatever card this page matched, which is what adopts a
-      // deck the ZIP path built. A page whose source has no id for it leaves
-      // the card's alone rather than clearing one an earlier run wrote.
       sourcePageId: page.pageId,
       name: match?.row.filename ?? null,
     };
@@ -1498,8 +1489,7 @@ async function detachMovedCards(db: Connection, importId: string, deckId: string
 // Only identity_key needs that, because only a title moves between cards -- a
 // page slid into the middle of an export shifts every title down one. A page id
 // cannot: the tier that matches on it runs first and takes the card already
-// holding it, so no other row is left wanting that id. Parking it as well would
-// also destroy the value the coalesce below reads back.
+// holding it, so no other row is left wanting that id.
 async function applyPlannedIdentities(db: Connection, runId: string): Promise<void> {
   await db
     .updateTable('deck_import_card')
@@ -1515,10 +1505,7 @@ async function applyPlannedIdentities(db: Connection, runId: string): Promise<vo
     .set({
       identity_key: (eb) => eb.ref('import_run_page.identity_key'),
       page_number: (eb) => eb.ref('import_run_page.page_number'),
-      // Coalesced, not assigned: a ZIP has no page id for anything, and a run
-      // from one must not strip the ids an app run wrote. Re-importing a deck
-      // the other way round is then a thing that can be done twice.
-      source_page_id: sql`coalesce(import_run_page.source_page_id, deck_import_card.source_page_id)`,
+      source_page_id: (eb) => eb.ref('import_run_page.source_page_id'),
     })
     .whereRef('import_run_page.card_id', '=', 'deck_import_card.id')
     .where('import_run_page.run_id', '=', runId)

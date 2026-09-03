@@ -1,13 +1,11 @@
-// The writer half of the container the reader in ../canva/zip.ts already walks.
-// Neither imports the other: an import of a Canva export and an export of a
-// Blender bundle share a file format and nothing else, and coupling them would
-// drag the deck importer into this screen's chunk. What holds the two to one
+// The whole of the container the scene bundle ships in. What holds it to one
 // reading of the spec is zip.test.ts, which writes with this and reads back
-// with that -- so a wrong checksum, a wrong size or a misplaced offset fails
-// against a table and a parser written independently of these.
+// with the parser in testZip.ts -- so a wrong checksum, a wrong size or a
+// misplaced offset fails against a table and a walk that share none of this
+// file's arithmetic.
 //
-// There is no dependency here for the same reason there is none over there:
-// deflate-raw is a stream every browser this targets already has.
+// There is no dependency for it: deflate-raw is a stream every browser this
+// targets already has.
 
 // A refusal a person is meant to read. Nothing below fails on a bundle a ZIP
 // can express, so a throw here means the export is past the format's own

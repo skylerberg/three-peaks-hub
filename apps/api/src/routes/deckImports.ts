@@ -104,7 +104,7 @@ deckImportsRouter.post(
     const body = c.req.valid('json') as {
       id?: string;
       source_label?: string | null;
-      pages: { page_number: number; title?: string; page_id?: string }[];
+      pages: { page_number: number; title?: string; page_id: string }[];
     };
 
     // Created on the first run rather than set up beforehand: the deck is the
@@ -120,7 +120,7 @@ deckImportsRouter.post(
         pages: body.pages.map((page) => ({
           pageNumber: page.page_number,
           title: page.title ?? null,
-          pageId: page.page_id ?? null,
+          pageId: page.page_id,
         })),
       }
     );

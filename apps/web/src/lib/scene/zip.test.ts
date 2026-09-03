@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readZip } from '../canva/zip.ts';
+import { readZip } from './testZip.ts';
 import { writeZip, ZipWriteError } from './zip.ts';
 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);

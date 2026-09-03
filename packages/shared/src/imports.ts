@@ -2,25 +2,16 @@
 // here so the browser and the API agree rather than each folding a title its
 // own way.
 //
-// The two sources say different amounts. A ZIP names its entries after the page
-// number and the page title -- `1.png`, `3 - Draft Deck Back.png` -- and that
-// name is everything it knows. The Canva app reads the design itself and also
-// has the page's own id, which is stable across a rename and a reorder.
-//
-// A page id is not folded into the identity key, and that is the whole reason a
-// card can be matched two ways. It rides in a column of its own, so a card
-// keeps its title key as well -- which is what lets a deck built from ZIPs,
-// which have no page ids at all, be imported by the app afterwards without
-// every card being tombstoned and re-added.
+// A design is read by the Canva app, which knows three things about a page: its
+// number, its title, and the page's own id. The id is the strongest of them and
+// is a column of its own rather than a third prefix on the identity key: a card
+// keeps its title key as well, so a page that is copied -- minting a new id and
+// keeping the title -- still lands on the card it is a copy of.
 //
 // Measured against Canva rather than assumed: a page id survives a rename, a
 // reorder, and being carried into a duplicate of the whole design. What mints a
 // new one is duplicating a PAGE -- the copy gets its own id and keeps the
 // title, which is the case only the id can tell apart.
-
-// What an export came out of. 'zip' is a file somebody downloaded and dropped;
-// 'canva' is the Canva app pushing the design it is open on.
-export const IMPORT_SOURCE_KINDS = ['zip', 'canva'] as const;
 
 export const IMPORT_OUTCOMES = ['added', 'updated', 'unchanged', 'removed'] as const;
 
@@ -35,12 +26,10 @@ export const IMPORT_TITLE_MAX_LENGTH = 200;
 // cannot be made arbitrarily long by the caller.
 export const IMPORT_PAGE_ID_MAX_LENGTH = 128;
 
-// What the API keeps when it is handed the name of an export: trimmed, cut to
-// the length above, and nothing at all when that leaves it empty. A run's label
-// is compared against the file offered to resume it, and the comparison is only
-// ever between two strings that have been through here -- a raw `File.name` is
-// the one the server never stored. Trimming precedes the cut, or a name cut
-// mid-space carries that space and the two sides differ by it.
+// What the API keeps when it is handed the name a design goes by: trimmed, cut
+// to the length above, and nothing at all when that leaves it empty. It is what
+// a deck shows as the thing it was last imported from. Trimming precedes the
+// cut, or a name cut mid-space carries a trailing space into the row.
 export function normalizeSourceLabel(label: string | null | undefined): string | null {
   if (label === null || label === undefined) return null;
   const trimmed = label.trim();
@@ -58,8 +47,8 @@ export interface ImportRunSummary {
 }
 
 // NFC first, because "é" as one code point and as "e" plus a combining accent
-// are different bytes and the unique index compares bytes -- a title that made
-// the round trip through a ZIP entry name on macOS arrives decomposed.
+// are different bytes and the unique index compares bytes -- and which of the
+// two a title arrives as is not something the sending end promises.
 // Whitespace is collapsed next, or an invisible double space between two
 // exports reads as a different card and tombstones the original. The slice
 // comes last, because lower-casing a string can lengthen it.
@@ -87,8 +76,9 @@ const SUFFIX_RESERVE = 6;
 
 const MAX_FILENAME_LENGTH = 255;
 
-// Reproduces the ZIP entry's own name, because that is what someone who
-// unzipped the export by hand already has on disk. `extension` carries no dot.
+// What an imported page is called once it is a card: the page number and the
+// page's own title, which is how somebody reading the deck finds the page they
+// are looking at in Canva. `extension` carries no dot.
 export function deckPageFilename(
   pageNumber: number,
   title: string | null,

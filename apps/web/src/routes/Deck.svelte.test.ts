@@ -252,6 +252,68 @@ describe('Deck editor', () => {
     expect(await screen.findAllByText('renamed-20.png')).not.toHaveLength(0);
   });
 
+  // The Canva app is where an import runs, and a tab somebody closed leaves the
+  // run open -- which the deck refuses every later import behind. This is the
+  // only place it can be settled.
+  describe('a run the Canva app left open', () => {
+    const RUN = '5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a';
+
+    function stubOpenRun(): { abandons: () => number } {
+      let abandoned = false;
+      fetchMock.mockImplementation(async (input) => {
+        const url = typeof input === 'string' ? input : (input as Request).url;
+        if (url.includes('/abandon')) {
+          abandoned = true;
+          return jsonResponse(200, { id: RUN, status: 'abandoned' });
+        }
+        if (url.includes(`/api/decks/${DECK}/import`)) {
+          return jsonResponse(200, {
+            id: 'import-1',
+            deck_id: DECK,
+            source_label: 'Base game',
+            open_run_id: abandoned ? null : RUN,
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-01T00:00:00.000Z',
+          });
+        }
+        if (url.includes(`/api/decks/${DECK}`)) {
+          return jsonResponse(200, { deck: DECK_ROW, cards: [] });
+        }
+        return jsonResponse(200, {
+          id: PROJECT,
+          name: 'Colori',
+          description: null,
+          role: 'editor',
+          created_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        });
+      });
+      return { abandons: () => urlsRequested().filter((url) => url.includes('/abandon')).length };
+    }
+
+    it('offers to discard it, and stops offering once it is discarded', async () => {
+      const { abandons } = stubOpenRun();
+
+      render(Deck, { projectId: PROJECT, deckId: DECK });
+      const discard = await screen.findByRole('button', { name: 'Discard this import' });
+
+      await fireEvent.click(discard);
+
+      await waitFor(() => expect(abandons()).toBe(1));
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Discard this import' })).toBeNull()
+      );
+    });
+
+    it('says what the deck was last imported from', async () => {
+      stubOpenRun();
+
+      render(Deck, { projectId: PROJECT, deckId: DECK });
+
+      expect(await screen.findByText('Last imported from Base game.')).toBeInTheDocument();
+    });
+  });
+
   // The history screen is read-only, so it is offered outside the editor-only
   // section the Canva import sits in -- and it costs this screen no request.
   it('links to the import history whether or not this account may edit', async () => {
@@ -286,6 +348,16 @@ describe('Deck editor', () => {
       expect(asked.some((url) => url.includes('/import/runs'))).toBe(false);
       view.unmount();
     }
+  });
+
+  it('offers nothing to discard on a deck with no open run', async () => {
+    stubApi();
+
+    render(Deck, { projectId: PROJECT, deckId: DECK });
+    await screen.findByRole('link', { name: 'Import history' });
+
+    expect(screen.queryByRole('button', { name: 'Discard this import' })).toBeNull();
+    expect(await screen.findByText('Never imported into.')).toBeInTheDocument();
   });
 
   // Every save sends the whole list and shows the response, so all three rows

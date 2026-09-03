@@ -7,7 +7,7 @@ import {
   instancesForTarget,
   validateScene,
 } from '@three-peaks/shared';
-import { readZip } from '../canva/zip.ts';
+import { readZip } from './testZip.ts';
 import { buildSceneBundle, SceneExportError, type SceneBundleRequest } from './bundle.ts';
 import type { SceneSelection } from './assets.ts';
 

@@ -1274,8 +1274,6 @@ export interface components {
       deck_id: string;
       id: string;
       open_run_id: string | null;
-      /** @enum {unknown} */
-      source_kind: 'canva' | 'zip';
       source_label: string | null;
       updated_at: string;
     };
@@ -5466,8 +5464,8 @@ export interface operations {
       content: {
         'application/json': {
           pages: {
+            page_id: string;
             page_number: number;
-            page_id?: string;
             title?: string;
           }[];
           id?: components['schemas']['Uuid'];

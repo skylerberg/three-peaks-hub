@@ -519,28 +519,29 @@ pays for and `apps/api` gains no PDF dependency.
   still a specifier Vite must resolve, so without the alias the build fails on a
   branch that cannot run.
 
-## Importing a Canva export
+## Importing a design
 
-`/projects/:projectId/decks/:deckId/import` reads the export **in the browser**
-and posts one page at a time. There is no ZIP dependency: `apps/web/src/lib/canva/`
-walks the central directory itself, because `DecompressionStream('deflate-raw')`
-is in every browser this targets — and `minimumReleaseAgeStrict` would refuse a
-freshly published package anyway.
+There is no import screen. The Canva app pushes the design it is open on, and
+what the web app keeps is the marker beside a deck — what it was last imported
+from, and a way to clear a run left open. Everything below is the API's half,
+which both ends of that arrangement rest on.
 
-- **An entry's method, its sizes and its crc are read from the central
-  directory.** The local header is consulted for one thing only, where the data
-  begins: the two records disagree about how long the extra field is, and macOS
-  `ditto` leaves the sizes to a data descriptor it never writes into the header.
 - **A page is matched on three tiers, strongest first**: the page's own id, then
   its title, then its number. `planPages` runs them as three passes rather than
   one interleaved walk, because a weaker claim walked earlier would take the card
   a later page names outright. The plan says per row which tier caught it.
+- **Every page of a manifest carries an id**, and a manifest without one is
+  refused. The app reads the design and always has one, so the only thing an
+  absent id could mean is a caller that has quietly dropped to matching on
+  titles — which is worth a 422 rather than an import that lands weaker than it
+  looks.
 - **The page id is a column, not a fourth prefix on `identity_key`.** The two
   answer different questions and a card wants both. Folded into one column,
-  adopting the id would throw the title away — and a title is all a ZIP has, so a
-  deck built that way could never be picked up by the app without tombstoning
-  every card and adding it back. `deck_import_card.source_page_id` is written by
-  finishing, coalesced so a ZIP run cannot strip the ids an app run wrote.
+  taking the id would throw the title away — and the title is what places a page
+  whose id this deck has never seen, which is what a design rebuilt somewhere
+  else arrives as. `deck_import_card.source_page_id` is written by finishing,
+  onto whatever card the page matched by whichever tier, so a deck placed by
+  title once is placed by id from then on.
 - **What a Canva page id survives was measured, not assumed**: a rename, a
   reorder, and being carried into a duplicate of the whole design, which keeps
   every id it copied. Duplicating a _page_ is what mints a new one, and the copy
@@ -549,40 +550,36 @@ freshly published package anyway.
   cards, so `applyPlannedIdentities` needs its two statements; a page id cannot,
   because the tier matching on it runs first and takes whatever card already
   holds it, leaving no other row wanting that id.
-- **Page numbers are reassigned before the manifest goes up.** A deleted Canva
-  page leaves a gap, and the run refuses anything but a contiguous list. The cost
-  lands on untitled pages, which are identified by number: one after the gap
-  moves onto the card the page before it made. A titled page is unaffected — and
-  a page carrying its own id is unaffected by either.
+- **A manifest's pages are numbered 1..n, each exactly once**, and anything else
+  is refused: the run's page count is the length of that list, and finishing
+  checks the count rather than enumerating what landed. The app numbers them off
+  the design's own page order, so a page deleted in Canva leaves no gap to
+  reassign around.
 - **The plan names the cards it is about to remove**: `removed` is
   `{ file_id, name }[]` rather than a count, and each page carries the name of
   the card it matched. Tombstoning artwork is the destructive half of a
   re-import, and the confirmation step is the only place it can be seen coming.
-  Do not work that list out in the browser by diffing the deck against the plan:
-  the server's matching includes a tie-break nothing here can see.
+  Do not work that list out in the client by diffing the deck against the plan:
+  the server's matching includes a tie-break nothing there can see.
 - **There is nothing to bind.** The deck owns its cards, so the deck is where an
-  export lands and no folder is chosen first. `deck_import` survives for the
-  resume check — the export's name and its page count — and `ensureImport`
+  import lands and no folder is chosen first. `deck_import` survives to say what
+  a deck was last imported from and whether a run is open, and `ensureImport`
   writes it on the first run rather than a person setting it up. A card that
   leaves the deck detaches its mapping row, which is what `detachMovedCards`
   now asks: not whether the file left a folder, but whether it left the deck.
-- **One store drives every deck's import, so every value in it carries the deck
-  it is for.** `runDeckId` scopes the run, the plan and the summary;
-  `bindingDeckId` scopes the import row. The route block is not
-  keyed, so moving between two decks' screens swaps the props on the screen
-  already mounted: nothing unmounts and nothing resets. A plan nobody has
-  confirmed deliberately outlives the screen that made it — a run in flight has
-  to — and the next deck's screen would otherwise adopt it and upload into the
-  first deck, or offer to discard a run belonging to the deck just left.
-- **Resuming checks the export's name and its page count, before a page goes
-  up.** The run numbers its pages from the manifest it opened with, so a
-  different export replayed into it lands that artwork on these cards, under
-  those numbers. The name alone does not settle it: Canva names an export after
-  the design, so a second export taken after an edit arrives under the name the
-  run already holds. Both ends of the name comparison go through
-  `normalizeSourceLabel` in `packages/shared/src/imports.ts`, because the label
-  was stored through the trim-and-truncate every text field gets and a raw
-  `File.name` is what the server never saw.
+- **`source_kind` is written and never read.** One source is left, so a value
+  nothing branches on says nothing; the column is NOT NULL, which is why it is
+  still written at all. Dropping it is a follow-up release's job, like any other
+  column a live release still writes.
+- **The deck screen scopes the import row it draws.** `bindingDeckId` says which
+  deck the row belongs to, because the route block is not keyed: walking from one
+  deck to another swaps props on the screen already mounted, and the row read for
+  the deck just left would otherwise be drawn — open run and all — under this
+  deck's name.
+- **Discarding an open run is the web app's, and finishing it is not.** A run
+  outlives the Canva tab that opened it and the deck refuses every later import
+  behind it, so the deck screen offers to abandon one. Nothing already imported
+  is undone by that: the pages that landed keep the versions they wrote.
 - **`GET /api/decks/:deckId/import` answers 404 for a deck nothing has been
   imported into.** It means "no history yet" rather than "set something up
   first", and the timeline beside it answers 200 with an empty list for the same
@@ -591,8 +588,8 @@ freshly published package anyway.
 - **Pages go up one at a time.** Each request asserts the storage quota, so a
   parallel burst can have every one of them pass a check the set of them fails.
 - Nothing is uploaded until someone has read the plan and pressed Import.
-  Re-importing tombstones the cards the export has stopped having, which is too
-  destructive to happen on a drop.
+  Re-importing tombstones the cards the design has stopped having, which is too
+  destructive to happen on a click.
 
 ### Reading the history back
 
@@ -629,17 +626,17 @@ one and appends `?version=` to the download it already fetches with the
 credential. Without it a row from last month renders with today's artwork, which
 is the single thing this whole feature exists not to do.
 
-`check:canva-import` is the only thing that reads a whole round trip. Its
-fixture is built to reach two traps a unit test can build but not carry all the
-way to a deck: the local and central extra fields are deliberately different
-lengths, and the one non-ASCII entry name is UTF-8 with the flag left clear.
-Then it imports the same export twice, and the second pass must leave every card
-on the version it already had.
+No browser probe reads a whole import round trip, because there is no screen to
+drive one from — it happens inside Canva's editor. `apps/api`'s own e2e suite is
+what imports one design twice and holds the second pass to leaving every card on
+the version it already had, and `check:a11y` drives the same routes to give the
+history screens a finished run to draw.
 
 # The Canva app
 
 `apps/canva` runs inside Canva's own editor and pushes the open design into a
-deck, so importing needs no ZIP downloaded and none uploaded. It is React and
+deck, which is the only way anything is imported: nothing is downloaded and
+nothing is uploaded by hand. It is React and
 Canva's toolchain — the only package here that is neither Svelte nor Vite — and
 it ships by **uploading a bundle to the Developer Portal**, touching no image,
 no manifest and no Terraform. `pnpm --filter @three-peaks/canva run build:prod`
@@ -696,10 +693,10 @@ does better, and a tool built to hand work over should not spend its surface
 area competing with what it hands to.
 
 **Nothing here added a dependency.** The archive is written by
-`apps/web/src/lib/scene/zip.ts`, the writing half of the reader
-`apps/web/src/lib/canva/zip.ts` already had to be — and deliberately not the
-same module as it, because a container format is the whole of what the two
-features have in common. Everything else this screen needs is the studio's own
+`apps/web/src/lib/scene/zip.ts`, and read back — in its tests only — by the
+separate parser in `apps/web/src/lib/scene/testZip.ts`, which shares none of the
+writer's arithmetic and so can actually disagree with it. Everything else this
+screen needs is the studio's own
 geometry, reached the way the studio reaches it — `apps/web/src/lib/scene/render.ts`
 is the only module here that touches `three`, and only `await import()` reaches
 that, so ticking a component costs nothing until Export is pressed.

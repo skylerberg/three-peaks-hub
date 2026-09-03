@@ -1,11 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import {
-  IMPORT_SOURCE_KINDS,
-  IMPORT_TITLE_MAX_LENGTH,
-  MAX_DECK_CARDS,
-  cardPreset,
-} from '@three-peaks/shared';
+import { IMPORT_TITLE_MAX_LENGTH, MAX_DECK_CARDS, cardPreset } from '@three-peaks/shared';
 import { db } from '../../src/db/index.ts';
 import { createUser, deleteUser, type TestUser } from '../setup/testContext.ts';
 
@@ -23,8 +18,9 @@ const poker = cardPreset('poker')!;
 interface Page {
   title?: string | null;
   bytes: Buffer;
-  // What the source calls the page. Absent is a ZIP, which has only its entry
-  // names; present is the Canva app, which read the design itself.
+  // The page's own id in the design. Every manifest carries one, so leaving it
+  // out here does not mean "no id" -- it means an id this deck has never seen,
+  // which is what a page built somewhere else arrives as.
   pageId?: string;
 }
 
@@ -158,19 +154,22 @@ describe('deck imports', () => {
   }
 
   // Two spellings of one request: the page count the run route reads, and the
-  // manifest of page numbers and titles a run that plans its matching up front
-  // is computed from. Undeclared keys are stripped by the validator, so
-  // whichever half the server does not know about costs nothing to send.
+  // manifest of page numbers, titles and page ids a run that plans its matching
+  // up front is computed from. Undeclared keys are stripped by the validator,
+  // so whichever half the server does not know about costs nothing to send.
+  //
+  // A page that names no id gets a fresh one rather than none: the manifest
+  // requires one, and an id nothing has seen leaves the weaker tiers to settle
+  // the page -- which is what these tests are about whenever they leave it out.
   function startRun(deckId: string, pageCount: number, user: TestUser = owner, pages: Page[] = []) {
     return user.api.post(`/api/decks/${deckId}/import/runs`, {
       page_count: pageCount,
       pages: Array.from({ length: pageCount }, (_, index) => {
         const title = pages[index]?.title;
-        const pageId = pages[index]?.pageId;
         return {
           page_number: index + 1,
           ...(title === undefined || title === null ? {} : { title }),
-          ...(pageId === undefined ? {} : { page_id: pageId }),
+          page_id: pages[index]?.pageId ?? randomUUID(),
         };
       }),
     });
@@ -224,7 +223,7 @@ describe('deck imports', () => {
 
   // One whole export: start, post every page, finish. `reverse` posts the last
   // page first, which is the only difference between the two orders a client
-  // could walk a ZIP in.
+  // could walk an export in.
   async function importPages(
     deckId: string,
     pages: Page[],
@@ -355,19 +354,19 @@ describe('deck imports', () => {
       expect((await startRun(deckId, 1)).status).toBe(201);
     });
 
-    // The constraint, not the writer: nothing routes a source kind yet, and a
-    // typo in the widened CHECK would otherwise sit undiscovered until the
-    // Canva app tried to open a run.
-    it('accepts every source kind the shared list names, and no other', async () => {
-      const deckId = await makeDeck('source-kinds');
+    // The column is NOT NULL and nothing reads it back, so what it holds is
+    // checked here rather than through a response: a value the CHECK refuses
+    // would fail the first import of every deck.
+    it('writes a source kind the constraint admits', async () => {
+      const { deckId } = await scenario('source-kind');
+      await importPages(deckId, [{ title: 'Alpha', bytes: png('alpha') }]);
 
-      for (const kind of IMPORT_SOURCE_KINDS) {
-        await db
-          .insertInto('deck_import')
-          .values({ id: randomUUID(), deck_id: deckId, source_kind: kind })
-          .onConflict((oc) => oc.column('deck_id').doUpdateSet({ source_kind: kind }))
-          .execute();
-      }
+      const row = await db
+        .selectFrom('deck_import')
+        .select(['source_kind'])
+        .where('deck_id', '=', deckId)
+        .executeTakeFirstOrThrow();
+      expect(row.source_kind).toBe('canva');
 
       await expect(
         db
@@ -1111,7 +1110,7 @@ describe('deck imports', () => {
       const { deckId } = await scenario(`title-${label.replace(/ /gu, '-')}`);
 
       const manifest = await owner.api.post(`/api/decks/${deckId}/import/runs`, {
-        pages: [{ page_number: 1, title }],
+        pages: [{ page_number: 1, title, page_id: randomUUID() }],
       });
       expect(manifest.status).toBe(allowed ? 201 : 422);
 
@@ -1290,34 +1289,35 @@ describe('deck imports', () => {
     const matches = (pages: Map<number, PageResult>) =>
       [...pages.entries()].sort(([a], [b]) => a - b).map(([, result]) => result.matched_by);
 
-    it('adopts a deck built from ZIPs, and matches on the id from then on', async () => {
+    it('carries an id onto the card a title matched, and matches on it after', async () => {
       const { deckId } = await scenario('canva-adoption');
 
-      const zip = await importPages(deckId, [
+      // Ids this deck has never seen: the cards were made by an export whose
+      // pages carried other ones.
+      const built = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha') },
         { title: 'Beta', bytes: png('beta') },
       ]);
 
-      // The first export that knows its page ids meets cards keyed on titles,
-      // so it matches on those -- and tombstones nothing, which is the whole
-      // point of the fallback.
+      // So the titles are what place them, and nothing is tombstoned -- which
+      // is the whole point of the fallback.
       const adopting = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
         { title: 'Beta', bytes: png('beta'), pageId: P2 },
       ]);
       expect(matches(adopting.pages)).toEqual(['identity', 'identity']);
       expect(adopting.run.counts).toMatchObject({ added: 0, removed: 0, unchanged: 2 });
-      expect(adopting.pages.get(1)!.file_id).toBe(zip.pages.get(1)!.file_id);
+      expect(adopting.pages.get(1)!.file_id).toBe(built.pages.get(1)!.file_id);
 
-      // Finishing wrote the ids onto those cards, so the next run reaches them
-      // by the strongest tier there is.
+      // Finishing wrote those ids onto the cards they matched, so the next run
+      // reaches them by the strongest tier there is.
       const settled = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
         { title: 'Beta', bytes: png('beta'), pageId: P2 },
       ]);
       expect(matches(settled.pages)).toEqual(['page_id', 'page_id']);
       expect(settled.run.counts).toMatchObject({ added: 0, removed: 0 });
-      expect(settled.pages.get(1)!.file_id).toBe(zip.pages.get(1)!.file_id);
+      expect(settled.pages.get(1)!.file_id).toBe(built.pages.get(1)!.file_id);
     });
 
     it('keeps every card through a rename and a reorder at once', async () => {
@@ -1389,7 +1389,7 @@ describe('deck imports', () => {
       // Not what duplicating a design does -- that carries every page id across
       // -- but what rebuilding the artwork somewhere else does: fresh ids under
       // the names people already gave the cards. The titles are what keeps the
-      // deck, and a ZIP export is the same case with no ids at all.
+      // deck.
       const copied = await importPages(deckId, [
         { title: 'Alpha', bytes: png('alpha'), pageId: 'MAHcopy0001' },
         { title: 'Beta', bytes: png('beta'), pageId: 'MAHcopy0002' },
@@ -1431,34 +1431,17 @@ describe('deck imports', () => {
       expect(swapped.pages.get(2)!.file_id).toBe(first.pages.get(1)!.file_id);
     });
 
-    it('keeps the ids through a ZIP re-import, so the app still places the deck', async () => {
-      const { deckId } = await scenario('canva-then-zip');
+    // The page id is what the strongest tier reads, and a manifest without one
+    // can only be matched by title and number. Refusing it is how a caller
+    // hears about that, rather than the import quietly landing weaker.
+    it('refuses a manifest whose page names no id', async () => {
+      const { deckId } = await scenario('canva-missing-id');
+      const res = await owner.api.post(`/api/decks/${deckId}/import/runs`, {
+        pages: [{ page_number: 1, title: 'Alpha' }],
+      });
 
-      const first = await importPages(deckId, [
-        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
-        { title: 'Beta', bytes: png('beta'), pageId: P2 },
-      ]);
-      await importPages(deckId, [
-        { title: 'Alpha', bytes: png('alpha'), pageId: P1 },
-        { title: 'Beta', bytes: png('beta'), pageId: P2 },
-      ]);
-
-      // A ZIP knows no page ids, and must not take away the ones these cards
-      // already carry -- clearing them would leave the next app import matching
-      // on titles again, which is the tier this one exists to get above.
-      const zip = await importPages(deckId, [
-        { title: 'Alpha', bytes: png('alpha') },
-        { title: 'Beta', bytes: png('beta') },
-      ]);
-      expect(matches(zip.pages)).toEqual(['identity', 'identity']);
-
-      const back = await importPages(deckId, [
-        { title: 'Renamed Alpha', bytes: png('alpha'), pageId: P1 },
-        { title: 'Renamed Beta', bytes: png('beta'), pageId: P2 },
-      ]);
-      expect(matches(back.pages)).toEqual(['page_id', 'page_id']);
-      expect(back.run.counts).toMatchObject({ added: 0, removed: 0 });
-      expect(back.pages.get(1)!.file_id).toBe(first.pages.get(1)!.file_id);
+      expect(res.status).toBe(422);
+      expect(await timeline(deckId)).toEqual([]);
     });
 
     it('refuses a manifest that gives two pages one id', async () => {
