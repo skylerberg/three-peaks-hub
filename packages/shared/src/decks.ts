@@ -6,9 +6,12 @@ import type { CardSize } from './cards.ts';
 
 export const DECK_NAME_LIMITS = [1, 120] as const;
 
-// A copy count, not an index: a card in the deck is in it at least once, and
-// taking it out is removing the row rather than counting it down to zero.
-export const DECK_QUANTITY_LIMITS = [1, 999] as const;
+// A copy count. Zero is a card the deck holds and prints none of -- artwork
+// kept, in order, with its place in the list, and no piece of card behind it --
+// which is a different thing from removing the row, and from deleting the
+// image. Everything counting pieces rather than cards reads it: the sheets, the
+// scene, and the deck's own "to print" total.
+export const DECK_QUANTITY_LIMITS = [0, 999] as const;
 
 // Well past a commercial deck, and low enough that one save is one request
 // rather than a body nothing has bounded.

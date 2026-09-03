@@ -332,11 +332,11 @@ function uniqueGroup(name: string, taken: Set<string>): string {
 }
 
 function copies(count: number): number {
-  return Math.max(1, Math.floor(count));
+  return Math.max(0, Math.floor(count));
 }
 
 function labelledCopies(label: string, count: number): string[] {
-  if (count <= 1) return [label];
+  if (count === 1) return [label];
   return Array.from({ length: count }, (_, index) => `${label} (${index + 1})`);
 }
 
@@ -469,8 +469,16 @@ export function planScene(selection: SceneSelection): ScenePlan {
   const taken = new Set<string>();
   const blocks: PlannedBlock[] = [];
 
-  for (const deck of selection.decks) blocks.push(deckBlock(deck, registry, taken));
-  if (selection.files.length > 0) blocks.push(filesBlock(selection.files, registry, taken));
+  // Nothing with no copies gets as far as a block. A group with no instances is
+  // a shot target that resolves to nothing, and a card whose .glb is built for
+  // an instance list it never appears in is geometry and bytes the bundle
+  // carries for no piece on the table.
+  for (const deck of selection.decks) {
+    const cards = deck.cards.filter((card) => copies(card.copies) > 0);
+    if (cards.length > 0) blocks.push(deckBlock({ ...deck, cards }, registry, taken));
+  }
+  const files = selection.files.filter((file) => copies(file.copies) > 0);
+  if (files.length > 0) blocks.push(filesBlock(files, registry, taken));
   for (const pieces of selection.library) {
     if (pieces.count > 0) blocks.push(libraryBlock(pieces, registry, taken));
   }

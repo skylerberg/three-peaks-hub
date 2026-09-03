@@ -1136,6 +1136,20 @@ export const guards = [
     runner: 'shared',
   },
   {
+    // The floor this replaces was written when a card was in a deck at least
+    // once, and it is exactly the line a reader restores on sight. Back in
+    // place it puts a card the deck prints none of on the table, and builds and
+    // ships a .glb for it.
+    name: 'a card the deck holds no copies of stays off the table',
+    package: 'web',
+    file: 'src/lib/scene/assets.ts',
+    find: '  return Math.max(0, Math.floor(count));',
+    replace: '  return Math.max(1, Math.floor(count));',
+    tests: ['src/lib/scene/assets.test.ts'],
+    testName: 'leaves a card the deck holds no copies of off the table entirely',
+    runner: 'web',
+  },
+  {
     // The other direction from the assetKey guard, and the expensive one: with
     // the registry handing out a new id per selection, a deck of fifty-two
     // cards builds fifty-two geometries and the bundle carries every one.

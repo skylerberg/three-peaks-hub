@@ -189,6 +189,9 @@ async function run() {
       alpha: [200, 40, 40],
       beta: [40, 160, 90],
       gamma: [60, 90, 200],
+      // In a deck and printed none of. Every count below is measured with it
+      // there, so a regression that expanded it would move all three of them.
+      delta: [120, 60, 170],
       'back-one': [30, 30, 30],
       'back-two': [230, 210, 120],
     };
@@ -243,27 +246,38 @@ async function run() {
           body: JSON.stringify({ back_file_id: await into(back, 'back') }),
         });
 
-        await fetch(`/api/decks/${deck.id}/cards`, {
+        const saved = await fetch(`/api/decks/${deck.id}/cards`, {
           method: 'PUT',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cards: placed.map((card) => ({ file_id: card.file_id, quantity: card.quantity })),
           }),
-        });
-        return deck.id;
+        }).then((r) => r.json());
+        return saved.deck;
       };
 
-      // Eight cards in the first deck and three in the second: the first sheet
-      // then carries both decks, which is the case a per-sheet back would get
-      // wrong and a per-slot back gets right.
-      await makeDeck('Alpha deck', 'back-one', [
+      // Eight pieces of card in the first deck and three in the second: the
+      // first sheet then carries both decks, which is the case a per-sheet back
+      // would get wrong and a per-slot back gets right. Alpha's third card is
+      // held at no copies, so the deck lists three and prints eight.
+      const alpha = await makeDeck('Alpha deck', 'back-one', [
         { image: 'alpha', quantity: 6 },
         { image: 'beta', quantity: 2 },
+        { image: 'delta', quantity: 0 },
       ]);
       await makeDeck('Beta deck', 'back-two', [{ image: 'gamma', quantity: 3 }]);
 
-      return { projectId };
+      return { projectId, alpha };
     }, files);
+
+    // Read back rather than assumed. A quantity of zero the API had refused
+    // would leave a two-card deck, and every count below would still come out
+    // exactly right -- which is this probe's own version of measuring nothing.
+    check(
+      'a deck holds a card it prints none of',
+      setup.alpha.card_count === 3 && setup.alpha.total_copies === 8,
+      `${setup.alpha.card_count} cards, ${setup.alpha.total_copies} copies`
+    );
 
     await browser.goto(`${base}/projects/${setup.projectId}/print`, { wait: 0 });
     await browser.page.waitForSelector('h1:has-text("Print sheets")', { timeout: 15_000 });
@@ -323,8 +337,9 @@ async function run() {
     const pageCount = (latin.match(/\/Type \/Page[^s]/g) ?? []).length;
     check('fronts and backs come to four pages', pageCount === 4, String(pageCount));
 
-    // Three fronts and two backs. Without the alias every one of the 11 cards
-    // and 11 backs would be embedded separately.
+    // Three fronts and two backs, out of four fronts uploaded. Without the alias
+    // every one of the 11 cards and 11 backs would be embedded separately; with
+    // the zeroed card printed it would be six.
     const embedded = (latin.match(/\/Subtype \/Image/g) ?? []).length;
     check('each distinct artwork is embedded once', embedded === 5, `${embedded} image XObjects`);
 
@@ -342,6 +357,15 @@ async function run() {
       'the second sheet holds the remaining two',
       frontTwo.length === 2,
       String(frontTwo.length)
+    );
+
+    // Alpha deck lists four cards and one of them is held at no copies. Printed,
+    // it would take the eleventh slot and put a fourth artwork on the fronts.
+    const drawn = new Set([...frontOne, ...frontTwo].map((placement) => placement.image));
+    check(
+      'the card the deck prints none of takes no slot',
+      drawn.size === 3,
+      `${drawn.size} artworks over ${frontOne.length + frontTwo.length} slots`
     );
 
     const cardWidthMm = frontOne[0].width * MM_PER_PT;

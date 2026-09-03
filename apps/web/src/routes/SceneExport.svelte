@@ -128,9 +128,11 @@
   });
 
   // A card whose artwork is in the bin has no bytes to build from, so it leaves
-  // here rather than failing halfway through an export.
+  // here rather than failing halfway through an export. So does one the deck
+  // holds no copies of: it puts nothing on the table, and the count beside the
+  // deck's name is a count of what is about to be laid out on one.
   function usableCards(cards: readonly DeckCard[]): DeckCard[] {
-    return cards.filter((card) => card.file.deleted_at === null);
+    return cards.filter((card) => card.file.deleted_at === null && card.quantity > 0);
   }
 
   const chosenDecks = $derived(

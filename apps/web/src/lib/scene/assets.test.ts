@@ -164,6 +164,28 @@ describe('planScene', () => {
     expect(new Set(plan.instances.map((instance) => instance.asset_id)).size).toBe(2);
   });
 
+  it('leaves a card the deck holds no copies of off the table entirely', () => {
+    const plan = planScene({
+      ...empty,
+      decks: [deck('villagers', [{ id: 'a', copies: 0 }, { id: 'b' }])],
+    });
+
+    // Not one instance fewer with the file still in the archive: a .glb nothing
+    // stands on the table is geometry built and bytes shipped for no piece.
+    expect(plan.instances).toHaveLength(1);
+    expect(plan.assets).toHaveLength(1);
+    expect(plan.builds.map((build) => build.front.file_id)).toEqual(['b']);
+  });
+
+  it('gives a deck holding no copies of anything no group to aim a shot at', () => {
+    const plan = planScene({
+      ...empty,
+      decks: [deck('villagers', [{ id: 'a', copies: 0 }]), deck('nobles', [{ id: 'b' }])],
+    });
+
+    expect(plan.groups.map((group) => group.name)).toEqual(['deck:nobles']);
+  });
+
   it('gives every instance in a deck one group to be targeted by', () => {
     const plan = planScene({ ...empty, decks: [deck('Villagers of the Vale', [{ id: 'a' }])] });
 

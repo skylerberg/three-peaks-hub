@@ -56,6 +56,15 @@
 
   const key = (deck: string, file: string) => `${deck}:${file}`;
 
+  // What one card puts on paper, read by the plan and by the count beside its
+  // name so the two cannot disagree. One of each collapses the counts to a
+  // single proof copy of every card in the run -- and a card the deck holds
+  // none of is not in the run, whichever way it is printed.
+  function printedCopies(card: DeckCard): number {
+    if (card.quantity === 0) return 0;
+    return oneOfEach ? 1 : card.quantity;
+  }
+
   // Only what is both selected and printable. A card whose image is in the bin
   // has no bytes to place, so it is dropped here rather than failing mid-render.
   const runDecks = $derived(
@@ -69,7 +78,7 @@
           .filter((card) => !card.file.deleted_at && !excluded[key(entry.deck.id, card.file_id)])
           .map((card) => ({
             file_id: card.file_id,
-            copies: oneOfEach ? 1 : card.quantity,
+            copies: printedCopies(card),
           })),
       }))
       .filter((entry) => entry.cards.length > 0)
@@ -227,7 +236,7 @@
                           {card.file.filename}
                         </span>
                         <span class="text-muted">
-                          {card.file.deleted_at ? 'deleted' : `×${oneOfEach ? 1 : card.quantity}`}
+                          {card.file.deleted_at ? 'deleted' : `×${printedCopies(card)}`}
                         </span>
                       </label>
                     </li>
