@@ -661,11 +661,38 @@ export const guards = [
     package: 'api',
     file: 'packages/shared/src/print.ts',
     root: true,
-    find: '  return { index: row * grid.columns + (grid.columns - 1 - column), rotate_180: false };',
-    replace: '  return { index: row * grid.columns + column, rotate_180: false };',
+    find: '  return { index: row * grid.columns + (grid.columns - 1 - column), rotate_180 };',
+    replace: '  return { index: row * grid.columns + column, rotate_180 };',
     tests: ['src/print.test.ts'],
     testName: 'puts a long-edge back where the paper flip lands it',
     runner: 'shared',
+  },
+  {
+    // The upright rule, applied to a card the grid has laid on its side. Every
+    // back still lands in the right box; every one comes out upside down once
+    // the card is cut.
+    name: 'a turned card’s back is inverted by the flip that crosses its top',
+    package: 'api',
+    file: 'packages/shared/src/print.ts',
+    root: true,
+    find: "  const rotate_180 = (flip === 'short') !== grid.rotated;",
+    replace: "  const rotate_180 = flip === 'short';",
+    tests: ['src/print.test.ts'],
+    testName: 'draws a long-edge back upside down relative to its front on a turned grid',
+    runner: 'shared',
+  },
+  {
+    // The bug in the first sheet of minis anyone printed: the planner turned the
+    // cell and the renderer drew the artwork upright in it, so eighteen boxes
+    // each held a clipped band of a card twice their height.
+    name: 'artwork on a turned grid is drawn through the turn',
+    package: 'web',
+    file: 'src/lib/print/pdf.ts',
+    find: '    const turn: QuarterTurns = plan.grid.rotated ? 1 : 0;',
+    replace: '    const turn: QuarterTurns = 0;',
+    tests: ['src/lib/print/pdf.test.ts'],
+    testName: 'turns every card of a turned grid onto its side',
+    runner: 'web',
   },
   {
     // Six cards a sheet on minis, and nothing about the output looks wrong --

@@ -120,33 +120,3 @@ export async function loadPrintImage(fileId: string, targetMm: number): Promise<
     bitmap.close();
   }
 }
-
-/**
- * The same artwork upside down.
- *
- * Needed only for a short-edge duplex flip, where the paper arrives at the back
- * side inverted and the art has to be printed inverted to come out level. The
- * turn is baked into the pixels rather than asked of the PDF, because jsPDF's
- * rotation is applied inside the image's own unit square and moves the box as
- * well as its contents -- correct placement then depends on undoing that, which
- * is a great deal of arithmetic to get wrong for a case nobody looks at twice.
- *
- * One rotated copy per distinct back, not per card: the caller caches these.
- */
-export async function rotate180(image: PrintImage): Promise<PrintImage> {
-  const bitmap = await createImageBitmap(
-    new Blob([image.data as BlobPart], {
-      type: image.format === 'PNG' ? 'image/png' : 'image/jpeg',
-    })
-  );
-  try {
-    return await canvasToPng(
-      drawn(bitmap, bitmap.width, bitmap.height, (ctx) => {
-        ctx.translate(bitmap.width, bitmap.height);
-        ctx.rotate(Math.PI);
-      })
-    );
-  } finally {
-    bitmap.close();
-  }
-}

@@ -25,10 +25,21 @@ export interface PrintOptions {
 }
 
 // Resolves a file id to bytes. The caller owns the cache, so the same artwork
-// asked for by twenty cards is fetched and decoded once.
+// asked for by twenty cards -- or by a front and a back -- is fetched and
+// decoded once.
 export interface ImageSource {
-  front(fileId: string, card: CardSize): Promise<PrintImage>;
-  back(fileId: string, card: CardSize, rotated: boolean): Promise<PrintImage>;
+  artwork(fileId: string, card: CardSize): Promise<PrintImage>;
+}
+
+// Clockwise quarter turns a piece of artwork is drawn through on the page. One
+// is the grid laying the card on its side; two more put a back upside down.
+export type QuarterTurns = 0 | 1 | 2 | 3;
+
+export interface Rect {
+  x_mm: number;
+  y_mm: number;
+  width_mm: number;
+  height_mm: number;
 }
 
 const CUT_MARK_LENGTH_MM = 3;
@@ -47,7 +58,7 @@ export function placement(
   image: { width: number; height: number },
   box: SlotBox,
   fit: ArtworkFit
-): { x_mm: number; y_mm: number; width_mm: number; height_mm: number } {
+): Rect {
   const aspect = image.width / image.height;
   const boxAspect = box.width_mm / box.height_mm;
   const matchWidth = fit === 'fill' ? aspect < boxAspect : aspect > boxAspect;
@@ -63,15 +74,84 @@ export function placement(
   };
 }
 
+/**
+ * The rectangle a piece of artwork covers on the page once it is turned.
+ *
+ * Fit and fill are decided in the card's own frame: a portrait image matches a
+ * portrait card however the card lies on the paper. So a sideways turn compares
+ * the image against the cell with its sides swapped and swaps the answer back.
+ * The centre is the cell's either way.
+ */
+export function artworkRect(
+  image: { width: number; height: number },
+  box: SlotBox,
+  fit: ArtworkFit,
+  turns: QuarterTurns
+): Rect {
+  if (turns % 2 === 0) return placement(image, box, fit);
+
+  const upright = placement(
+    image,
+    { ...box, width_mm: box.height_mm, height_mm: box.width_mm },
+    fit
+  );
+  return {
+    x_mm: box.x_mm + (box.width_mm - upright.height_mm) / 2,
+    y_mm: box.y_mm + (box.height_mm - upright.width_mm) / 2,
+    width_mm: upright.height_mm,
+    height_mm: upright.width_mm,
+  };
+}
+
+export interface ImageArgs extends Rect {
+  // Degrees anticlockwise, which is the sense jsPDF's `rotation` takes.
+  rotation: number;
+}
+
+/**
+ * What `addImage` has to be handed for the artwork to cover `rect`, turned.
+ *
+ * jsPDF does not rotate about the centre of the box it is given. It translates
+ * to that box's bottom-left corner, rotates by `rotation` degrees anticlockwise
+ * and then scales the unit square by the width and height -- so the turned
+ * image extends from that corner along wherever the turn has pointed its right
+ * and its up. Each case below is that corner solved for the rectangle the
+ * artwork should end up covering, with the artwork's own sides handed over as
+ * the width and height, which a sideways turn swaps against the rectangle's.
+ * `check:print` reads the result back out of a real file and holds this to the
+ * library.
+ */
+export function imageArgs(rect: Rect, turns: QuarterTurns): ImageArgs {
+  const { x_mm: x, y_mm: y, width_mm: w, height_mm: h } = rect;
+  switch (turns) {
+    case 0:
+      return { x_mm: x, y_mm: y, width_mm: w, height_mm: h, rotation: 0 };
+    // Pivot at the top-left corner: right goes down, up goes right.
+    case 1:
+      return { x_mm: x, y_mm: y - w, width_mm: h, height_mm: w, rotation: 270 };
+    // Pivot at the top-right corner: right goes left, up goes down.
+    case 2:
+      return { x_mm: x + w, y_mm: y - h, width_mm: w, height_mm: h, rotation: 180 };
+    // Pivot at the bottom-right corner: right goes up, up goes left.
+    case 3:
+      return { x_mm: x + w, y_mm: y + h - w, width_mm: h, height_mm: w, rotation: 90 };
+  }
+}
+
+function upsideDown(turns: QuarterTurns): QuarterTurns {
+  return ((turns + 2) % 4) as QuarterTurns;
+}
+
 function drawArtwork(
   doc: jsPDF,
   image: PrintImage,
   box: SlotBox,
   fit: ArtworkFit,
-  alias: string
+  alias: string,
+  turns: QuarterTurns
 ): void {
-  const at = placement(image, box, fit);
-  const overflows = at.width_mm > box.width_mm + 1e-6 || at.height_mm > box.height_mm + 1e-6;
+  const rect = artworkRect(image, box, fit, turns);
+  const overflows = rect.width_mm > box.width_mm + 1e-6 || rect.height_mm > box.height_mm + 1e-6;
 
   // Clipped rather than pre-cropped on a canvas: cropping would re-encode the
   // artwork, and re-encoding is what the pass-through in images.ts exists to
@@ -85,7 +165,9 @@ function drawArtwork(
 
   // The alias is what stops the same artwork being embedded once per copy. With
   // a quantity of forty, that is the difference between a four-megabyte file and
-  // a hundred-and-sixty-megabyte one.
+  // a hundred-and-sixty-megabyte one. The turn lives in the placement, so one
+  // embedding serves every orientation it is drawn at.
+  const at = imageArgs(rect, turns);
   doc.addImage(
     image.data,
     image.format,
@@ -94,7 +176,8 @@ function drawArtwork(
     at.width_mm,
     at.height_mm,
     alias,
-    'FAST'
+    'FAST',
+    at.rotation
   );
 
   if (overflows) doc.restoreGraphicsState();
@@ -151,12 +234,16 @@ export async function renderRuns(
 
   for (const { run, plan } of plans) {
     if (plan.grid.per_sheet === 0) continue;
+    // The grid's turn is the card's: a landscape cell holds a card on its side,
+    // and drawing it upright at the cell's width is a band of its middle
+    // eighteen times over.
+    const turn: QuarterTurns = plan.grid.rotated ? 1 : 0;
 
     for (const sheet of plan.sheets) {
       page();
       for (const slot of sheet.slots) {
-        const image = await images.front(slot.item.front_file_id, run.card);
-        drawArtwork(doc, image, slot.box, options.fit, `front:${slot.item.front_file_id}`);
+        const image = await images.artwork(slot.item.front_file_id, run.card);
+        drawArtwork(doc, image, slot.box, options.fit, `art:${slot.item.front_file_id}`, turn);
         drawn += 1;
         onProgress?.({ drawn, total });
       }
@@ -167,18 +254,15 @@ export async function renderRuns(
       page();
       for (const slot of sheet.slots) {
         if (slot.item.back_file_id === null) continue;
-        const placementOnBack = backPlacement(slot.index, plan.grid, options.flip);
-        const image = await images.back(
-          slot.item.back_file_id,
-          run.card,
-          placementOnBack.rotate_180
-        );
+        const onBack = backPlacement(slot.index, plan.grid, options.flip);
+        const image = await images.artwork(slot.item.back_file_id, run.card);
         drawArtwork(
           doc,
           image,
-          slotBox(plan.grid, placementOnBack.index),
+          slotBox(plan.grid, onBack.index),
           options.fit,
-          `back:${slot.item.back_file_id}:${placementOnBack.rotate_180 ? 'turned' : 'upright'}`
+          `art:${slot.item.back_file_id}`,
+          onBack.rotate_180 ? upsideDown(turn) : turn
         );
       }
       if (options.cut_marks) drawCutMarks(doc, options, plan.grid);
