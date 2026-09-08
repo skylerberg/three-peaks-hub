@@ -161,6 +161,41 @@ describe('backPlacement', () => {
     expect(backPlacement(0, grid, 'long').rotate_180).toBe(false);
   });
 
+  // A turned card's top points across the page rather than up it, so the flip
+  // that inverts it is the other one: long-edge reverses left and right, which
+  // is now the axis its top lies along, and short-edge leaves that axis alone.
+  describe('on a grid that turns the card', () => {
+    const turned = planGrid(letter, cardPreset('mini')!, margin);
+
+    it('draws a long-edge back upside down relative to its front on a turned grid', () => {
+      expect(turned.rotated).toBe(true);
+      for (let index = 0; index < turned.per_sheet; index += 1) {
+        expect(backPlacement(index, turned, 'long').rotate_180).toBe(true);
+      }
+    });
+
+    it('leaves a short-edge back turned the way its front is', () => {
+      for (let index = 0; index < turned.per_sheet; index += 1) {
+        expect(backPlacement(index, turned, 'short').rotate_180).toBe(false);
+      }
+    });
+
+    // The paper flips the same way whatever is drawn in the cells, so the slot
+    // a back lands in is the page's rule and does not move with the turn.
+    it('still mirrors the slot the way the paper flips', () => {
+      for (let index = 0; index < turned.per_sheet; index += 1) {
+        const front = slotBox(turned, index);
+        const long = slotBox(turned, backPlacement(index, turned, 'long').index);
+        const short = slotBox(turned, backPlacement(index, turned, 'short').index);
+
+        expect(front.x_mm + long.x_mm + front.width_mm).toBeCloseTo(letter.width_mm, 6);
+        expect(long.y_mm).toBeCloseTo(front.y_mm, 6);
+        expect(front.y_mm + short.y_mm + front.height_mm).toBeCloseTo(letter.height_mm, 6);
+        expect(short.x_mm).toBeCloseTo(front.x_mm, 6);
+      }
+    });
+  });
+
   it.each(['long', 'short'] as const)('is its own inverse on the %s edge', (flip) => {
     for (let index = 0; index < grid.per_sheet; index += 1) {
       expect(backPlacement(backPlacement(index, grid, flip).index, grid, flip).index).toBe(index);

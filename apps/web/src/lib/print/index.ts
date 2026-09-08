@@ -1,5 +1,5 @@
 import { type CardSize, planRuns } from '@three-peaks/shared';
-import { type PrintImage, loadPrintImage, rotate180 } from './images.ts';
+import { type PrintImage, loadPrintImage } from './images.ts';
 import { type ImageSource, type PrintOptions, renderRuns } from './pdf.ts';
 
 export type { ArtworkFit, PrintOptions } from './pdf.ts';
@@ -22,29 +22,18 @@ export interface PrintProgress {
 }
 
 // One fetch and one decode per distinct piece of artwork, however many cards
-// name it. Backs are cached separately per turn, because a short-edge flip needs
-// an upside-down copy and that is a different set of pixels.
+// name it and whichever side of them it is on. Every turn a card takes is drawn
+// in the file rather than in the pixels, so there is one copy of each to hold.
 function cachedImages(): ImageSource {
   const cache = new Map<string, Promise<PrintImage>>();
 
-  const target = (card: CardSize) => Math.max(card.width_mm, card.height_mm);
-
-  const load = (key: string, produce: () => Promise<PrintImage>) => {
-    const existing = cache.get(key);
-    if (existing) return existing;
-    const started = produce();
-    cache.set(key, started);
-    return started;
-  };
-
   return {
-    front(fileId, card) {
-      return load(`front:${fileId}`, () => loadPrintImage(fileId, target(card)));
-    },
-    back(fileId, card, rotated) {
-      const upright = load(`front:${fileId}`, () => loadPrintImage(fileId, target(card)));
-      if (!rotated) return upright;
-      return load(`turned:${fileId}`, async () => rotate180(await upright));
+    artwork(fileId, card) {
+      const existing = cache.get(fileId);
+      if (existing) return existing;
+      const started = loadPrintImage(fileId, Math.max(card.width_mm, card.height_mm));
+      cache.set(fileId, started);
+      return started;
     },
   };
 }

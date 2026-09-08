@@ -484,8 +484,16 @@ Two things there are worth knowing before changing anything:
   this emits is portrait.
 - **`backPlacement` is where duplex is won or lost.** The printer's flip is what
   mirrors the page, so the back page is drawn as if read from the front with the
-  slots transposed. A short-edge flip also arrives inverted, and that is the one
-  case where the artwork itself is turned.
+  slots transposed. Whether a back is also inverted depends on the card's own
+  turn: a flip reverses one axis of the page, and the back turns over when that
+  axis is the one its front's top lies along -- short edge for an upright card,
+  long edge for one the grid has laid on its side.
+- **The renderer draws every card through the grid's turn**, in the content
+  stream rather than in the pixels. jsPDF rotates about the bottom-left corner
+  of the box it is handed, and `imageArgs` in `apps/web/src/lib/print/pdf.ts`
+  is that corner solved for each quarter turn; `check:print` reads the turned
+  placements back out of a real file, because the first sheet of minis drew
+  eighteen upright cards clipped to landscape cells and nothing measured it.
 
 A sheet may hold cards from several decks, so the back is resolved per slot
 rather than per sheet. That is what `check:print` exists to hold: it builds two

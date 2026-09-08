@@ -43,7 +43,9 @@ export interface Grid {
   rows: number;
   per_sheet: number;
   // Whether each card is turned a quarter turn on the page. The cell below is
-  // its footprint after that turn, so nothing downstream has to un-swap it.
+  // its footprint after that turn, so nothing downstream has to un-swap it; the
+  // renderer draws the artwork through the same turn, and backPlacement reads
+  // it to decide which flip inverts a back.
   rotated: boolean;
   cell_width_mm: number;
   cell_height_mm: number;
@@ -132,7 +134,8 @@ export type FlipEdge = 'long' | 'short';
 
 export interface BackPlacement {
   index: number;
-  // Whether the art has to be drawn upside down at that slot.
+  // Whether the back is drawn upside down relative to its front -- on top of
+  // the turn the grid gives both of them.
   rotate_180: boolean;
 }
 
@@ -148,9 +151,15 @@ export interface BackPlacement {
  *
  *  - `long` (the duplex default) turns the sheet about its vertical axis. Left
  *    and right swap; up stays up.
- *  - `short` turns it about its horizontal axis. Top and bottom swap, and the
- *    page arrives inverted -- so this is the one case where the art itself is
- *    drawn rotated 180°.
+ *  - `short` turns it about its horizontal axis. Top and bottom swap.
+ *
+ * Whether the back is also drawn upside down depends on which way the card's
+ * own top points. A back's top has to land on the physical edge the front's top
+ * is on, and a flip reverses exactly one axis of the page: the short-edge flip
+ * reverses up and down, which inverts an upright card, and the long-edge flip
+ * reverses left and right, which inverts a card the grid has laid on its side.
+ * Read as the upright rule alone, every back on a mini sheet arrives upside
+ * down behind its front.
  *
  * A part-full last sheet needs no special case: only the slots that were used
  * are asked for.
@@ -158,11 +167,12 @@ export interface BackPlacement {
 export function backPlacement(index: number, grid: Grid, flip: FlipEdge): BackPlacement {
   const row = Math.floor(index / grid.columns);
   const column = index % grid.columns;
+  const rotate_180 = (flip === 'short') !== grid.rotated;
 
   if (flip === 'short') {
-    return { index: (grid.rows - 1 - row) * grid.columns + column, rotate_180: true };
+    return { index: (grid.rows - 1 - row) * grid.columns + column, rotate_180 };
   }
-  return { index: row * grid.columns + (grid.columns - 1 - column), rotate_180: false };
+  return { index: row * grid.columns + (grid.columns - 1 - column), rotate_180 };
 }
 
 // One thing to print: the artwork, and what belongs on its reverse. A null back
