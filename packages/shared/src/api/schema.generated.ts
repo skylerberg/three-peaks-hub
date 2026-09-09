@@ -886,6 +886,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/print/outstanding': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What each card still owes the printer
+     * @description Every live card of every live deck in the project, with how many copies are already on paper at its current artwork and current back, and how many are not. A card owes copies because nothing has printed it, because its artwork has been re-imported since, because the deck was given a new back, or because its copy count went up — four situations and one subtraction, and `reason` says which.
+     */
+    get: operations['getApiPrintOutstanding'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/print/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Record what came off the printer
+     * @description Written after the document has been built, and it names the version of each card that went into it — the client is the only end that knows which bytes it drew. Recording is what makes the next run able to leave those cards out.
+     */
+    post: operations['postApiPrintRuns'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/print/runs/{runId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Undo a recorded print run
+     * @description For the sheet that jammed. The run is removed rather than tombstoned — a claim that certain cards are on paper, withdrawn, was never true — and the cards it named go back to owing what they owed before it.
+     */
+    delete: operations['deleteApiPrintRunsByRunId'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/canva-app/session': {
     parameters: {
       query?: never;
@@ -1561,6 +1621,32 @@ export interface components {
       }[];
     };
     Password: string;
+    PrintOutstanding: {
+      decks: {
+        back_file_id: string | null;
+        back_version_number: number | null;
+        cards: {
+          file_id: string;
+          last_printed_at: string | null;
+          owed_copies: number;
+          printed_copies: number;
+          printed_version_number: number | null;
+          quantity: number;
+          reason: 'artwork' | 'back' | 'copies' | 'never' | null;
+          version_number: number;
+        }[];
+        deck_id: string;
+        last_printed_at: string | null;
+      }[];
+    };
+    PrintRun: {
+      card_count: number;
+      copies: number;
+      created_at: string;
+      created_by: string | null;
+      id: string;
+      project_id: string;
+    };
     Project: {
       created_at: string;
       created_by: string;
@@ -5996,6 +6082,235 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  getApiPrintOutstanding: {
+    parameters: {
+      query: {
+        /** @description a UUID */
+        project_id:
+          string | '00000000-0000-0000-0000-000000000000' | 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description What is outstanding */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrintOutstanding'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  postApiPrintRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          cards: {
+            copies: number;
+            file_id: components['schemas']['Uuid'];
+            version_number: number;
+            back_file_id?:
+              | string
+              | '00000000-0000-0000-0000-000000000000'
+              | 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+              | null;
+            back_version_number?: number | null;
+          }[];
+          project_id: components['schemas']['Uuid'];
+          id?: components['schemas']['Uuid'];
+        };
+      };
+    };
+    responses: {
+      /** @description Recorded */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrintRun'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Validation failed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            details: {
+              message: string;
+              path: string;
+            }[];
+            error: string;
+          };
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiPrintRunsByRunId: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        runId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Undone */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            error: string;
+          };
+        };
+      };
+      /** @description Not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

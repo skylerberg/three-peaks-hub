@@ -14,6 +14,10 @@ export interface PrintJobDeck {
 export interface PrintJob {
   decks: readonly PrintJobDeck[];
   options: PrintOptions;
+  // Which version of each file to draw, by file id. A file left out is drawn at
+  // whatever it is now, which is what a screen that has no version to offer
+  // wants; the print screen has one for every card and pins them all.
+  versions?: Readonly<Record<string, number>>;
 }
 
 export interface PrintProgress {
@@ -24,14 +28,18 @@ export interface PrintProgress {
 // One fetch and one decode per distinct piece of artwork, however many cards
 // name it and whichever side of them it is on. Every turn a card takes is drawn
 // in the file rather than in the pixels, so there is one copy of each to hold.
-function cachedImages(): ImageSource {
+function cachedImages(versions: Readonly<Record<string, number>>): ImageSource {
   const cache = new Map<string, Promise<PrintImage>>();
 
   return {
     artwork(fileId, card) {
       const existing = cache.get(fileId);
       if (existing) return existing;
-      const started = loadPrintImage(fileId, Math.max(card.width_mm, card.height_mm));
+      const started = loadPrintImage(
+        fileId,
+        Math.max(card.width_mm, card.height_mm),
+        versions[fileId]
+      );
       cache.set(fileId, started);
       return started;
     },
@@ -60,6 +68,6 @@ export async function generatePrintPdf(
     compress: true,
   });
 
-  await renderRuns(doc, runs, job.options, cachedImages(), onProgress);
+  await renderRuns(doc, runs, job.options, cachedImages(job.versions ?? {}), onProgress);
   return doc.output('blob');
 }

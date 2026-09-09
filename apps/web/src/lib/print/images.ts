@@ -90,9 +90,18 @@ async function rasterizeSvg(text: string, targetPixels: number): Promise<PrintIm
  *
  * The declared type comes off the response rather than from the file row,
  * because the API decides an image's type by its magic bytes and serves that.
+ *
+ * `version` pins which bytes: the print screen draws the version it was told
+ * about and records that same number, so the ledger says what is on the paper
+ * rather than what the file reached while the document was building.
  */
-export async function loadPrintImage(fileId: string, targetMm: number): Promise<PrintImage> {
-  const response = await fetch(`/api/files/${fileId}/download`, { headers: authHeader() });
+export async function loadPrintImage(
+  fileId: string,
+  targetMm: number,
+  version?: number
+): Promise<PrintImage> {
+  const query = version === undefined ? '' : `?version=${version}`;
+  const response = await fetch(`/api/files/${fileId}/download${query}`, { headers: authHeader() });
   if (!response.ok) throw new Error(`Could not read the artwork (status ${response.status})`);
 
   const contentType = (response.headers.get('Content-Type') ?? '').split(';')[0].trim();
