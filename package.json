@@ -44,6 +44,7 @@
     "check:scene": "pnpm --filter @three-peaks/web run check:scene",
     "check:scene-shots": "node scripts/check-scene-shots.mjs",
     "blender:smoke": "tools/blender/smoke.sh",
+    "canva:release": "node scripts/canva-release.mjs",
     "check:scene-contract": "node scripts/check-scene-contract.mjs",
     "check:dockerfiles": "node scripts/check-dockerfiles.mjs",
     "check:k8s": "node scripts/check-k8s.mjs"

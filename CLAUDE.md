@@ -699,9 +699,16 @@ deck, which is the only way anything is imported: nothing is downloaded and
 nothing is uploaded by hand. It is React and
 Canva's toolchain — the only package here that is neither Svelte nor Vite — and
 it ships by **uploading a bundle to the Developer Portal**, touching no image,
-no manifest and no Terraform. `pnpm --filter @three-peaks/canva run build:prod`
-is what produces the one to upload; the plain `build` bakes in whatever
+no manifest and no Terraform. `pnpm canva:release` is the whole of a release:
+it builds through `build:prod`, refuses the result if it names localhost, pushes
+`canva-app.json`, and then prints the steps for the App source field, which is
+the one part Canva exposes no API for. The plain `build` bakes in whatever
 `CANVA_BACKEND_HOST` says, which locally is a localhost API.
+
+It needs `CANVA_APP_ID` in `apps/canva/.env` and reads it nowhere else, because
+that is the only place the Canva CLI looks — an id in the environment it is
+spawned with does not reach it. `apps/api/.env` already holds the same id, since
+the audience the API pins its tokens to is this app.
 
 **It authenticates by exchanging Canva's word for ours.** The app can prove
 which Canva user is running it and nothing else, so somebody signed in here
