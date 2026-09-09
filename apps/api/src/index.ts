@@ -18,6 +18,7 @@ import { docsRouter } from './routes/docs.ts';
 import { filesRouter } from './routes/files.ts';
 import { healthCheck } from './routes/health.ts';
 import { modelsRouter } from './routes/models.ts';
+import { printRunsRouter } from './routes/printRuns.ts';
 import { projectsRouter } from './routes/projects.ts';
 import { openApiSpec } from './spec/openapi.ts';
 import { attachRealtime, realtimeEventsDocument, startBus } from './services/realtime/index.ts';
@@ -67,6 +68,7 @@ app.route('/api/components', componentsRouter);
 app.route('/api/models', modelsRouter);
 app.route('/api/decks', decksRouter);
 app.route('/api/decks', deckImportsRouter);
+app.route('/api/print', printRunsRouter);
 app.route('/api/canva-app', publicCanvaAppRouter);
 app.route('/api/canva-app', canvaAppRouter);
 

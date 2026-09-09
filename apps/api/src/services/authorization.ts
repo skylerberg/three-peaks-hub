@@ -207,6 +207,24 @@ export async function assertImportRunAccess(
   return { ...access, runId, deckId: row.deck_id, importId: row.import_id };
 }
 
+export async function assertPrintRunAccess(
+  c: Pick<AppContext, 'get'>,
+  runId: string,
+  mode: 'read' | 'write' = 'read'
+): Promise<ProjectAccess> {
+  const row = await c
+    .get('db')
+    .selectFrom('print_run')
+    .select(['print_run.project_id as project_id'])
+    .where('print_run.id', '=', runId)
+    .executeTakeFirst();
+
+  if (!row) throw new AppError(404, 'Print run not found');
+  return mode === 'write'
+    ? await assertProjectWrite(c, row.project_id)
+    : await assertProjectAccess(c, row.project_id);
+}
+
 /**
  * Refuses a set of file ids that does not lie entirely inside one project.
  *

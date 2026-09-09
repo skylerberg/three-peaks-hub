@@ -280,6 +280,11 @@ async function run() {
       'mini-two': [40, 120, 200],
       'back-mini': [90, 40, 20],
     };
+    // Beta's artwork after somebody has redrawn it. Not in the map above,
+    // because it is uploaded as a second version of a card rather than as a
+    // card of its own -- which is what the reprint half of this probe is about.
+    const redrawn = [...solidPng({ width: 372, height: 520, rgb: [240, 200, 40] })];
+
     const files = Object.fromEntries([
       ...Object.entries(artwork).map(([name, rgb]) => [
         name,
@@ -551,6 +556,113 @@ async function run() {
       'a mini’s back is turned the opposite way to its front',
       facingProblems(backMini, 'W').length === 0,
       facingProblems(backMini, 'W').join('; ')
+    );
+
+    // --- printing only what has changed ---------------------------------
+    //
+    // Generating the document is what records it, so by here the printer is
+    // square with all 29 cards. Give one of them new artwork and ask again in
+    // the changed mode: what has to come out is that card and nothing else.
+    // Nothing short of a real file can say so -- the counts on the screen are
+    // computed from the same numbers the plan is, so they would agree with a
+    // planner that had quietly kept every card.
+    await browser.page.waitForSelector('p:has-text("Recorded as printed")', { timeout: 30_000 });
+    check('the run it built is written down as printed', true);
+
+    const redrew = await browser.page.evaluate(
+      async (payload) => {
+        const token = localStorage.getItem('tph.token');
+        const headers = { Authorization: `Bearer ${token}` };
+        const deck = await fetch(`/api/decks/${payload.deckId}`, { headers }).then((r) => r.json());
+        const card = deck.cards.find((row) => row.file.filename === 'beta.png');
+        const res = await fetch(`/api/files/${card.file_id}/versions`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'image/png' },
+          body: new Uint8Array(payload.bytes),
+        });
+        const body = await res.json();
+        return { status: res.status, number: body.version?.version_number ?? null };
+      },
+      { deckId: setup.alpha.id, bytes: redrawn }
+    );
+
+    check(
+      'one card is given new artwork',
+      redrew.status === 201 && redrew.number === 2,
+      `${redrew.status}, version ${redrew.number}`
+    );
+
+    await browser.goto(`${base}/projects/${setup.projectId}/print`, { wait: 0 });
+    await browser.page.waitForSelector('button:has-text("Generate PDF")', { timeout: 30_000 });
+    await browser.page.getByLabel('What to print').selectOption('changed');
+
+    const reprintSaid = await browser.page.textContent('p:has-text("sheets of US Letter")');
+    check(
+      'the screen counts only the two copies of the card that changed',
+      /\b2\s+cards on 2\s+sheets/.test(reprintSaid ?? ''),
+      reprintSaid ?? ''
+    );
+
+    await browser.page.evaluate(() => {
+      const original = URL.createObjectURL.bind(URL);
+      window.__printed = null;
+      URL.createObjectURL = (blob) => {
+        window.__printed = blob;
+        return original(blob);
+      };
+    });
+    await browser.click('button:has-text("Generate PDF")');
+    await browser.page.waitForFunction(() => window.__printed !== null, { timeout: 120_000 });
+
+    const reprintBytes = Uint8Array.from(
+      await browser.page.evaluate(async () => [
+        ...new Uint8Array(await window.__printed.arrayBuffer()),
+      ])
+    );
+    const reprintLatin = Buffer.from(reprintBytes).toString('latin1');
+
+    check(
+      'the reprint is one front sheet and its backing page',
+      (reprintLatin.match(/\/Type \/Page[^s]/g) ?? []).length === 2,
+      String((reprintLatin.match(/\/Type \/Page[^s]/g) ?? []).length)
+    );
+
+    const reprintPages = readPlacements(reprintBytes).map(inSlotOrder);
+    check(
+      'the reprint holds two cards and nothing else',
+      reprintPages[0]?.length === 2,
+      `${reprintPages[0]?.length} slots`
+    );
+    check(
+      'both of them are the one card that changed',
+      new Set(reprintPages[0].map((placement) => placement.image)).size === 1,
+      `${new Set(reprintPages[0].map((placement) => placement.image)).size} artworks`
+    );
+    check(
+      'the redrawn card and its back are the only artwork embedded',
+      (reprintLatin.match(/\/Subtype \/Image/g) ?? []).length === 2,
+      `${(reprintLatin.match(/\/Subtype \/Image/g) ?? []).length} image XObjects`
+    );
+    check(
+      'the reprint still puts a back behind its card',
+      pairFrontsToBacks(reprintPages[0], reprintPages[1], LETTER_WIDTH_PT).problems.length === 0,
+      pairFrontsToBacks(reprintPages[0], reprintPages[1], LETTER_WIDTH_PT).problems.join('; ')
+    );
+
+    // And once that is recorded too, the deck owes nothing again -- which is the
+    // half a run that recorded the wrong version would fail.
+    await browser.page.waitForSelector('p:has-text("Recorded as printed")', { timeout: 30_000 });
+    const settled = await browser.page.evaluate(async (projectId) => {
+      const token = localStorage.getItem('tph.token');
+      const body = await fetch(`/api/print/outstanding?project_id=${projectId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json());
+      return body.decks.flatMap((deck) => deck.cards).filter((card) => card.owed_copies > 0);
+    }, setup.projectId);
+    check(
+      'nothing is left owing once the reprint is recorded',
+      settled.length === 0,
+      JSON.stringify(settled)
     );
 
     if (pageErrors.length > 0) {

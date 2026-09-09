@@ -1138,4 +1138,44 @@ export const guards = [
     tests: ['tests/e2e/deckImport.test.ts'],
     testName: 'takes an existing card to no copies, so a deck imported before this catches up',
   },
+  {
+    // Comparing the file alone and not the version it is at. A deck given new
+    // artwork for its back then reads as fully printed, and every card in it
+    // goes on carrying a reverse that is one version out -- the one kind of
+    // staleness no comparison of fronts can see.
+    name: 'a new version of the back asks for the cards behind it again',
+    package: 'api',
+    file: 'src/services/printRuns.ts',
+    find: '  return group.back_file_id === backFileId && group.back_version_number === backVersion;',
+    replace: '  return group.back_file_id === backFileId;',
+    tests: ['tests/e2e/printRuns.test.ts'],
+    testName: 'owes every card again when the deck is given a new back',
+  },
+  {
+    // Counting every copy ever printed rather than the copies printed at the
+    // artwork the card carries now. It reads as a simplification -- the sum is
+    // right there -- and it makes re-importing a card invisible to the one
+    // screen that exists to notice it.
+    name: 'copies printed at an older version do not count towards this one',
+    package: 'api',
+    file: 'src/services/printRuns.ts',
+    find: '  const atVersion = groups.filter((group) => group.version_number === version);',
+    replace: '  const atVersion = groups;',
+    tests: ['tests/e2e/printRuns.test.ts'],
+    testName: 'owes the whole card again when its artwork is versioned',
+  },
+  {
+    // Dropping the pinned versions leaves the document drawn from whatever each
+    // file is at now while the ledger records the numbers the screen was told
+    // -- so a card re-imported while the print screen sat open is written down
+    // as printed at a version that never went through the printer.
+    name: 'the sheets are drawn at the versions the run is recorded with',
+    package: 'web',
+    file: 'src/routes/Print.svelte',
+    find: '        { decks: runDecks, options, versions: $state.snapshot(versions) },',
+    replace: '        { decks: runDecks, options },',
+    tests: ['src/routes/Print.svelte.test.ts'],
+    testName: 'draws every card at the version it records, backs included',
+    runner: 'web',
+  },
 ];

@@ -527,6 +527,41 @@ pays for and `apps/api` gains no PDF dependency.
   still a specifier Vite must resolve, so without the alias the build fails on a
   branch that cannot run.
 
+## Printing only what has changed
+
+`print_run` and `print_run_card` record what is already on paper: one row per
+card per run, naming the version of the artwork that went through the printer
+and the back it was given. A date on the deck would answer a different question
+-- it could not tell a card somebody left out of the last run from one that came
+off it.
+
+`readOutstanding` in `apps/api/src/services/printRuns.ts` is the whole of the
+comparison, and what the screen shows is one subtraction: the copies the deck
+asks for, less the copies already on paper at the artwork this card carries now,
+behind the back this deck gives it now. Four situations fall out of that rather
+than being tested for -- a card nothing has printed, one whose artwork has been
+re-imported, one whose deck has a new back, one whose copy count went up -- and
+`reason` says which, because a badge reading "new artwork" is a different
+instruction from one reading "2 more".
+
+Three consequences are worth knowing before changing any of it:
+
+- **Part runs add up.** Printing the shortfall on its own has to leave nothing
+  owing, or a deck would ask for the same three cards every time.
+- **A run with the backing pages switched off recorded no reverse**, and a
+  reverse that was never printed cannot go out of date. Otherwise somebody
+  printing fronts onto pre-backed stock is told the whole deck is owed, for ever.
+- **The version is the client's to name.** `apps/web/src/routes/Print.svelte`
+  draws each card at the number `GET /api/print/outstanding` handed it and
+  records that same number, so the ledger describes the paper rather than
+  whatever the file reached while jsPDF was working.
+
+Generating the document records the run, because building it is the act of
+printing and a second button is a step to forget. `DELETE /api/print/runs/:runId`
+is the jammed sheet: it removes the run rather than marking it, and the cards it
+claimed go back to owing what they owed before. None of this publishes a realtime
+event -- no other screen draws any of it, so there would be nothing to place.
+
 ## Importing a design
 
 There is no import screen. The Canva app pushes the design it is open on, and

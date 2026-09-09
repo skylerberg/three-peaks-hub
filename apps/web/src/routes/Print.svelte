@@ -17,6 +17,18 @@
   import { ApiError } from '../api/client.ts';
   import { type Deck, type DeckCard, decks } from '../lib/decks.svelte.ts';
   import { saveBlob } from '../lib/download.ts';
+  import {
+    type OutstandingCard,
+    type OutstandingDeck,
+    type PrintMode,
+    type PrintRun,
+    type RecordedCard,
+    copiesToPrint,
+    outstandingLabel,
+    readOutstanding,
+    recordPrintRun,
+    undoPrintRun,
+  } from '../lib/printRuns.ts';
   import { link } from '../lib/router.svelte.ts';
   import { apiMessage } from '../lib/session.svelte.ts';
   import { toasts } from '../lib/toasts.svelte.ts';
@@ -41,6 +53,15 @@
   // own counts are the persistent truth; this is one print job's opinion.
   let excluded = $state<Record<string, boolean>>({});
 
+  // What each card still owes the printer, as the API works it out. Held beside
+  // the decks rather than folded into them: it is a fact about print runs, and
+  // the deck rows are the same ones every other screen reads.
+  let outstanding = $state<OutstandingDeck[]>([]);
+  // The run this screen has just written down, and the only one it offers to
+  // take back. A jammed sheet is the case; anything older is history.
+  let recorded = $state<PrintRun | null>(null);
+  let undoing = $state(false);
+
   let pageId = $state(DEFAULT_PAGE_SIZE_ID);
   let printerMargin = $state(DEFAULT_PRINTER_MARGIN_MM);
   let includeBacks = $state(true);
@@ -48,6 +69,7 @@
   let cutMarks = $state(true);
   let fit = $state<'fill' | 'fit'>('fill');
   let oneOfEach = $state(false);
+  let mode = $state<PrintMode>('all');
   let generating = $state(false);
   let progress = $state<{ drawn: number; total: number } | null>(null);
 
@@ -56,32 +78,101 @@
 
   const key = (deck: string, file: string) => `${deck}:${file}`;
 
-  // What one card puts on paper, read by the plan and by the count beside its
-  // name so the two cannot disagree. One of each collapses the counts to a
-  // single proof copy of every card in the run -- and a card the deck holds
-  // none of is not in the run, whichever way it is printed.
-  function printedCopies(card: DeckCard): number {
-    if (card.quantity === 0) return 0;
-    return oneOfEach ? 1 : card.quantity;
+  // One lookup for the whole screen. A deck of five hundred cards is scanned
+  // once here rather than once per row per recompute.
+  const owed = $derived.by(() => {
+    const byDeck: Record<string, Record<string, OutstandingCard>> = {};
+    for (const deck of outstanding) {
+      byDeck[deck.deck_id] = Object.fromEntries(deck.cards.map((card) => [card.file_id, card]));
+    }
+    return byDeck;
+  });
+  const owedDecks = $derived(
+    Object.fromEntries(outstanding.map((deck) => [deck.deck_id, deck])) as Record<
+      string,
+      OutstandingDeck | undefined
+    >
+  );
+
+  function outstandingFor(deckId: string, fileId: string): OutstandingCard | undefined {
+    return owed[deckId]?.[fileId];
   }
 
-  // Only what is both selected and printable. A card whose image is in the bin
-  // has no bytes to place, so it is dropped here rather than failing mid-render.
-  const runDecks = $derived(
+  // What one card puts on paper, read by the plan and by the count beside its
+  // name so the two cannot disagree.
+  function printedCopies(deckId: string, card: DeckCard): number {
+    return copiesToPrint(card.quantity, outstandingFor(deckId, card.file_id), mode, oneOfEach);
+  }
+
+  // Only what is both selected and printable, with the version each card is
+  // drawn at carried alongside -- the same number the run is recorded with, so
+  // the ledger names the artwork that went through the printer.
+  //
+  // A card whose image is in the bin has no bytes to place, so it is dropped
+  // here rather than failing mid-render.
+  const runEntries = $derived(
     loaded
       .filter((entry) => selected[entry.deck.id])
       .map((entry) => ({
-        name: entry.deck.name,
-        card: deckCardSize(entry.deck),
-        back_file_id: entry.deck.back_file_id,
+        deck: entry.deck,
+        state: owedDecks[entry.deck.id],
         cards: entry.cards
           .filter((card) => !card.file.deleted_at && !excluded[key(entry.deck.id, card.file_id)])
           .map((card) => ({
             file_id: card.file_id,
-            copies: printedCopies(card),
-          })),
+            copies: printedCopies(entry.deck.id, card),
+            version_number: outstandingFor(entry.deck.id, card.file_id)?.version_number ?? null,
+          }))
+          .filter((card) => card.copies > 0),
       }))
       .filter((entry) => entry.cards.length > 0)
+  );
+
+  const runDecks = $derived(
+    runEntries.map((entry) => ({
+      name: entry.deck.name,
+      card: deckCardSize(entry.deck),
+      back_file_id: entry.deck.back_file_id,
+      cards: entry.cards.map((card) => ({ file_id: card.file_id, copies: card.copies })),
+    }))
+  );
+
+  // Every version this screen knows about, backs included, so the document is
+  // drawn from the same artwork the counts above were worked out against.
+  const versions = $derived.by(() => {
+    const pinned: Record<string, number> = {};
+    for (const deck of outstanding) {
+      for (const card of deck.cards) pinned[card.file_id] = card.version_number;
+      if (deck.back_file_id !== null && deck.back_version_number !== null) {
+        pinned[deck.back_file_id] = deck.back_version_number;
+      }
+    }
+    return pinned;
+  });
+
+  // What to write down once the file exists. A card the outstanding read did
+  // not name has no version to record, so it is left out rather than recorded
+  // at a number nobody checked -- it simply stays owed.
+  const recordable = $derived(
+    runEntries.flatMap((entry) =>
+      entry.cards
+        .filter((card) => card.version_number !== null)
+        .map((card): RecordedCard => {
+          const back =
+            includeBacks && entry.deck.back_file_id !== null && entry.state?.back_version_number
+              ? {
+                  back_file_id: entry.deck.back_file_id,
+                  back_version_number: entry.state.back_version_number,
+                }
+              : {};
+          return {
+            file_id: card.file_id,
+            version_number: card.version_number as number,
+            copies: card.copies,
+            ...back,
+          };
+        })
+    )
   );
 
   const options = $derived({
@@ -98,6 +189,7 @@
   const summary = $derived(summarizeRuns(planRuns(runDecks), page, printerMargin, includeBacks));
 
   const anyBacks = $derived(runDecks.some((entry) => entry.back_file_id !== null));
+  const anySelected = $derived(loaded.some((entry) => selected[entry.deck.id]));
 
   $effect(() => {
     const project = projectId;
@@ -109,8 +201,13 @@
       try {
         await decks.loadList(project);
         const list = decks.decks;
-        const full = await Promise.all(list.map((deck) => decks.readDeck(deck.id)));
+        const [full, pending] = await Promise.all([
+          Promise.all(list.map((deck) => decks.readDeck(deck.id))),
+          readOutstanding(project),
+        ]);
         loaded = full;
+        outstanding = pending;
+        recorded = null;
         selected = Object.fromEntries(
           full.map((entry) => [entry.deck.id, preselect === null || preselect === entry.deck.id])
         );
@@ -129,6 +226,10 @@
     return planGrid(page, deckCardSize(deck), printerMargin).per_sheet;
   }
 
+  function when(timestamp: string): string {
+    return new Date(timestamp).toLocaleString();
+  }
+
   function sizeLabel(deck: Deck): string {
     const preset = matchingCardPreset(deckCardSize(deck));
     return preset ? preset.name : `${deck.card_width_mm} × ${deck.card_height_mm} mm`;
@@ -137,20 +238,57 @@
   async function generate() {
     generating = true;
     progress = null;
+    // Snapshotted before the await: the recording has to name the cards that
+    // went into this document, not whatever the boxes say by the time it is
+    // built.
+    const printed = $state.snapshot(recordable) as RecordedCard[];
     try {
       // Imported here and nowhere else, so jsPDF and the layout code sit in a
       // chunk only this screen pays for.
       const { generatePrintPdf } = await import('../lib/print/index.ts');
-      const blob = await generatePrintPdf({ decks: runDecks, options }, (update) => {
-        progress = update;
-      });
+      const blob = await generatePrintPdf(
+        { decks: runDecks, options, versions: $state.snapshot(versions) },
+        (update) => {
+          progress = update;
+        }
+      );
 
       saveBlob(blob, 'print-sheets.pdf');
+      await record(printed);
     } catch (caught) {
       toasts.error(caught instanceof Error ? caught.message : 'The sheets could not be built.');
     } finally {
       generating = false;
       progress = null;
+    }
+  }
+
+  // After the file, and never instead of it: the document is the thing that was
+  // asked for, so a recording that fails says so and leaves the sheets alone.
+  async function record(printed: RecordedCard[]) {
+    if (printed.length === 0) return;
+    try {
+      recorded = await recordPrintRun(projectId, printed);
+      outstanding = await readOutstanding(projectId);
+    } catch (caught) {
+      toasts.error(
+        `The sheets were built, but recording them failed, so they still count as unprinted. ${apiMessage(caught)}`
+      );
+    }
+  }
+
+  async function undo() {
+    const run = recorded;
+    if (!run) return;
+    undoing = true;
+    try {
+      await undoPrintRun(run.id);
+      recorded = null;
+      outstanding = await readOutstanding(projectId);
+    } catch (caught) {
+      toasts.error(apiMessage(caught));
+    } finally {
+      undoing = false;
     }
   }
 </script>
@@ -182,6 +320,7 @@
         <ul class="flex flex-col gap-2">
           {#each loaded as entry (entry.deck.id)}
             {@const perSheet = cardsPerSheet(entry.deck)}
+            {@const printedAt = owedDecks[entry.deck.id]?.last_printed_at ?? null}
             <li class="rounded-md border border-edge bg-surface p-3">
               <div class="flex flex-wrap items-center gap-3">
                 <label class="flex min-h-11 min-w-0 flex-1 items-center gap-3">
@@ -195,6 +334,13 @@
                 <span class="text-sm text-muted">{sizeLabel(entry.deck)}</span>
                 <span class="text-sm text-muted">
                   {perSheet > 0 ? `${perSheet} per sheet` : 'too large for this paper'}
+                </span>
+                <span class="text-sm text-muted">
+                  {#if printedAt}
+                    last printed <time datetime={printedAt}>{when(printedAt)}</time>
+                  {:else}
+                    never printed
+                  {/if}
                 </span>
                 {#if entry.deck.back_file_id === null}
                   <span class="text-sm text-warning">no back</span>
@@ -235,8 +381,22 @@
                         >
                           {card.file.filename}
                         </span>
+                        {#if !card.file.deleted_at}
+                          {@const label = outstandingLabel(
+                            outstandingFor(entry.deck.id, card.file_id)
+                          )}
+                          {#if label}
+                            <span
+                              class="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent"
+                            >
+                              {label}
+                            </span>
+                          {/if}
+                        {/if}
                         <span class="text-muted">
-                          {card.file.deleted_at ? 'deleted' : `×${printedCopies(card)}`}
+                          {card.file.deleted_at
+                            ? 'deleted'
+                            : `×${printedCopies(entry.deck.id, card)}`}
                         </span>
                       </label>
                     </li>
@@ -252,6 +412,22 @@
 
       <section class="flex flex-col gap-4 rounded-md border border-edge bg-surface p-4">
         <h2 class="text-lg font-semibold">Options</h2>
+
+        <div class="flex flex-col gap-1">
+          <label class="text-sm font-medium" for="{uid}-mode">What to print</label>
+          <select
+            id="{uid}-mode"
+            class="focus-ring min-h-11 max-w-96 rounded-md border border-edge bg-surface px-2 text-sm"
+            bind:value={mode}
+          >
+            <option value="all">Everything selected</option>
+            <option value="changed">Only what has changed since the last print</option>
+          </select>
+          <p class="max-w-96 text-xs text-muted">
+            Changed means a card nothing has printed yet, artwork that has been updated since it was
+            last printed, a card back the deck has replaced, or a copy count that has gone up.
+          </p>
+        </div>
 
         <div class="flex flex-wrap gap-6">
           <label class="flex items-center gap-2 text-sm">
@@ -336,6 +512,24 @@
           <p class="text-sm text-warning">
             None of the selected decks has a card back, so the backing pages would be blank.
           </p>
+        {/if}
+        {#if mode === 'changed' && summary.cards === 0 && anySelected}
+          <p class="text-sm text-muted">
+            Everything selected is already on paper at its current artwork. Switch to “everything
+            selected” to print it again.
+          </p>
+        {/if}
+        {#if recorded}
+          <div class="flex flex-wrap items-center gap-3">
+            <p class="text-sm" role="status">
+              Recorded as printed: {recorded.copies}
+              {recorded.copies === 1 ? 'copy' : 'copies'} of {recorded.card_count}
+              {recorded.card_count === 1 ? 'card' : 'cards'}.
+            </p>
+            <Button variant="ghost" disabled={undoing} onclick={undo}>
+              {undoing ? 'Undoing…' : 'Undo'}
+            </Button>
+          </div>
         {/if}
 
         {#if generating}

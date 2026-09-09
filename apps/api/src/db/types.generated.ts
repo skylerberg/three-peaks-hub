@@ -220,6 +220,23 @@ export interface PersonalAccessToken {
   user_id: string;
 }
 
+export interface PrintRun {
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  id: string;
+  project_id: string;
+}
+
+export interface PrintRunCard {
+  back_file_id: string | null;
+  back_version_number: number | null;
+  copies: number;
+  file_id: string;
+  id: string;
+  run_id: string;
+  version_number: number;
+}
+
 export interface Project {
   created_at: Generated<Timestamp>;
   created_by: string;
@@ -262,6 +279,8 @@ export interface DB {
   import_run_card: ImportRunCard;
   import_run_page: ImportRunPage;
   personal_access_token: PersonalAccessToken;
+  print_run: PrintRun;
+  print_run_card: PrintRunCard;
   project: Project;
   project_member: ProjectMember;
   session: Session;
