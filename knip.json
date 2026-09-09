@@ -3,7 +3,8 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
-      "project": ["scripts/**/*.mjs"]
+      "project": ["scripts/**/*.mjs"],
+      "ignoreBinaries": ["pbcopy"]
     },
     "apps/api": {
       "entry": ["scripts/*.ts", "src/db/migrations/*.ts"],
