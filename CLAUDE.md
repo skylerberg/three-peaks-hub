@@ -106,6 +106,9 @@ tree.
 6. **Re-export every schema from `apps/api/src/schemas/index.ts`.** The OpenAPI
    component-name registry reads that barrel; a schema left out appears inline
    and the generated client gets an anonymous duplicate instead of a named type.
+   Only the outermost schema of a request or response is named, though — one
+   nested inside another is inlined however it is exported, which is why the
+   deck listing spells a deck out rather than referencing the named one.
 7. Length limits in ArkType, not CHECK constraints. FKs cascade, except
    `project.created_by` and `file_version.created_by`, which are RESTRICT, and
    `file.deleted_by` / `folder.deleted_by`, which are SET NULL — an account
@@ -168,9 +171,10 @@ boundary from the bus's `{ type, payload }`; an e2e test holds the two together.
 
 ## Migrations
 
-Deploys are rolling and the migrate Job runs **before** the rollout, so old and
-new pods serve side by side. **Every migration must be backward-compatible with
-the previous release** — drop or rename a column in a follow-up release.
+Migrations are numbered files in `apps/api/src/db/migrations/`. Deploys are
+rolling and the migrate Job runs **before** the rollout, so old and new pods
+serve side by side. **Every migration must be backward-compatible with the
+previous release** — drop or rename a column in a follow-up release.
 
 **A migration's number has to be free on `main` when it merges, not when it was
 written.** Kysely orders them by filename and refuses one that sorts before a
@@ -976,9 +980,9 @@ from under the first.
   leaves behind is that a CLI belongs in its own file, never at the top of a
   module the server imports.
 - **`check:comments`** reads the prose and fails on the same sentence in two
-  files, and on a file or symbol named in prose that no longer resolves. When it
-  fires, give the rule one owner — the module that implements it — and cut the
-  other copy down to what is local.
+  files, and on a repository path named in prose that no longer resolves. When
+  it fires, give the rule one owner — the module that implements it — and cut
+  the other copy down to what is local.
 - **`check:a11y`** runs axe-core over the real screens in **both colour
   schemes**; half the tokens exist only under `prefers-color-scheme: dark`, so a
   light-only run reads none of them.
